@@ -21,11 +21,15 @@
 //                 item open there, at e, already claims more bytes than the
 //                 input has (min > |S|): §18.1 answers a refusal only once no
 //                 earlier length claim is open, so an unsatisfiable claim
-//                 outranks a later syntax error. Or F is well-formed within w
-//                 and e lies in one of its byte strings (embedded CBOR: tag 24,
-//                 .cbor / .cborseq; a payload of its own the framer does not
-//                 open).
-//   x malformed   F is malformed at the same head; or inside a byte string.
+//                 outranks a later syntax error. Or e lies in one of the byte
+//                 strings the framer read whole (embedded CBOR: tag 24, .cbor /
+//                 .cborseq; a payload of its own the framer does not open) --
+//                 whether F is well-formed within w, or cut short / malformed
+//                 further on: the string comes first in stream order, so its
+//                 payload's refusal decides (D355; docs/scanner.md, "Precedence
+//                 across classes").
+//   x malformed   F is malformed at the same head; or inside a byte string, as
+//                 above.
 //   x too_large   R > P, and F gives no well-formed item within w: it is longer
 //                 than P; or truncated; or malformed in a head whose refusal
 //                 needs a byte past w (f8 17 with w after the f8); or malformed
@@ -111,10 +115,10 @@ export function framerCheck(S, P, lines, tally) {
       if (F.kind === 'truncated' && e === F.at) cls = 'truncated: same head';
       else if (F.kind === 'truncated' && openClaim(open, e, n)) cls = 'truncated: an enclosing item whose claim runs past the input';
       else if (F.kind === 'malformed' && openClaim(open, e, n)) cls = 'truncated: a claim runs past the input before a syntax error (§18.1)';
-      else if (fits && inBytes) cls = 'truncated: inside a byte string (embedded)';
+      else if (inBytes) cls = fits ? 'truncated: inside a byte string (embedded)' : `truncated: inside a byte string (embedded) before the framer's ${F.kind} stop`;
     } else if (code === MALFORMED) {
       if (F.kind === 'malformed' && F.at === e) cls = `malformed: same head (${F.why})`;
-      else if (fits && inBytes) cls = 'malformed: inside a byte string (embedded)';
+      else if (inBytes) cls = fits ? 'malformed: inside a byte string (embedded)' : `malformed: inside a byte string (embedded) before the framer's ${F.kind} stop`;
     } else {
       const stop = F.kind === 'ok' ? F.end : F.at;
       const name = nameOf(code);

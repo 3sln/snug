@@ -176,3 +176,29 @@ fn regression_complete_message_then_more_than_the_limit() {
         assert_eq!(got, ["m0+65541", "x not_map"], "{:?}", cuts);
     }
 }
+
+#[test]
+fn regression_d355_a_count_claim_inside_a_tag_4_outranks_a_later_key_type() {
+    // D355 (P9.9): a tag 4 taken whole above the Bindle tag set, holding a map whose count claims
+    // past the input, then an integer key under text keys: truncated at the map's head (D211)
+    let s = [0xa0u8, 0xc4, 0x82, 0x00, 0xb3, 0x18, 0x64, 0x1c];
+    let profile = snug::Profile { keys: snug::Keys::Text, ..snug::Profile::DETERMINISTIC };
+    let opts = SequenceOptions { profile, ..SequenceOptions::default() };
+    for cuts in [vec![8], vec![1, 8], vec![3, 5, 8], (1..=8).collect::<Vec<usize>>()] {
+        let mut seq = Sequence::new(&opts).unwrap();
+        let mut items: Vec<Result<snug::Message<'static>, Error>> = Vec::new();
+        let mut from = 0;
+        for to in cuts.iter().copied() {
+            items.extend(seq.feed(&s[from..to]).into_iter().map(|i| i.map(|m| m.into_owned())));
+            from = to;
+            if seq.is_done() { break; }
+        }
+        if !seq.is_done() { items.extend(seq.finish()); }
+        let got: Vec<String> = items.into_iter().map(|item| match item {
+            Ok(m) => format!("m{}+{}", m.index, m.len()),
+            Err(Error::Sequence(f)) => format!("x{} {} @{}", f.index, f.failure.reason, f.offset),
+            Err(e) => format!("x {}", e.code()),
+        }).collect();
+        assert_eq!(got, ["m0+1", "x1 cbor/truncated @4"], "{:?}", cuts);
+    }
+}

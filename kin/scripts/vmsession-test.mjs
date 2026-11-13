@@ -61,6 +61,15 @@ for (const c of sessionCases(STRESS, SEED)) {
   for (const [h, lim] of [['c48221196ab3', [1, 0, -1, -1, -1, 1, -1, -1, 0, 2]],
     ['a4181845c756adefb3182138fb1827c48221196ab3f97c00fa7fc00000', [1, 0, 36, 4, 5, 7, -1, -1, 0, 2]]])
     cases.push({ prog, rule, lim, bytes: Uint8Array.from(h.match(/../g).map(x => parseInt(x, 16))), label: `fixed ${h.slice(0, 16)}`, stress: true });
+  // D355 (P9.9 sequence-test 30000 1001): a tag 4 / 40 taken whole above the Bindle tag set holding a container
+  // whose count claims past the input, then a refusal before the input ends: the buffer's truncation at the
+  // count comes first; an unknown-length session used to answer the later refusal (key_type, malformed, ...)
+  for (const tag of ['c48200', 'c48220', 'd828828101'])
+    for (const box of ['b3', '93', '9840', 'a2'])
+      for (const tail of ['18641c', '1c', 'ff', 'f800', '61617f'])
+        for (const flags of [60, 61, 122])
+          cases.push({ prog, rule, lim: [1, 0, -1, -1, -1, -1, -1, -1, 0, flags], bytes: Uint8Array.from(`${tag}${box}${tail}`.match(/../g).map(x => parseInt(x, 16))),
+            label: `fixed D355 ${tag} ${box} ${tail} (flags ${flags})`, stress: true });
 }
 
 // ---------------------------------------------------------------- the oracle

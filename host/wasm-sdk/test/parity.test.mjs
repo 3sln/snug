@@ -758,6 +758,22 @@ test('sequences: regression 2026-11-11 -- a complete 65,541-byte message followe
     }
 });
 
+test('sequences: regression D355 -- a count claim inside a tag 4 outranks a later key_type', () => {
+  const S = Uint8Array.of(0xa0, 0xc4, 0x82, 0x00, 0xb3, 0x18, 0x64, 0x1c);
+  const run = (api, cuts) => {
+    const r = api.sequenceReader({ wire: 'deterministic', top: 'any', keys: 'text', tags: 'any' }), got = [];
+    let from = 0, res;
+    for (const to of cuts) { res = r.feed(S.subarray(from, to)); from = to; got.push(...res.messages.map(m => `m${m.index}+${m.length}`)); if (res.error) break; }
+    if (!res.error) { res = r.end(); got.push(...res.messages.map(m => `m${m.index}+${m.length}`)); }
+    got.push(`x${res.error.index} ${res.error.code} @${res.error.offset}`);
+    return got;
+  };
+  for (const cuts of [[8], [1, 8], [3, 5, 8], [1, 2, 3, 4, 5, 6, 7, 8]]) {
+    assert.deepEqual(run(WSEQ, cuts), ['m0+1', 'x1 truncated @4'], `wasm ${cuts}`);
+    assert.deepEqual(run(NSEQ, cuts), ['m0+1', 'x1 truncated @4'], `native ${cuts}`);
+  }
+});
+
 test('sessions (P9.7, D327): the live bound and release, as the native package', async () => {
   const w = await wcompile('r = { id: uint }'), n = await ncompile('r = { id: uint }');
   const bytes = N.encode({ id: 3 });

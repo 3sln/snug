@@ -249,3 +249,19 @@ test('regression D351: an indefinite bstr message, then a refusal in the same ch
   const res = sequenceReader(opts).feed(chunk);
   assert.deepEqual([res.messages.map(m => [...m.view.raw()]), res.error?.index], [[[0x44, 0xa1, 0x61, 0x61, 0x01], [0x43, 0, 1, 2]], 2]);
 });
+
+// D355 (P9.9): a tag 4 taken whole above the Bindle tag set, holding a map whose count claims past
+// the input, then an integer key (key_type under text keys) before the input ends. The buffer
+// refuses at the count first: truncated at the map's head (D211), under every chunking.
+test('regression D355: a count claim inside a tag 4 outranks a later key_type', () => {
+  const S = Uint8Array.of(0xa0, 0xc4, 0x82, 0x00, 0xb3, 0x18, 0x64, 0x1c);
+  const opts = { wire: 'deterministic', top: 'any', keys: 'text', tags: 'any' };
+  for (const cuts of [[8], [1, 8], [3, 5, 8], [1, 2, 3, 4, 5, 6, 7, 8]]) {
+    const r = sequenceReader(opts), got = [];
+    let from = 0, res;
+    for (const to of cuts) { res = r.feed(S.subarray(from, to)); from = to; got.push(...res.messages.map(m => `m${m.index}+${m.length}`)); if (res.error) break; }
+    if (!res.error) { res = r.end(); got.push(...res.messages.map(m => `m${m.index}+${m.length}`)); }
+    got.push(`x${res.error.index} ${res.error.code} @${res.error.offset}`);
+    assert.deepEqual(got, ['m0+1', 'x1 truncated @4'], `${cuts}`);
+  }
+});

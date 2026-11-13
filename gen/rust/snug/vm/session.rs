@@ -527,6 +527,15 @@ pub(crate) fn item_begin(p: &[i32], pool: &[u8], b: &[u8], s: &mut [i32], ss: &m
                 if kx1 < (-1) {
                     return need(ss, base, pos, ((-2) - kx1) - pos);
                 }
+                // D355 (as D085's for a key): a refusal inside the item after a
+                // count that claims past the window -- the window must reach the
+                // claim first, or the buffer's truncation at that count is lost
+                if (kx1 == (-1)) && (ss[(SS_UNK) as usize] == 1) {
+                    let mc1: i32 = key_max_claim(b, pos, end, wend);
+                    if mc1 > wend {
+                        return need(ss, base, pos, mc1 - pos);
+                    }
+                }
                 direct = 1;
             }
         }

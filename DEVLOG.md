@@ -7719,6 +7719,70 @@ ceil(measured × 1.02): bytes 154,028 → **153,564**, gzip 70,071 →
     main, all ok.
   - P9.9's final-main run covers the rest.
 
+### D355 — A tag 4 / 40 taken whole in an unknown-length session first waits for a count it holds that claims past the window; the framer reads an embedded refusal before a later stop (P9.9 finding)
+**Decision** (P9.5 engineer, provisional). P9.9's `sequence-test 30000 1001`
+and `30000 1002` on `fa91db8` failed with 27 and 9 lines. There were two
+classes, and the oracle, the framer and kin were each checked against
+RFC 8949, D211 and the stream-order precedence (docs/scanner.md).
+* **Class A: kin was wrong.** Example: `c4 82 00 b3 18 64 1c` under text
+  keys and a tag set above Bindle (flags 60).
+  - What the RFC and D211 say: the map `b3` claims 19 pairs, but only 3
+    bytes follow it. The buffer refuses at that count first: `truncated`
+    at 3. D211 makes the buffer's verdict over the message window the
+    verdict, and §18.1 holds a later refusal while an earlier length claim
+    is open.
+  - What the session did: an unknown-length session (sequence mode and
+    drain mode alike, D085) answered `key_type` at 4.
+  - Cause: `item-begin` takes a tag 4 / 40 whole above the Bindle tag set
+    (P8.4, D265). When `key-end-any` stops at a refusal inside it, the item
+    was walked over the window against the provisional end, so the inner
+    count's claim was never recorded.
+  - Fix (`kin/vm-session.kin`): the same guard a map key already has (D085,
+    `map-key`). When the walk ends at a refusal and some count on the way
+    claims past the window (`key-max-claim`), the session first asks for
+    the bytes up to that claim. Once the end is known (`vms-eof`, SS_UNK 2)
+    the buffer walk decides.
+  - Scope: one generated function, shared by JS, Rust and the wasm SDK.
+    The valid-CBOR path (`vitem`) was not affected. Profile-only
+    `scanStream` of an untold length had the same wrong answer
+    (`key_type`), and now says `truncated` as the buffer does.
+  - Liveness (D212) is unchanged: the extra wait happens only for an item
+    that is refused anyway.
+* **Class B: the framer's comparison mapping was wrong** (P9.5). The
+  examples are `85 d81842 8201 20 ...` (snug: truncated at 4; framer: at 14)
+  and four more like it. snug's offset lies inside a tag-24 byte string
+  that the framer read whole, before the root itself runs out. That
+  string's payload is cut short, and it comes first in stream order. The
+  mapping accepted an embedded refusal only when the root was well-formed.
+  It now accepts it whatever the root's stop: the string is complete and
+  before that stop (`kin/scripts/sequence-framer.mjs`).
+* **The D211 oracle was right in both classes.**
+
+**Regressions**:
+* `sequence-test`:
+  - Class A shape: 720 sequences, every tag (`c4 82 00`, `c4 82 20`,
+    `c4 82 d82119 19b3`, `d828 82 8101`, `d828 82 81 1818`) × container
+    (`b3 93 9840 ba00010000 a2 82`) × refusal tail × flags 60/61/122/124.
+  - Class B shape: 15 sequences of embedded truncation before the root's.
+  - On `fa91db8` these give 660 kin != oracle runs (whole and 1-byte) and 6
+    framer disagreements; with the fix, 0.
+* `vmsession-test`: 180 fixed D355 cases under every window policy and
+  unknown length. Old code: `drain 5 ... | buffer 1 ...`; now equal.
+* Host tests, each `m0+1, x1 truncated @4` under 4 chunkings for
+  `a0 c4 82 00 b3 18 64 1c`:
+  - JS `host/js/test/sequence.test.mjs`;
+  - Rust `host/rust/tests/sequence.rs` (`cbor/truncated`; old code
+    `cbor/key_type @5`);
+  - wasm SDK `parity.test.mjs` (wasm == native).
+* Size: within every cap (no cap changed).
+
+**Alternatives**:
+* Record the count claims while walking the tag-4/40 item whole: a second
+  pending mechanism in the buffer walk.
+* Drop the D265 whole-item shortcut in unknown-length sessions: it would
+  frame every decimal / ndarray, and need a new gated path.
+- [ ] **Signed off** (manager)
+
 ## Findings
 
 - 2026-11-11 (manager): **the 6½-day `scan-test.mjs 300 1` process

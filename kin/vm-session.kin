@@ -38,7 +38,7 @@
                                    SS_STEPS IT_POS IT_D IT_FB IT_CK IT_NQ IT_END IT_CTX IT_MODE IT_NOTE
                                    IT_PAIR SS_ABYTES SS_PROF SS_HDR PH_START PH_ITEM PH_RET PH_FRAME PH_DONE
                                    PH_HELD VMS_HELD VMS_RESUME SS_UNK SS_NPEND SS_PEND PW pend-raw pend-drop
-                                   SS_SEQ SS_MLEN
+                                   key-max-claim SS_SEQ SS_MLEN
                                    F_END F_KE F_KA
                                    MODE_ITEM MODE_VSEQ MODE_DSEQ MODE_FRAME FW FK_ARR FK_MAP FK_TAG FK_TEXT
                                    FK_BSTR FK_DARR FK_DMAP FK_DTEXT FK_DSEQ F_KIND F_PH F_PIN F_N F_EL
@@ -459,7 +459,13 @@
               (let [rt1 (rule-tag (ia s O_HI) (ia s O_LO))]
                 (if (or (== rt1 4) (== rt1 40))
                   (do (let [kx1 (key-end-any b pos end wend)]
-                        (if (< kx1 (neg 1)) (return (need ss base pos (- (- (neg 2) kx1) pos)))))
+                        (if (< kx1 (neg 1)) (return (need ss base pos (- (- (neg 2) kx1) pos))))
+                        (comment "D355 (as D085's for a key): a refusal inside the item after a"
+                                 "count that claims past the window -- the window must reach the"
+                                 "claim first, or the buffer's truncation at that count is lost")
+                        (if (and (== kx1 (neg 1)) (== (ia ss SS_UNK) 1))
+                          (do (let [mc1 (key-max-claim b pos end wend)]
+                                (if (> mc1 wend) (return (need ss base pos (- mc1 pos))))))))
                       (set direct 1)))))))
       (comment "P8.4 (D266): with the valid machinery, an item the frames do not take is"
                "whole: a malformed head, an indefinite string, and the tags whose rules"

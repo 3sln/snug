@@ -133,6 +133,20 @@ const PRESETS = [['bindle', 0], ['deterministic', 122], ['valid', 378]];
   }
   for (const h of ['9fff 00', 'bf ff a0', 'bf6161 01 ff bf ff', '9f 9f ff ff 9f ff', '5f 4100 ff 7f 6161 ff 00', '9f 01 ff 9f', '1817 9f ff 1817'])
     for (const flags of [256, 378]) push(bytes(h), flags, `indefinite roots ${h} (flags ${flags})`, null);
+  // D355 (P9.9, sequence-test 30000 1001): a tag 4 / 40 taken whole above the Bindle tag set
+  // (D265) holding a container whose count claims past the input, then a refusal before the
+  // input ends (`c4 82 00 b3 18 64 ..`, keys text: key_type at 4). The buffer refuses at the
+  // count first (truncated at 3, D211); the session answered key_type, its count claim never
+  // recorded. Every tag x container x refusal x tail, under the flag sets that reach the path.
+  for (const tag of ['c4 82 00', 'c4 82 20', 'c4 82 d82119 19b3', 'd828 82 8101', 'd828 82 81 1818'])
+    for (const box of ['b3', '93', '98 40', 'ba 00010000', 'a2', '82'])
+      for (const tail of ['18 64 1c', '1c', 'ff', 'f8 00', '6161 7f', '18 64 18 64 60'])
+        for (const flags of [60, 61, 122, 124])
+          push(bytes(`${tag} ${box} ${tail}`), flags, `D355 tag-4/40 count claim then a refusal: ${tag} ${box} ${tail} (flags ${flags})`, null);
+  // D355 (P9.9, sequence-test 30000 1002, framer class): a tag-24 payload cut short inside a root
+  // that is itself cut short further on: the payload's truncation comes first in stream order.
+  for (const h of ['85 d81842 8201 20', 'a4 00 d81844 9705a335 81', 'aa 02 00 d81845 aabf020001 00', '82 d81841 9f 01', '83 d81843 c48200 a1'])
+    for (const flags of [0, 122, 378]) push(bytes(h), flags, `D355 embedded truncation before the root's: ${h} (flags ${flags})`, null);
 }
 
 // A sequence of more than MAX_MESSAGES messages (the 1,500,001 zero bytes vector is 1.5 M
