@@ -31,6 +31,16 @@
         {"rule": "t", "hex": "a26161411f616240", "expect": false},
         {"rule": "t", "hex": "a26161411f61624101", "expect": true}
       ]
+    },
+    {
+      "category": "regression", "name": "map cursor after a 2^31 - 1 head (D362, P9.13 SEC-F1)", "options": {"wire": "valid"},
+      "cddl": "r = { b: uint // c: uint, * tstr => any }\ns = { c: uint // b: uint, * tstr => any }\n",
+      "cases": [
+        {"rule": "r", "hex": "a261621a7fffffff616300", "expect": false, "note": "the overflow-checked Rust VM panicked here (map-cursor counted in O_LO, still 2^31 - 1)"},
+        {"rule": "r", "hex": "a261621a7ffffffe616300", "expect": false},
+        {"rule": "s", "hex": "a261621a7fffffff616300", "expect": false, "note": "PEG: the first alternative takes c and locks in, so b is unexpected"},
+        {"rule": "s", "hex": "a261621bffffffffffffffff616300", "expect": false}
+      ]
     }
   ]
 }

@@ -334,12 +334,14 @@
     (iset s O_LO units)
     (return (neg 1))))
 
-(defn ^:pub ^I32 map-cursor [^IntsR p ^Ints s ^I32 bo ^I32 mt ^I32 kid ^I32 at]
+(defn ^:pub ^I32 map-cursor [^IntsR p ^Ints s ^I32 bo ^I32 mt ^I32 kid ^I32 at ^I32 cnt]
   (comment "The pair's key in this map's named table (program-2 §6.1 step 1): while"
            "keys ascend, the cursor advances to the first named key >= kid, 1 unit per"
            "step; once they stopped ascending, a binary search, 1 unit per probe"
-           "(each also counted in s[O_LO], for schedule 2's simple pair). The index"
-           "(also s[bo + MB_NJ]) or -1; or a negated code.")
+           "(each also counted in s[O_LO] when cnt is 1, for schedule 2's simple pair:"
+           "map-pre zeroes O_LO first. D362: map-keyq passes 0, as O_LO there still"
+           "holds a head argument, up to 2^31 - 1, that the count overflowed). The"
+           "index (also s[bo + MB_NJ]) or -1; or a negated code.")
   (iset s (+ bo MB_NJ) (neg 1))
   (if (< kid 0) (return (neg 1)))
   (let [nb (m-named p mt)
@@ -348,7 +350,7 @@
       (do (let [^:mut cur (ia s (+ bo MB_CUR))]
             (while (and (< cur nn) (< (ia p (+ nb (* 3 cur))) kid))
               (if (not (charge s 1 at)) (return (neg R_BUDGET)))
-              (iset s O_LO (+ (ia s O_LO) 1))
+              (if (== cnt 1) (iset s O_LO (+ (ia s O_LO) 1)))
               (set cur (+ cur 1)))
             (iset s (+ bo MB_CUR) cur)
             (if (and (< cur nn) (== (ia p (+ nb (* 3 cur))) kid))
@@ -359,7 +361,7 @@
           ^:mut hi nn]
       (while (< lo hi)
         (if (not (charge s 1 at)) (return (neg R_BUDGET)))
-        (iset s O_LO (+ (ia s O_LO) 1))
+        (if (== cnt 1) (iset s O_LO (+ (ia s O_LO) 1)))
         (let [mid (sar (+ lo hi) 1)
               k (ia p (+ nb (* 3 mid)))]
           (if (== k kid)

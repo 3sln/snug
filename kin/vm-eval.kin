@@ -1215,7 +1215,7 @@
   (let [mt (block-mt p s fb area)]
     (free-on s)
     (iset s O_LO 0)
-    (let [rc (map-cursor p s area mt kid pos)]
+    (let [rc (map-cursor p s area mt kid pos 1)]
       (free-off s)
       (if (< rc (neg 1)) (return rc)))
     (let [units (ia s O_LO)
@@ -1237,7 +1237,7 @@
         (if (== smap 0)
           (do (if (not (charge s 1 pos)) (return (neg R_BUDGET)))
               (if (!= (ia s (+ bo MB_ALIVE)) 0)
-                (do (let [rc (map-cursor p s bo mt kid pos)]
+                (do (let [rc (map-cursor p s bo mt kid pos 0)]
                       (if (< rc (neg 1)) (return rc)))))))
         (if (!= (ia s (+ bo MB_ALIVE)) 0)
           (do (set cnq (map-key-query p s mt cfb cw cnq e pos))

@@ -1771,7 +1771,7 @@ export function mapPre(p, s, fb, area, smap, kid, pos) {
     const mt = blockMt(p, s, fb, area);
     freeOn(s);
     s[O_LO] = 0;
-    const rc = mapCursor(p, s, area, mt, kid, pos);
+    const rc = mapCursor(p, s, area, mt, kid, pos, 1);
     freeOff(s);
     if (rc < (-1)) {
         return rc;
@@ -1802,7 +1802,7 @@ export function mapKeyq(p, s, fb, area, nb, smap, kid, cfb, cw, e, pos) {
                 return -R_BUDGET;
             }
             if (s[bo + MB_ALIVE] !== 0) {
-                const rc = mapCursor(p, s, bo, mt, kid, pos);
+                const rc = mapCursor(p, s, bo, mt, kid, pos, 0);
                 if (rc < (-1)) {
                     return rc;
                 }

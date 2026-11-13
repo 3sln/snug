@@ -427,12 +427,14 @@ export function keyProbe(p, pool, b, s, ks, ke, lo0) {
     return -1;
 }
 
-export function mapCursor(p, s, bo, mt, kid, at) {
+export function mapCursor(p, s, bo, mt, kid, at, cnt) {
     // The pair's key in this map's named table (program-2 §6.1 step 1): while
     // keys ascend, the cursor advances to the first named key >= kid, 1 unit per
     // step; once they stopped ascending, a binary search, 1 unit per probe
-    // (each also counted in s[O_LO], for schedule 2's simple pair). The index
-    // (also s[bo + MB_NJ]) or -1; or a negated code.
+    // (each also counted in s[O_LO] when cnt is 1, for schedule 2's simple pair:
+    // map-pre zeroes O_LO first. D362: map-keyq passes 0, as O_LO there still
+    // holds a head argument, up to 2^31 - 1, that the count overflowed). The
+    // index (also s[bo + MB_NJ]) or -1; or a negated code.
     s[bo + MB_NJ] = -1;
     if (kid < 0) {
         return -1;
@@ -445,7 +447,9 @@ export function mapCursor(p, s, bo, mt, kid, at) {
             if (!charge(s, 1, at)) {
                 return -R_BUDGET;
             }
-            s[O_LO] = s[O_LO] + 1;
+            if (cnt === 1) {
+                s[O_LO] = s[O_LO] + 1;
+            }
             cur += 1;
         }
         s[bo + MB_CUR] = cur;
@@ -461,7 +465,9 @@ export function mapCursor(p, s, bo, mt, kid, at) {
         if (!charge(s, 1, at)) {
             return -R_BUDGET;
         }
-        s[O_LO] = s[O_LO] + 1;
+        if (cnt === 1) {
+            s[O_LO] = s[O_LO] + 1;
+        }
         const mid = (lo + hi) >> 1;
         const k = p[nb + (3 * mid)];
         if (k === kid) {

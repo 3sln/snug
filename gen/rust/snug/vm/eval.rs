@@ -1722,7 +1722,7 @@ pub fn map_pre(p: &[i32], s: &mut [i32], fb: i32, area: i32, smap: i32, kid: i32
     let mt: i32 = block_mt(p, s, fb, area);
     free_on(s);
     s[(O_LO) as usize] = 0;
-    let rc: i32 = map_cursor(p, s, area, mt, kid, pos);
+    let rc: i32 = map_cursor(p, s, area, mt, kid, pos, 1);
     free_off(s);
     if rc < (-1) {
         return rc;
@@ -1752,7 +1752,7 @@ pub fn map_keyq(p: &[i32], s: &mut [i32], fb: i32, area: i32, nb: i32, smap: i32
                 return -R_BUDGET;
             }
             if s[(bo + MB_ALIVE) as usize] != 0 {
-                let rc: i32 = map_cursor(p, s, bo, mt, kid, pos);
+                let rc: i32 = map_cursor(p, s, bo, mt, kid, pos, 0);
                 if rc < (-1) {
                     return rc;
                 }
