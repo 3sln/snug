@@ -168,9 +168,9 @@
       "justification": "SDK runtime: opt-level 3 + wasm-opt -O3 (325,264 B / 131,831 gzip, Node zlib level 9)."
     },
     "compiler": {
-      "bytes": 154028,
-      "gzip": 70071,
-      "justification": "Compiler: opt-level \"z\" + wasm-opt -Oz (151,007 B / 68,697 gzip, Node zlib level 9)."
+      "bytes": 153564,
+      "gzip": 69851,
+      "justification": "Compiler: opt-level \"z\" + wasm-opt -Oz (151,007 B / 68,697 gzip, Node zlib level 9). Lowered by D354's addendum: with no core::fmt left in the module (fmt-free cc_warnings and compile.rs check_arguments) it measures 150,552 B / 68,481 gzip on main 42c869a + the cut; ceil(measurement * 1.02), down from 154,028 / 70,071."
     }
   }
 }

@@ -7637,6 +7637,32 @@ it keeps D341's caps, which was the gate's purpose.
 **Alternatives:** raising the gzip cap to ceil(70,170 × 1.02) = 71,574 was
 the first draft. It was superseded by this cut and never landed (the
 patch is kept as `.cache/p917-b-d354-budget-devlog.patch.superseded`).
+
+**Addendum (2026-11-13; the coordinator approved it): the last `format!` goes,
+and the caps come down.** host/rust/src/compile.rs `check_arguments` built a
+`control_value` refusal's detail with `format!("{name} argument: {d}")`. It
+now concatenates the same text: the name, " argument: ", then the detail.
+The native crate's text is byte-identical. host/rust/tests/abnf.rs already
+asserted the full "{name} argument: {detail}" string. host/rust/tests/controls.rs
+now also asserts the no-detail case, where the detail is the control's name
+("chars").
+
+In the wasm compiler, this path is never taken: cc.rs's registry accepts
+every argument, and the SDK checks arguments in JS (D142), as the native
+JS host does. host/wasm-sdk/test/parity.test.mjs now compiles the `.abnf`
+prose-val refusal through the SDK and the native package. It requires the
+same SchemaError on both, ending with the Rust crate's exact detail text.
+
+| compiler module | bytes | gzip (zlib 9) | `core::fmt` symbols |
+| --- | ---: | ---: | ---: |
+| after the `cc_warnings` cut (`d33a16b`) | 152,505 | 69,458 | 5 |
+| after this cut | **150,552** | **68,481** | **0** (400 functions) |
+
+That is −1,953 B / −977 gzip, and 455 B / 216 gzip below the D341 baseline
+(151,007 / 68,697). The compiler caps in tools/size/budget.json come down to
+ceil(measured × 1.02): bytes 154,028 → **153,564**, gzip 70,071 →
+**69,851**. The SDK runtime module and its caps are unchanged
+(325,406 / 132,056).
 - [x] **Signed off** (manager, 2026-11-13). The coordinator approved the
   cut in place of a raise. Merged at `d33a16b`; drift ok on main;
   budget.json is unchanged.
