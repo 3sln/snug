@@ -7788,6 +7788,153 @@ RFC 8949, D211 and the stream-order precedence (docs/scanner.md).
     was right in both.
   - `sequence-test 30000` now passes at both P9.9 seeds.
 
+### D356 — Hosted CI on GitHub Actions: macOS arm64 gate sets, release in five shards, compat and Linux cells, one required status (P9.20)
+**Decision** (P9.20 engineer; the design accepted by the coordinator).
+`.github/workflows/ci.yml` runs `bb gates` on GitHub's runners. A gate
+runs under the watchdog with its caps, and a SKIP fails the job, as
+locally (release-policy §2). CI does not replace release-policy §4 step 4.
+* **Triggers and jobs:**
+
+  | Job | Runner | When | What |
+  | --- | --- | --- | --- |
+  | `land` | `macos-15` | pull request, push to main | `bb gates land` |
+  | `release` ×5 | `macos-15` | `v*` / `src/v*` tag, manual run | `bb gates release-core`, `-vm`, `-rust`, `-wasm`, `-long` |
+  | `compat` ×5 | `macos-15` | every run | `npm-test` on Node 20 (`SNUG_NODE_OLDEST=1`), 22, 24; `rust-api-test` on Rust 1.87, stable |
+  | `linux` ×5 | `ubuntu-24.04` | every run | the same five cells |
+  | `ci` | `ubuntu-24.04` | always | fails unless compat and linux passed, and land (or, on a release run, every shard) passed |
+
+* **Why macOS arm64 for the gate sets:** the gate scripts were written and
+  recorded there. `tools/runtime/run.mjs` reads `sysctl` and `sw_vers`,
+  Chrome's default path is macOS's, and `wasm-build` wraps `rust-lld` with
+  `DYLD_LIBRARY_PATH`.
+* **Primary toolchain:** Node 24.6.0 (the Node that
+  `tools/unicode/gen-tables.mjs` pins, which `unicode-test --check`
+  needs) and Rust 1.92.0, pinned so that a new Rust release cannot turn a
+  land run red by itself. Every gate of both sets runs on it once,
+  including the identity, fuzz and proptest gates: their subject is
+  JS == Rust on one machine, not a toolchain.
+* **proptest runs on Node 24 only.** Its failing slow-compile and
+  slow-validate checks read `process.threadCpuUsage()`, which needs
+  Node ≥ 23.9; on Node 20 they can only warn. No job runs proptest on
+  Node 20 (one that did would be warning-only and must say so).
+* **Compat cells** are the ones a toolchain can change: `npm-test` on the
+  latest Node 20, 22 and 24, and `rust-api-test` on Rust 1.87 (no Clippy,
+  as `msrv`, D344) and on the latest stable. The release set's
+  `node-oldest` and `msrv` test the floors on the primary runner.
+* **The stable cell is required, and red until D357.** Rust 1.98.1
+  overflows the test thread's stack in `public_api`'s
+  `named_compile_limits_runtime_caps_and_depth_ceiling` ("has overflowed
+  its stack"). 1.92.0 and 1.87 pass the same test. D357 fixes it
+  separately; the cell stays required so the overflow cannot be
+  forgotten.
+* **Linux cells** (coordinator, 2026-11-13). `npm-test` and
+  `rust-api-test` are plain POSIX `sh` and Node:
+  - `kin/scripts/rust-crate` uses `find`, `cmp`, `cp`, `mktemp`, `ls`,
+    `sort`, `cut` and `sed -n`, in POSIX forms GNU accepts.
+    `host/rust/tests/run` adds `cargo`, `rustdoc` and `cat`. The crate has
+    no dependencies, so `--offline` holds. The tests shell out only to
+    `node`. Nothing in host/js's tests or host/rust's tests and sources is
+    platform-specific (grep: no `process.platform`, `target_os`,
+    `/Applications`, `sysctl`).
+  - So no portability change was needed. Each Linux cell runs its gate
+    the way `kin/scripts/gates` does, without Babashka or a kin checkout:
+    `node kin/scripts/watchdog.mjs GATE -- CMD` (npm-test with the gate
+    map's `--gate-wall=1800 --gate-cpu=3600`, as `bb gates` appends for a
+    gate the watchdog has no default for), failing on a non-zero exit or
+    a `^\s*SKIP\b` line on stdout.
+  - The runner is pinned to `ubuntu-24.04` (as `macos-15` is), not
+    `ubuntu-latest`, so an image move cannot change a run by itself.
+* **Release shards** (`ci/gate-map.edn` `:partitions`). The release set's
+  wall caps sum to about 23 hours; a hosted job stops at 6. Shard sums:
+  core 281, vm 300, rust 280, wasm 310, long 220 minutes. `bb gates
+  --check` now fails unless a partition's shards hold exactly its set's
+  gates, each once, and each shard's wall caps sum to at most 330 minutes.
+  Every job's `timeout-minutes` is above its sum and at most 360.
+* **Pins:** every action by commit SHA:
+  - `actions/checkout` `3d3c42e5aac5ba805825da76410c181273ba90b1` (v7.0.1);
+  - `actions/setup-node` `949feb2413d6458794dcd2491c4babbbce0c15c1` (v7.1.0);
+  - `actions/cache` `55cc8345863c7cc4c66a329aec7e433d2d1c52a9` (v6.1.0).
+
+  Babashka 1.3.190, macOS aarch64, checked against sha256
+  `1a01b043796d34200c1e854f52e81da94206952354ea1aa242a1bf625829669d`.
+  kin at `KIN_REF` `21e8ab9c3d14d438c31916a7e052cf5929b75ca3`. workerd
+  1.20251217.0 by `ci/tools/package-lock.json`. The Rust MSRV, the wasm
+  nightly and the engines Node are read from the repository. No Clojure
+  CLI: no gate runs a JVM.
+* **Security:** `permissions: contents: read`, no secrets, no
+  `pull_request_target`, no publish, deploy, tag or upload step,
+  `persist-credentials: false`.
+* **`tools/runtime/run.mjs` SKIP fix.** A runtime that was missing and not
+  `--skip`ped was quietly left out, so `runtime` could pass without Chrome
+  or workerd. It now prints `SKIP runtime browser arm -- no Chrome
+  (SNUG_CHROME): NOT RUN` (or the workerd arm), which `bb gates` counts as
+  NOT RUN.
+
+**Local proof** (macOS arm64, 2026-11-13). The previous engineer's
+`.cache/p920-scratch/sim.sh` replays a job's commands from a `git clean
+-fdx` tree with only the tools its setup installs (kin at `KIN_REF`,
+Babashka 1.3.190, nvm Node, `env -i`):
+* On Rust 1.98.1 (stable, before the 1.92.0 pin): `land` 8 of 9 ok,
+  `rust-api-test` failed on the D357 overflow; `npm-test` ok on Node
+  20.20.2 (`SNUG_NODE_OLDEST=1`, 54 s) and 22.23.5 (71 s); `release-vm`
+  vmsession-test (2741 s) and sequence-test (1516 s) ok, vm-test NOT RUN
+  (below).
+* On 1.92.0: `land` all 9 ok (wasm-sdk-test 769 s, vm-test 284 s).
+  Compat: `npm-test` Node 24.6.0 ok (44 s); `rust-api-test` on 1.87 ok
+  (187 s); on stable 1.98.1 FAIL (the D357 overflow).
+* `release-rust` on 1.92.0 (on the rebased branch): all 9 ok in 27
+  minutes (rust-api-test-full 1014 s, msrv 159 s).
+* **Found by the replay and fixed:** `release-core` ran scan-test as NOT
+  RUN (`SKIP wasm (SNUG_SCAN_WASM not set)`, and a `SKIP cbor2
+  differential`), and `release-vm`'s vm-test likewise (`SKIP wasm`).
+  scan-test and vm-test build their wasm arm with `wasm-build speed`, and
+  scan-test's cbor2 differential needs bench/compare. Those shards now
+  install the nightly (and core bench/compare). With the fix:
+  `release-core` all 10 ok with no SKIP line (scan-test's wasm arm
+  31360/31360); vm-test with release-vm's setup ok (194 s).
+* `release-wasm` (1.92.0, pre-fix commit; the shard is unchanged by the
+  fix): wasm-sdk-test, wasm-package-test (workerd recipes, Chrome
+  157.0.8103.78) and wasm-size ran with no FAIL or SKIP line; node-oldest
+  and runtime were still running at merge, so the shard is not claimed.
+* `release-long` (valid-test, proptest) was not run locally.
+* **Linux cells, local replay.** No Linux machine or container was
+  available (Docker's daemon is not running). The workflow's own gate-step
+  block, extracted from ci.yml, ran under `bash -e` with `sh` resolving to
+  `/bin/dash` (Ubuntu's `/bin/sh`): npm-test ok on Node 20.20.2
+  (`SNUG_NODE_OLDEST=1`), 22.23.5 and 24.6.0 (1507/1507);
+  rust-api-test ok on 1.87 under `dash host/rust/tests/run`.
+  `kin/scripts/rust-crate` under dash builds a tree byte-identical to the
+  one under macOS `sh` (104 files, `diff -r`). The step fails a gate that
+  prints `  SKIP …` and one that exits 3, and passes a clean one.
+
+**Not done:**
+* actionlint was not run. Downloading it was refused by the permission
+  system, and it was not tried again. The first hosted run validates the
+  workflow. (A parse by a local `act -l` lists the five jobs and the
+  `needs` graph as intended; it executes nothing.)
+* **Gaps for the first hosted run:**
+  - Hosted macOS Chrome and workerd are untested: `wasm-package-test` and
+    `runtime` (release-wasm) have run only on the local machine.
+  - Chrome is the runner image's and is not pinned. The setup prints its
+    version and fails if it is missing.
+  - `-Zbuild-std` downloads the std crates' dependencies cold on a first
+    run. The registry is cached by nightly after that.
+  - Shards' cap sums sit near the 330-minute limit, and the gates' times
+    come from the local machine, not a 3-vCPU hosted runner. A shard that trips the
+    watchdog or its `timeout-minutes` needs a re-split (`bb gates
+    --check` guards the sums).
+  - The Linux cells have run only as a local replay: the first run is
+    their first on Linux (GNU tools, glibc's thread stacks).
+  - The stable-Rust cells (macOS and Linux) are red until D357.
+
+**Alternatives**:
+* Babashka on Linux too, running `bb gates npm-test`: one more pinned
+  binary and a kin checkout for two gates whose commands are one line.
+* `ubuntu-latest`: a moving image.
+* Run the release set in one job: it cannot fit 6 hours.
+* Every gate on Linux: the gate scripts call macOS tools (above).
+- [ ] **Signed off** (manager)
+
 ## Findings
 
 - 2026-11-11 (manager): **the 6½-day `scan-test.mjs 300 1` process
@@ -11154,6 +11301,19 @@ can run alongside them; its build work is post-RC unless it is cheap.
       - kin also has Go, Java and C#.
       - Go would be 18–28 engineer-days and needs no new kin emitter.
       - Recommendation: no new target before the RC; Go post-RC on demand.
+- [ ] **P9.20 — CI (GitHub Actions)** (owner decision, 2026-11-13). Hosted
+  CI runs the gate sets of `ci/gate-map.edn` with `bb gates`, read-only.
+  Landed (D356, see there); nothing is pushed by engineers. It closes when
+  the coordinator's first hosted run is green, which needs D357 first (the
+  stable-Rust cells are required and red until then).
+  - `.github/workflows/ci.yml`: `land` on pull requests and pushes to
+    main; the release set as five shards on `v*` / `src/v*` tags and a
+    manual run; a macOS compat matrix; a Linux matrix; one `ci` status.
+  - `.github/actions/setup`: the pinned toolchain per job. `ci/tools`:
+    workerd by lockfile.
+  - `ci/gate-map.edn` `:partitions`, checked by `bb gates --check`.
+  - `tools/runtime/run.mjs`: a missing runtime prints SKIP (NOT RUN).
+  - release-policy §2 and §4.1.
 
 **Last**
 - [x] **P9.12 — P8.7 binary-size audit** (owner requirement, D303), done
