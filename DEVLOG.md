@@ -8198,6 +8198,172 @@ Only x86_64 Linux is left to CI's cells.
     on cc09911 therefore stands for the shared core. D357's own gate record
     above is the P9.9 addendum for the Rust host.
 
+### D365 — Gates that passed falsely now fail: each fix proven by a mutation the old gate passed and the fixed gate catches (P9.13 WP3)
+**Decision** (P9.13 WP3 engineer; the gates review saved in
+`.cache/p913-triage/gates-review.md`, manager's assignment). Every fix below
+was proven the same way. A mutation was applied to the product or to its
+input, then the gate was run twice: from main a19eb62 (a scratch worktree)
+and from the fixed branch. The **before** result is main's, the **after**
+result is the fix's.
+
+**Blocking**
+* **B1 `runtime` always exited 0** (`tools/runtime/run.mjs`).
+  - Before: every arm of a full run on main counted 772 passed and 204
+    failed cases, and the gate exited 0. The 204 were real: the suite
+    decoded corpus/cbor-vectors' Bindle refusal vectors under the default
+    `valid` preset (D267), which accepts them.
+  - Fix: `tools/runtime/verdict.mjs`, which now decides the exit status. It
+    fails the run on any of:
+    - an arm that should run but has no result, no totals, a fatal, 0
+      passes or a failing case;
+    - a dynamic-code pattern in a bundle or in the package source (`ALLOW`
+      is empty);
+    - in Chrome: eval or `new Function` not blocked by the CSP, a CSP report
+      not from control.js's two deliberate probes, extra violations, or a
+      page error, an unhandled rejection or a `console.error` (now
+      captured).
+  - `selfTest()` runs first in every gate run. It injects 12 kinds of
+    failure into a clean result and requires `verdict()` to catch each.
+  - The suite runs the profile vectors under `{ wire: 'bindle' }`.
+  - `--skip browser|workerd` now prints SKIP (N9, partly).
+  - After: 976/0 in all nine arms, `ok runtime`, exit 0. With
+    `--inject-fail` (one refusal vector that `0x00` passes), nine FAIL lines
+    and exit 1.
+* **B2 `rscan-test` passed a short Rust answer.**
+  - Mutation: a wrapper that drops the Rust binary's last line (`300 1`).
+  - Before: the Rust line printed FAIL 41015/41016, but the gate ended "ok"
+    and exit 0.
+  - After: the line count is checked against the runs, and the summary's
+    disagreement calls `fail()`. FAIL, exit 1.
+
+**Should-fix**
+* **S1 proptest passed a property with 0 cases.**
+  - Mutation: `worker.mjs` exits at once.
+  - Before (`--tree=working --minutes=0.05 --props=4`): "P4 0 cases; 0
+    failure signatures", exit 0.
+  - After: a worker that exits without `done` records `P<n>/worker-exit`.
+    A requested property that ran 0 cases records `P<n>/no-cases`. Exit 1.
+  - New self-check flag: `--inject-exit=P`.
+* **S2 watchdog-test did not protect the exit pass-through.** It now
+  checks:
+  - for `run()`: exit 1 → 1, SIGTERM → 143, SIGSEGV → 129;
+  - for `selfWatch()`: exit 0, 1 and 3 kept, and a signal never 0.
+
+  Two mutations: exit 1 → 0, and any signal → 0
+  (`res(code ?? 0)`). Main's test passed both; the fixed test fails both.
+* **S3 npm-test passed a truncated run.**
+  - Mutation: `test('MUTATION', () => process.exit(0))` at the head of
+    sessions.test.mjs.
+  - Before: 611 tests, 611 pass, exit 0.
+  - After: test/index.js registers a last test, and an exit hook makes the
+    exit status 1 unless it ran. "FAIL test/index.js: the suite stopped
+    before its last test", exit 1. A clean run is 1508/1508.
+* **S4 NOT RUN detection.**
+  - `kin/scripts/gates` reads stderr as well as stdout. A NOT RUN line is:
+    - a `SKIP` line;
+    - "<tool> unavailable / missing / not installed / not found … skipped";
+    - node:test's `ℹ skipped N` or `ℹ todo N` with N > 0;
+    - TAP's `# skip N` or `# todo N` with N > 0.
+  - Probe gates (a SKIP on stderr, "clippy unavailable; skipped",
+    `ℹ skipped 2`, `# todo 1`) all passed main's runner; the fixed runner
+    reports 4 NOT RUN. A clean probe printing "2 phase-later skipped" and
+    "ℹ skipped 0" stays ok.
+  - `rust-api-test` prints `SKIP clippy … NOT RUN` when Clippy is missing,
+    unless `SNUG_CLIPPY_OPTIONAL=1`. ci.yml sets that for the rust-version
+    cells only (D344).
+  - The CI Linux step reads stdout and stderr with the same patterns,
+    checked on the probes.
+* **S5 regexp-test's Rust VM and wasm compiler arms never ran.**
+  - compile-test passed only the compiler binary.
+  - Now compile-test builds the VM host (`kin/scripts/vm-bin`, shared with
+    vm-test) and `wasm-build cc`, and passes both. A missing arm prints
+    SKIP.
+  - The first run of the VM arm found a real fault. regexp-test sent 10
+    limit words where vm.rs reads 11 (word 10 is the group arena's limit,
+    added later), so the Rust VM panicked (exit 101) on the first case.
+    The arm had been broken since that protocol change, unseen.
+  - With the 11th word: 6696/6696 JS == Rust VM outputs, and 158/158
+    JS == Rust == wasm compiler outcomes.
+* **S6 depth boundaries.**
+  - New vectors with written-down verdicts: N nested containers around
+    `0x00` under maxDepth D, for N = D−1, D and D+1, with D = 32 and 4.
+    Shapes: definite and indefinite arrays and maps. Rule: N ≤ D is ok;
+    D+1 is depth at the (D+1)-th head. Without flag 256 an indefinite
+    container is refused as indefinite at 0.
+  - Where: 120 in det-cases (scan-test and rscan-test, flags 0, 122, 118,
+    378 and 374), and 96 in valid-test §3d (scanner and VM against `any`).
+  - rscan-test now also holds its recursive scan to any written-down
+    verdict.
+  - Mutation: `kin/scan.kin` `scan-iarr` `(>= depth max)` → `(>`,
+    re-emitted. Before: scan-test, rscan-test and valid-test all passed.
+    After: all three fail ("depth indefinite array 33/32 f378: JS ok@-1,
+    vector depth@32"). In valid-test the VM still said depth@32: before
+    this, only vm-test's identity caught it.
+* **S7 valid-test's cbor2 differential explained by class, not by cause.**
+  Each class is now re-checked on its input:
+  - limits: the input must stop being refused once the limits are lifted;
+  - duplicates: two keys of one map must have equal cbor2 CDE encodings;
+  - cbor2 tag decoders: cbor2 must accept the input with
+    `ignoreGlobalTags`. The error-message `/tag/` shortcut is gone.
+
+  The recorded counts are asserted for the gate's own run (300, seed 1):
+  1396/1502 agree; cbor2 tag decoders (content) 3, tag rules 65, cbor2 tag
+  decoders 11, limits 27. Mutation: `scan-typed` refuses every well-sized
+  typed array under valid. Before: the differential line read "ok … tag
+  rules 86; 0 unexplained", the class absorbing 21 new refusals. After:
+  FAIL on the counts. (Other sections catch this mutation on both.)
+* **S8 rfc-corpus dropped `wire: 'valid'`.**
+  - The fallback is removed, and `--gate` also requires `validSupported`
+    and `runtimeStable`.
+  - Mutation: an explicit `wire: 'valid'` is refused, while the default
+    stays valid.
+  - Before: it fell back silently, and every check passed with exit 0.
+  - After: 499 unexplained, and "FAIL rfc-corpus: … wire 'valid' is not
+    supported by this build", exit 1.
+* **S9 proptest seeds.**
+  - Unless `--seeds` is given, each worker starts at an offset from
+    sha256(HEAD + UTC date). The offset is logged with the flags that
+    replay it (`--seeds=A..B --seed-offset=N`), and recorded in
+    summary.json.
+  - campaign.test.mjs (9 tests: injected finding, worker exit, no cases,
+    seed offset, slow compiles) now runs first in every proptest gate run.
+* **S10 the CI release matrix.**
+  - `gates --check`, which every `bb gates` set also runs before it
+    starts, now parses ci.yml. The release matrix must run exactly
+    `:partitions :release`, and each `timeout-minutes` must sit above the
+    shard's caps and be at most 360.
+  - Mutations: the release-long row deleted, and release-vm's timeout set
+    to 200. Main's `--check` passed both; the fixed one fails both.
+* **S11 stamp-test.**
+  - Copy a builds under `TZ=UTC` and `LC_ALL=C`. Copy b is shifted: its
+    files and its Node clock (a preloaded `Date`) are 400 days ahead, with
+    `TZ=Pacific/Kiritimati` and `LC_ALL=tr_TR.UTF-8`.
+  - Mutation: package-build writes today's date into package.json. Before:
+    ok (both builds on the same day). After: the npm pack byte-identity
+    check fails.
+
+**Nits**
+* **N1:** scan-test, vm-test and compile-test treat `wasm-build` exit 3 (no
+  toolchain or wasm-opt) as SKIP, and any other failure as FAIL. A
+  `SNUG_SCAN_WASM` or `SNUG_VM_WASM` inherited from the caller is unset.
+* **N4:** the scan-test and vm-test wasm arms and the SDK parity tallies
+  fail on 0 comparisons. Mutation: the wasm cap set to −1. Before: "ok
+  0/0". After: "FAIL wasm: 0 cases tried".
+* **N6:** drift compares gen/ with HEAD, not the index. In a scratch
+  worktree, a stale gen file was committed, then emitted and staged.
+  Before: "ok every committed module matches its source". After: FAIL. A
+  tree with emitted but uncommitted gen/ changes now fails drift.
+* **N10:** the stale "red until D357" text is gone from ci.yml and
+  release-policy §4.1.
+* **Not done:** N2, N3, N5, N7, N8, and the rest of N9 (Chrome and workerd
+  run detached from the watchdog's process group).
+
+**Verification:** `bb gates release` on the branch (rebased on 5ca0ccb):
+all 31 gates ok, including runtime 976/0 in every arm, valid-test's
+recorded cbor2 counts, compile-test's two new regexp arms, and proptest
+with its self-test first. `bb gates --check` and `bb docs-test` ok.
+- [ ] **Signed off** (manager)
+
 ### D366 — The user docs describe the released library, and `bb docs-test` refuses a release whose shipped text says otherwise; maintainer records leave the npm package; fresh output buffers are `Uint8Array<ArrayBuffer>` (P9.13 WP4: API-B1, S3–S6, N1–N11; coordinator decisions 3 and 5)
 **Decision** (WP4 docs engineer, provisional):
 * **Post-release text now, and a gate.** README, guide, profiles, rust.md,
