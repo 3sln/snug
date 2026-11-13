@@ -7944,6 +7944,58 @@ Babashka 1.3.190, nvm Node, `env -i`):
 * `ubuntu-latest`: a moving image.
 * Run the release set in one job: it cannot fit 6 hours.
 * Every gate on Linux: the gate scripts call macOS tools (above).
+
+**Setup-action audit (after the first hosted run, 2026-11-13).**
+* **What the local proof missed.** `sim.sh` installed the tools itself and
+  ran only the gates, so no command of `.github/actions/setup` ran before
+  the first hosted run. That run (43468291319) stopped in setup: `node
+  node_modules/esbuild/bin/esbuild --version` threw a SyntaxError, because
+  esbuild's install replaces `bin/esbuild` with the native binary. The
+  coordinator fixed it in `5304d36` (`node_modules/.bin/esbuild`). The same
+  run passed every Linux cell and every macOS compat cell except stable
+  (the D357 overflow, as expected).
+* **The audit.** A local runner (`.cache/p920-audit/run-setup.rb`) runs every
+  `run:` block of the action exactly as written. Each block is written to a
+  file and run as `bash --noprofile --norc -eo pipefail` (`shell: bash`) in
+  its working directory, under `env -i` with the step's env. `${{ }}` and
+  `if:` are evaluated, and `GITHUB_ENV`, `GITHUB_PATH` and `GITHUB_OUTPUT`
+  are applied between steps. It runs from a `git clean -fdx` checkout of
+  `5304d36`, with kin at `KIN_REF`, a private `HOME` and a private
+  `RUSTUP_HOME`. The `uses:` steps are emulated: the kin checkout is
+  compared with `KIN_REF`, setup-node puts the nvm Node first on PATH, and
+  the cache step prints its key.
+  - Setup passed for all eleven matrix inputs (land, the five release
+    shards, the five compat cells). Every step was checked:
+    - the pins read rust-version 1.87, `nightly-2026-09-16` and engines
+      `>=20`;
+    - the Babashka 1.3.190 tarball downloads, matches its sha256 and prints
+      `babashka v1.3.190`;
+    - `SNUG_NODE_OLDEST_NODE` is Node 20.20.2;
+    - rustup installs 1.92.0 with Clippy (a cold download), 1.87, stable
+      (1.100.0 by then) and the nightly with rust-src and wasm32. PATH's
+      `rustc` is the rustup default;
+    - the cache key is `cargo-registry-macOS-ARM64-nightly-2026-09-16`, and
+      the setup-node npm cache paths exist;
+    - bench/compare `npm ci` passes, `.bin/esbuild` prints 0.28.2 and
+      `wasm-opt` prints version 132. `node .../binaryen/bin/wasm-opt` is
+      the way `wasm-build` runs it; binaryen's bin is JS;
+    - ci/tools `npm ci` passes and workerd prints 2025-12-17. Chrome is
+      157.0.8103.78. `SNUG_WORKERD` and `SNUG_CHROME` are exported, and
+      the Chrome path's spaces survive `GITHUB_ENV`.
+  - The guards fail as meant: a Linux runner; no `KIN_REF`; a wrong
+    Babashka sha256; Homebrew's `rustc` first on PATH; an unknown `rust`
+    input; Node 22 where node-oldest wants 20.
+  - In ci.yml, the Linux job's Rust step (msrv and stable) passed. The
+    `ci` aggregate gives the expected verdict in all ten result
+    combinations tried: pull request and release runs, failed, cancelled
+    and skipped jobs.
+  - **Hardened:** the pins step checked only that each value was
+    non-empty. Two `"node": ">=NN"` matches would have written a two-line
+    `oldest` into `$GITHUB_OUTPUT`. Each value must now match its shape
+    (`X.Y[.Z]`, `nightly-YYYY-MM-DD`, `NN`), or setup fails and names
+    them. Tested with two matches and with `^20`.
+  - Not covered locally: the hosted runner's own tool cache and its
+    rustup version, and how `actions/cache` behaves on a hosted runner.
 - [ ] **Signed off** (manager)
 
 ## Findings
