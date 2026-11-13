@@ -146,11 +146,36 @@ pub extern "C" fn cc_warnings() -> *const u8 {
             match ch {
                 '"' => out.push_str("\\\""),
                 '\\' => out.push_str("\\\\"),
-                c if (c as u32) < 0x20 => out.push_str(&format!("\\u{:04x}", c as u32)),
+                c if (c as u32) < 0x20 => {
+                    const HEX: &[u8; 16] = b"0123456789abcdef";
+                    out.push_str("\\u00");
+                    out.push(HEX[(c as usize) >> 4] as char);
+                    out.push(HEX[(c as usize) & 15] as char);
+                }
                 c => out.push(c),
             }
         }
         out.push('"');
+    }
+    // fmt-free decimal (core::fmt would add to the module, D354)
+    fn int(out: &mut String, n: i32) {
+        let mut v = n.unsigned_abs();
+        if n < 0 {
+            out.push('-');
+        }
+        let mut buf = [0u8; 10];
+        let mut i = buf.len();
+        loop {
+            i -= 1;
+            buf[i] = b'0' + (v % 10) as u8;
+            v /= 10;
+            if v == 0 {
+                break;
+            }
+        }
+        for &b in &buf[i..] {
+            out.push(b as char);
+        }
     }
     let s = st();
     let mut j = String::from("[");
@@ -166,7 +191,11 @@ pub extern "C" fn cc_warnings() -> *const u8 {
                 Some(r) => js(&mut j, r),
                 None => j.push_str("null"),
             }
-            j.push_str(&format!(",\"line\":{},\"column\":{},\"message\":", w.line, w.column));
+            j.push_str(",\"line\":");
+            int(&mut j, w.line);
+            j.push_str(",\"column\":");
+            int(&mut j, w.column);
+            j.push_str(",\"message\":");
             js(&mut j, w.message);
             j.push('}');
         }
