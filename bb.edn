@@ -55,6 +55,10 @@
                :task (shell "kin/scripts/node-oldest")}
   msrv       {:doc "P9.18 (D344): the assembled crate's build, tests and doctests on its rust-version, via rustup; SKIP without it."
               :task (shell "kin/scripts/msrv")}
+  dist       {:doc "P9.19 (D346): build the dist branch commit and tags from a stamped release build's artefacts, in the given repository; never pushes.   bb dist --repo <checkout> --release <dir> --source <commit> [--overlay <dir>] [--dry-run]"
+              :task (apply shell "node" "kin/scripts/dist.mjs" *command-line-args*)}
+  dist-test  {:doc "P9.19 (D346): offline validation of bb dist in .cache/dist-test: reproducible commits, npm git+file and #semver, the wasm-sdk tree, cargo git tag, a probe Go module via go/ tags.   bb dist-test --release <dir> --source <commit>"
+              :task (apply shell "node" "kin/scripts/dist-test.mjs" *command-line-args*)}
   gates      {:doc "P9.15: run gate sets or gates from ci/gate-map.edn in order, each under the watchdog; SKIP or blocked = not ok.   bb gates release | land | identity | <gate>... | --list | --check"
               :task (apply shell "kin/scripts/gates" *command-line-args*)}
   identity   {:doc "SPEC §7: the cross-host identity gates (bb gates identity): Programs, verdicts, reasons, paths and budget points, JS == Rust."

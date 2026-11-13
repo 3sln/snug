@@ -85,7 +85,7 @@
                     :doc "cargo build, test and doctests of the assembled crate on rust-version (rustup); SKIPs without it: NOT RUN (P9.18)"}}
 
  ;; bb.edn tasks that are not gates
- :not-gates [gen emit bench-scan gates identity wasm-release stamp]
+ :not-gates [gen emit bench-scan gates identity wasm-release stamp dist dist-test]
 
  :sets
  {;; docs/release-policy.md §4 step 4, in that order. A SKIP or a :blocked gate fails it.

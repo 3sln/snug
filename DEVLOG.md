@@ -7145,6 +7145,93 @@ Results are in the P9.15 (rework) item.
   The engineer's full runs, on the placeholder tree and on a stamped tree,
   are recorded in the P9.15 (rework) item.
 
+### D346 — Git-source distribution: an orphan `dist` branch of unpacked release artefacts, `vX.Y.Z` on the dist commit; npmjs, crates.io and GitHub Releases as channels, not GitHub Packages (P9.19, O3)
+**Decision** (proposed, P9.19 engineer). There are four parts.
+
+- **The branch** (release-policy §9). An orphan `dist` branch holds one
+  commit per release. The commit is the release artefacts unpacked:
+  - the `@3sln/snug` tarball at the root;
+  - the `snug-cbor` `.crate` in `rust/` (crate name per the owner,
+    2026-11-12; it was `snug-cddl` in the first draft);
+  - `@3sln/snug-wasm` in `wasm-sdk/`;
+  - an optional `go/` module;
+  - `DIST.json` and `.npmignore`.
+
+  `bb dist` builds it, linear and reproducible. The branch is generated
+  release output, not source history, and it is the only place stamped
+  versions live in git.
+- **Tags.**
+  - `vX.Y.Z` goes on the dist commit and `src/vX.Y.Z` on the source release
+    commit.
+  - `go/vX.Y.Z` goes on the dist commit when a Go module exists.
+  - Once pushed, a tag never moves.
+- **Channels.**
+  - Both npm packages go on npmjs.com.
+  - The crate goes on crates.io.
+  - GitHub Releases carries the raw `.wasm` modules, the tarballs, the
+    `.crate`, `SHA256SUMS` and a source archive of `src/vX.Y.Z`.
+  - `dist` serves git-source consumers.
+  - GitHub Packages is used for nothing.
+- **Targets.** No new kin target before the RC. Go after the RC only if a
+  consumer asks (18–28 engineer-days, docs/reviews/2026-11-12-targets.md).
+  Babashka pod / Clojure: dropped by the owner 2026-11-12.
+
+**Why:**
+- The owner set the intent: "dist branch with release build". Unpacking
+  the artefacts, rather than copying a build directory, makes a git
+  install byte-equal to the registry package. That was checked for npm:
+  119 files.
+- **The tag that consumers name should be the installable tree.** The
+  alternative fails in a test:
+  - with `dist/vX.Y.Z` beside a source `vX.Y.Z`, npm's `#semver:` takes
+    the last tag ending in the version;
+  - that is the source commit, and the install fails;
+  - with `v…` on dist, it reaches the dist commit (both tested).
+- **GitHub Packages:**
+  - its npm registry needs a personal access token to install even public
+    packages, plus an `.npmrc` scope line;
+  - it has no Cargo or Go registry (GitHub docs, checked 2026-11-12).
+- **Go would need the dist tree in any case.** On main, the version kin
+  writes into every Program is the placeholder, and a Go module cannot
+  import files from outside its own directory.
+
+**Alternatives:**
+- **`dist/vX.Y.Z` on the dist commit**, keeping `vX.Y.Z` on source:
+  - it breaks npm `#semver:`;
+  - consumers must spell the prefix.
+
+  Its merit is that GitHub's "Source code" archives for the release stay
+  the source; the chosen scheme attaches a source archive instead.
+- **The dist tree as built directories** (the npm staging and the
+  assembled crate) rather than unpacked artefacts. The tree would differ
+  from what the registries ship: the crate dir holds `src/bin` and
+  `tests/`.
+- **GitHub Packages for npm.** Rejected: it needs a token for public
+  installs.
+- **A separate dist repository.** No longer needed after the owner's
+  answer.
+
+**Decisions needed (coordinator / owner):**
+1. The tag scheme: `vX.Y.Z` on dist with `src/vX.Y.Z` on source, or the
+   prefixed alternative.
+2. Whether the `dist` commit and tags are pushed as part of the release
+   go (§4 step 7).
+3. Whether `bb dist` lands now or with P9.15's release tooling.
+   - It needs `version.edn` to refuse the placeholder.
+   - It skips that check on a tree without `version.edn`.
+4. Whether the Go assessment is filed under D006's deferral as it stands.
+- [x] **1–3 decided** (coordinator, 2026-11-12):
+  - **Tags:** `vX.Y.Z` on the dist commit, `src/vX.Y.Z` on the source
+    commit, and `go/vX.Y.Z` if a Go module exists. The release attaches a
+    `git archive` of `src/vX.Y.Z`.
+  - **Pushing:** the dist commit and its tags go out under the same owner
+    release go as everything else.
+  - **Landing:** `bb dist` merges right after the P9.15 rework lands.
+- [x] **4 (Go)**: deferred under D006 (owner, 2026-11-12, via
+  coordinator). Go comes after 0.1.0, in 0.2.0 at the earliest. The
+  assessment above (18–28 engineer-days, no kin change) stands for when it
+  is picked up.
+
 ## Findings
 
 - 2026-11-11 (manager): **the 6½-day `scan-test.mjs 300 1` process
@@ -10243,7 +10330,7 @@ can run alongside them; its build work is post-RC unless it is cheap.
   - Done (D344): Node ≥ 20 and Rust ≥ 1.87. `bb gates node-oldest msrv`,
     both in the release set. The npm suite now runs every test file, and
     the Unicode tests tolerate a newer Node ICU.
-- [ ] **P9.19 — Git-source consumers** (O3). Design and validate locally:
+- [x] **P9.19 — Git-source consumers** (O3). Design and validate locally:
   - an orphan `dist` branch of stamped, built trees, one commit per
     release;
   - tags on those commits, plus Go-style subdirectory tags where needed;
@@ -10301,6 +10388,70 @@ can run alongside them; its build work is post-RC unless it is cheap.
   - The remote exists now (`origin`, private). Nothing is pushed by
     engineers or the manager; the `dist` branch is built and validated
     locally only.
+  - **Results (2026-11-12; D346 decided, see there).**
+    - **Design:** release-policy §9.
+    - **Tool:** `bb dist`, which runs `kin/scripts/dist.mjs`.
+      - It builds the commit from the release artefacts: npm tarball at
+        the root, `.crate` in `rust/`, SDK in `wasm-sdk/`, and further
+        trees through `--overlay`.
+      - It writes `DIST.json` and `.npmignore`.
+      - Commits are linear and reproducible, with identity and dates from
+        the source commit.
+      - Tags: `vX.Y.Z` on the dist commit (source gets `src/vX.Y.Z`), and
+        `go/vX.Y.Z` when `go/go.mod` exists.
+      - It refuses the placeholder, mismatched versions and existing tags.
+        It never pushes.
+    - **Validation:** `bb dist-test`, not a gate, run offline in scratch
+      repositories. All passed, on a stamped build of `p915r` 5698c68 at
+      0.1.0:
+      - reproducible commit `486c390d42d9`;
+      - npm `git+file` install equal to the tarball's 119 files, and the
+        package validates;
+      - npm `#semver:` reaches the dist commit;
+      - a cargo `git` + `tag` dependency builds and validates;
+      - a probe Go module resolves through `go/v0.1.0`.
+      - Done by hand: 0.1.1 chained as a child, and a pin on v0.1.0 holds.
+      - **Landing run** (2026-11-12, on a stamped build of main
+        `a004cbc` at 0.1.0, made by the §4 step 5 route in a detached
+        worktree and never committed). The build gave the npm tarball, the
+        `snug-cbor-0.1.0.crate`, and `bb wasm-release` with the P9.17 package
+        build for `@3sln/snug-wasm`. `bb dist-test` passed every check:
+        - reproducible commit `3332e7e46184`;
+        - npm `#v0.1.0` gives the tarball's 120 files and validates;
+        - `#semver:` reaches the dist commit;
+        - the dist `wasm-sdk/` matches the SDK tarball's 94 files, and
+          it packs, installs, runs `init()` and validates;
+        - cargo `git` + `tag` builds and validates;
+        - the Go probe resolves through `go/v0.1.0`.
+      - Not run: the pnpm `#v0.1.0&path:/wasm-sdk` install itself. pnpm is
+        only a corepack shim here, and it would download.
+      - `dist.mjs` now requires `version.edn` and its `:placeholder`, with
+        comments stripped before matching. It refuses a source commit
+        without the file (checked on `b4fb762`) and a placeholder-version
+        tarball (checked).
+      - Gates on the rebased branch: drift, check and `bb gates --check`
+        ok. `npm test` passed 1500/1500 on the second run. On the first run,
+        one test failed: sessions.test.mjs "pooled arrays are zeroed before
+        reuse", with "the pooled entry is reused". It passed 3/3 alone and in
+        the full rerun. The branch does not touch host/js. This is a
+        flake for the P9.13 review.
+    - **Learnt:** `dist/vX.Y.Z` beside a source `vX.Y.Z` sends npm's
+      `#semver:` to the source commit, and the install fails. npm also
+      needs the remote HEAD to exist. Neither can be checked offline:
+      github.com fetches, `github:` codeload installs, proxy.golang.org,
+      release archives.
+    - **Channels:** npmjs, crates.io, GitHub Releases for the `.wasm`,
+      tarballs and checksums, and `dist` for git consumers. GitHub
+      Packages is not used:
+      - npm needs a PAT even for public packages;
+      - it has no Cargo or Go.
+
+      Sources are cited in docs/reviews/2026-11-12-targets.md.
+    - **Targets:** JS (snug's emitter) and Rust (kin's) are at full
+      parity; wasm is a build of Rust.
+      - kin also has Go, Java and C#.
+      - Go would be 18–28 engineer-days and needs no new kin emitter.
+      - Recommendation: no new target before the RC; Go post-RC on demand.
 
 **Last**
 - [x] **P9.12 — P8.7 binary-size audit** (owner requirement, D303), done
