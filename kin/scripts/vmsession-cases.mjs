@@ -120,19 +120,31 @@ export const SHAPES = [
   // 13: everything dead under any, with long keys and long strings
   ['r = [* any]', (R, F) =>
     arr(Array.from({ length: R.int(4) }, () => map(Array.from({ length: R.int(5) }, () => [text(word(R, keyLen(R))), R.bool() ? text(word(R, R.pick([0, 400]))) : bytes(Array.from({ length: R.pick([3, 2000]) }, () => R.int(256)))]), R, F)))],
+  // 14-16 (D350, P9.9): embedded refusals after byte strings whose bytes are malformed
+  // heads (an indefinite uint, a break, a reserved ai, a cut head) or empty, under the
+  // valid preset (word 9 = 378): the canonical path gives such content its own copy, and
+  // a refusal at the end of the main copy must map to the input, not into that copy
+  ['r = [* (bstr .size 1 / bstr .cbor uint)]', (R, F) => arr(Array.from({ length: 1 + R.int(4) }, () => bytes(badContent(R, F)))), 378],
+  ['r = { * tstr => bstr / bstr .cbor uint }', (R, F) =>
+    map(Array.from({ length: 1 + R.int(4) }, (_, i) => [text(LETTERS[i]), bytes(badContent(R, F))]), R, false), 378],
+  ['r = [bstr, * bstr .cbor uint]', (R, F) => arr([bytes(badContent(R, true)), ...Array.from({ length: R.int(3) }, () => bytes(badContent(R, F)))]), 378],
 ];
+function badContent(R, F) {
+  return R.pick([[], [0x1f], [0xff], [0x1c], [0x18], [0x5f], [0x01], [0x18, 0x20], F ? [0x7f] : [0x02], F ? [] : [0x03]]);
+}
 
 /** n cases of each shape (valid, then faulty, bit-flipped, truncated), with random limits. */
 export function sessionCases(n, seed) {
   const R = rng(seed * 2654435761 + 7);
   const out = [];
-  SHAPES.forEach(([cddl, gen], si) => {
+  SHAPES.forEach(([cddl, gen, pf], si) => {
     for (let k = 0; k < n; k++) {
       const F = k % 2 === 1;
       let b = Uint8Array.from(gen(R, F));
       if (F && R.bool(4) && b.length > 1) { b = b.slice(); const at = R.int(b.length); b[at] ^= 1 << R.int(8); }
       if (F && R.bool(5)) b = b.subarray(0, R.int(b.length + 1));
       const lim = [1, 0, -1, -1, -1, R.bool(6) ? R.int(400) : -1, -1, R.bool(4) ? 50 + R.int(6000) : -1, 0];
+      if (pf !== undefined) lim.push(pf);
       out.push({ cddl, lim, bytes: b, label: `session shape ${si} #${k}` });
     }
   });

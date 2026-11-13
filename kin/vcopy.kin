@@ -634,7 +634,15 @@
             (iset o O_S_DUPO dofs))
         (do (iset o O_S_DUPP (neg 1))
             (iset o O_S_DUPO (neg 1))))
-      (let [z (region cb o cs ce top 1 (+ (- ce cs) 64))
+      (comment "D350: one gap byte before the region, so no position is both the end"
+               "of the region before it (the end of a truncated or empty content walked"
+               "there) and this region's start: vmap-x reads a walk position at a"
+               "region's start as inside the region.")
+      (if (>= top (blen cb))
+        (do (iset o O_VNEEDB (+ (* 2 (blen cb)) 256))
+            (return (neg CODE_SCRATCH))))
+      (bset cb top 0)
+      (let [z (region cb o cs ce (+ top 1) 1 (+ (- ce cs) 64))
             stp (ia o O_S_STOPP)
             pst (ia o O_S_PSTOP)]
         (iset o O_S_DUPP (neg 1))
@@ -645,7 +653,7 @@
         (if (and (< r 0) (> dk 0))
           (do (let [w (dup-event o dk)]
                 (if (< w 0) (return w)))))
-        (let [w2 (ev-add o cs EV_EMB ce top z)]
+        (let [w2 (ev-add o cs EV_EMB ce (+ top 1) z)]
           (if (< w2 0) (return w2))
           (let [e (ev-last o)]
             (iset o (+ e 5) stp)
