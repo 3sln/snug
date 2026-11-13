@@ -102,7 +102,16 @@ impl Error {
 }
 impl fmt::Display for Error {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "snug: operation refused ({})", self.code())
+        match self {
+            Self::Usage("owned_view") => f.write_str(
+                "snug: this input is valid but not its own deterministic form, so it is read through its \
+                 canonical copy and cannot be viewed borrowed; use Schema::document (owned_view)",
+            ),
+            Self::Usage("poisoned") => f.write_str(
+                "snug: an extension predicate panicked inside an earlier call; this sequence cannot go on (poisoned)",
+            ),
+            _ => write!(f, "snug: operation refused ({})", self.code()),
+        }
     }
 }
 impl std::error::Error for Error {

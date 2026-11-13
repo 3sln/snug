@@ -163,7 +163,7 @@ repository.
   `max_entries` and `max_items` (`None` is the default), and the `Limits`
   type is gone. Write `DecodeOptions { max_depth: Some(8), ..Default::default() }`
   (D360).
-- `[rust]` The generated kin modules are no longer the public module
+- `[rust]` The generated core modules are no longer the public module
   `snug::snug` (now an undocumented `snug::generated` for the test hosts), so
   `use snug::*;` compiles. `schema::Session` and `schema::Step` are internal;
   the drivers (`Schema::validate_blob`, `validate_reader`, their async forms)
@@ -256,6 +256,11 @@ repository.
   wrapping them to 32 bits.
 - `[rust]` A reader or async source that reports more bytes than the buffer
   holds is an error (`read`), never a slice panic.
+- `[js]` `fromSerializedSync(bytes, options?)` loads a stored Program
+  synchronously, as the wasm SDK's does.
+- `[js]` `[wasm-sdk]` `pushValidator` with a declared length accepts
+  `failFast` without effect, as `pushScanner` and the handle drivers do (it
+  threw `TypeError`); `failFast` changes only an unknown-length message.
 
 ### Security
 

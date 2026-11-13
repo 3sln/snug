@@ -12107,7 +12107,15 @@ can run alongside them; its build work is post-RC unless it is cheap.
     - SEC-F5: `validateAt` clamps `depth` and `items` (JS and SDK).
     - SEC-F8: verifier marks are sized at most to `P.length / 8` (JS, Rust
       and the SDK).
-  - **Nits done:**
+  - **API nits (left by WP4):**
+    - API-N1: `failFast` with a declared length is accepted without effect
+      by `pushValidator` too (native and SDK), as by `pushScanner`, the
+      handle drivers and Rust's `SourceOptions`. It used to throw.
+    - API-N7: `Error::Usage("owned_view")`'s message names
+      `Schema::document`, and `"poisoned"` says why.
+    - API-N8: JS gains `fromSerializedSync` (the SDK's), and docs/rust.md
+      gains a JS ↔ Rust table of source names. The names themselves stay.
+  - **Code nits done:**
     - N1: sequence readers record S as VmSession does.
     - N2: an over-reporting reader is an error, not a slice panic.
     - N3: the free readers refuse `chunk: 0`.
@@ -12126,6 +12134,9 @@ can run alongside them; its build work is post-RC unless it is cheap.
     - N8: `st()`'s `&'static mut` aliasing in the wasm crates. It is sound
       single-threaded, and its refactor touches every export.
     - S4 (duck-typed schemas in `view()`) was not assigned.
+  - **Test crates:** kin/scripts' crates (vm-test, vmsession-test,
+    abnf-test, compile-crate, nav-crate, write-crate) re-export their
+    generated modules as `generated` for the renamed bin paths (D361).
   - **Coordinator decision 5:** `{ name: undefined }` against `? name: tstr`
     answers `{ ok: false, reason: 'type', path: ['name'], offset: 10 }`, and
     `decode` and views answer `schema/type` at `name`. A test checks this;

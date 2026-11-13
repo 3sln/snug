@@ -22,6 +22,7 @@ puttext() { tmp=$(mktemp); printf '%s' "$1" > "$tmp"; put "$tmp" "$2"; rm -f "$t
 put host/rust/Cargo.toml "$dir/Cargo.toml"
 puttext "//! snug compiler crate (dev subset): generated modules + the compile host.
 pub mod snug;
+#[doc(hidden)] pub mod generated { pub use crate::snug::*; }
 pub mod compile;
 pub mod sha256;
 pub mod unicode_tables;

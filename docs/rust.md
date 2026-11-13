@@ -265,6 +265,15 @@ heads, without building sibling values or allocating per step.
 
 ## Cache Programs and validate blobs
 
+The sources have Rust names where JavaScript's would not fit Rust's I/O
+traits:
+
+| JavaScript | Rust |
+| --- | --- |
+| a handle (`{ size, read(offset, length) }`), `validateHandle` / `validateHandleSync` | a `Blob` / `AsyncBlob`, `Schema::validate_blob` / `validate_blob_async` |
+| a stream, `validateStream` / `scanStream` | a `std::io::Read` / `AsyncSource`, `Schema::validate_reader` / `validate_reader_async` |
+| `fromSerialized` / `fromSerializedSync` | `Program::deserialize` then `Schema::from_program` |
+
 ```rust
 use snug::{Schema, CompileOptions, Program, BytesBlob, SourceOptions, ValidationOptions};
 let schema = Schema::compile("r = uint", &CompileOptions::default())?;
@@ -447,7 +456,7 @@ strict RFC 5234 + RFC 7405 + RFC 9165 §3 unless `CompileOptions::abnf` is
 `AbnfMode::Lenient` (non-exhaustive, in the source key); under the
 default, snug's non-RFC forms are `control_value` with a detail naming the
 option, and `check_abnf_in(text, mode)` checks under either mode. Verdicts and
-budget units come from the generated core (`snug::snug::abnf`), the same as JS and the wasm SDK.
+budget units come from the generated core, the same as JS and the wasm SDK.
 `with_max_bytes` sets the item bound (default 65,536). `with_max_words` sets
 the matcher's scratch cap, clamped to 65,536..=16,777,216 words (default
 4,194,304, the PEG group arena's default); past it, validation stops with
@@ -645,7 +654,7 @@ variant as a refusal, and render an unknown path segment generically.
 | --- | --- |
 | `Error`, `SourceError`, `sessions::SessionError` | error families: new codes are additive (release policy §1.3) |
 | `Segment` | diagnostic paths; a new construct may need a new segment kind |
-| `Top`, `Keys`, `Tags`, `Floats` (in `Profile`), `Cuts`, `Regexp`, `CompilerProfile`, `OnInvalid` | options: a new mode or preset is a minor change |
+| `Top`, `Keys`, `Tags`, `Floats` (in `Profile`, the options' `wire`), `Cuts`, `Regexp`, `CompilerProfile`, `OnInvalid` | options: a new mode or preset is a minor change |
 
 These stay exhaustive, so a `match` can cover every case without a fallback:
 

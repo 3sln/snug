@@ -789,7 +789,9 @@ fn regression_d351_embedded_content_keeps_the_items_copy_and_order() {
         let schema = Schema::compile(src, &CompileOptions::default()).unwrap();
         let doc = schema.document(&indef, "r", &v, &mut s).unwrap();
         assert_eq!(doc.view().raw(), &[0x43, 0x00, 0x01, 0x02], "{src}");
-        assert!(schema.view(&indef, "r", &mut s).is_err(), "{src}: not borrowable");
+        let e = schema.view(&indef, "r", &mut s).unwrap_err();
+        assert_eq!(e.code(), "owned_view", "{src}: not borrowable");
+        assert!(e.to_string().contains("Schema::document"), "the message names the owned form");
     }
     // [ {"b": 1, "a": 2}, h'01' ]: keys out of order, then embedded content in order
     let b = [0x82, 0xa2, 0x61, 0x62, 0x01, 0x61, 0x61, 0x02, 0x41, 0x01];

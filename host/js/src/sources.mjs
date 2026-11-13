@@ -279,7 +279,8 @@ export function pushValidator(schema, length, rule, options = {}, scheduling = {
   validateOptions(scheduling, 'scheduling');
   const { failFast, ...sessionScheduling } = scheduling;
   if (length === undefined) return pushUnknown(openSession(schema, rule, undefined, options, sessionScheduling), scheduling, r => r);
-  if (failFast !== undefined) throw new TypeError('failFast is for a message of unknown length.');
+  // failFast only changes an unknown-length message; a declared length is read whole either way (as
+  // pushScanner, the handle drivers and Rust's SourceOptions), so it is accepted and has no effect (P9.13)
   return pushSession(openSession(schema, rule, length, options, sessionScheduling), length, want => want.keep);
 }
 

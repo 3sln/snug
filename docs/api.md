@@ -368,6 +368,7 @@ another. Use the path to explain, and the offset only to locate.
 | `schema.validateAt(bytes, start, end, rule, options?)` | Detached ValidationResult over [start,end); absolute offsets; default top any. |
 | `fromProgram(P, B, { controls? }?): Promise<Schema>` | Copies and verifies, without loading the compiler. |
 | `fromSerialized(bytes: Uint8Array, { controls? }?): Promise<Schema>` | Checks container integrity/compatibility (format 2.0; 1.x is refused as `format_version`) and verifies; without the compiler. A Program using extension controls needs the registry it was compiled with. |
+| `fromSerializedSync(bytes: Uint8Array, { controls? }?): Schema` | The same, synchronously (also in the wasm SDK, after `init`). |
 
 The entry also exports schema-first helpers:
 
@@ -510,7 +511,7 @@ with top defaulting to any and limits only lowering the compiled values.
 | `scanHandleSync(handle, options?, sourceOptions?)` | true; Promise reads refused |
 | `validateHandle(schema, handle, rule, options?, sourceOptions?)` | Promise resolving ValidationResult; sync or async reads, one in flight |
 | `validateHandleSync(schema, handle, rule, options?, sourceOptions?)` | ValidationResult; Promise reads refused |
-| `pushValidator(schema, length, rule, options?, { quantum?, failFast? }?)` | PushValidator with `feed`, `resume`, `finalize`; `length` undefined: unknown length (drain mode; `end()` = finalize; `failFast` allowed only then; `bytesHeld`) |
+| `pushValidator(schema, length, rule, options?, { quantum?, failFast? }?)` | PushValidator with `feed`, `resume`, `finalize`; `length` undefined: unknown length (drain mode; `end()` = finalize; `bytesHeld`). `failFast` changes only an unknown-length message: with a declared length the message is read whole, as for every source |
 | `streamSource(input)` | AsyncIterable over a ReadableStream, AsyncIterable or Iterable of Uint8Array |
 | `validateStream(schema, source, rule, options?, { quantum?, failFast? }?)` | Promise resolving ValidationResult for a message of unknown length: the buffer's result (drain), or with failFast a certain refusal at once (accept/refuse equal, code may differ) |
 | `scanStream(source, options?, { quantum?, failFast? }?)` | Promise resolving true / rejecting SnugFault, unknown length (the VM against `any`) |
