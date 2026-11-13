@@ -7781,7 +7781,12 @@ RFC 8949, D211 and the stream-order precedence (docs/scanner.md).
   pending mechanism in the buffer walk.
 * Drop the D265 whole-item shortcut in unknown-length sessions: it would
   frame every decimal / ndarray, and need a new gated path.
-- [ ] **Signed off** (manager)
+- [x] **Signed off** (manager, 2026-11-13). Landed at `ebd5e43`, rebased
+  onto D353/D354. On main: drift ok, no conflict markers.
+  - Class A was a kin bug: an inner count claim was lost in unknown-length
+    sessions. Class B was a mistake in the framer mapping. The D211 oracle
+    was right in both.
+  - `sequence-test 30000` now passes at both P9.9 seeds.
 
 ## Findings
 
