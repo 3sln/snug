@@ -6,6 +6,8 @@ import { prepareOps } from '../ops.mjs';
 const errors = [];
 addEventListener('error', e => errors.push(String(e.message)));
 addEventListener('unhandledrejection', e => errors.push(String(e.reason?.stack ?? e.reason)));
+const consoleErrors = [], consoleError = console.error.bind(console);
+console.error = (...a) => { consoleErrors.push(a.map(String).join(' ')); consoleError(...a); };
 const out = document.getElementById('out');
 const now = () => performance.now();
 let report;
@@ -41,6 +43,6 @@ try {
   for (const [name, y] of Object.entries(primitives)) { const s = now(); for (let i = 0; i < 130; i++) await y(); yieldMs[name] = +((now() - s) / 130).toFixed(3); }
   report = { runtime: 'browser', yieldMsPerYield: yieldMs, fatal: String(e?.stack ?? e) };
 }
-report.violations = window.__cspViolations; report.errors = errors;
+report.violations = window.__cspViolations; report.errors = errors; report.consoleErrors = consoleErrors;
 out.textContent = JSON.stringify(report, null, 1);
 await fetch('result', { method: 'POST', body: JSON.stringify(report) });
