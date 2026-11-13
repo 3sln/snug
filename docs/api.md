@@ -3,8 +3,8 @@
 This reference describes the package facades and is maintained with the
 [declaration files](../host/js/types/) (one per entry point). `npm test` checks declarations
 with Node's TypeScript parser, checks exported names against runtime exports,
-and uses offline TypeScript for semantic checks if it exists in the permitted
-neighbouring checkout. The original package gate had no offline TypeScript;
+and uses offline TypeScript for semantic checks when `SNUG_TYPESCRIPT` names an
+installed `lib/typescript.js`. The original package gate had no offline TypeScript;
 the [onboarding example](guide.md#typescript-onboarding) was separately
 checked with offline TypeScript 5.8.3 on 2026-11-03. Declarations changed
 since then (the `valid` preset, format 2.0 compile options) have been checked

@@ -10,7 +10,7 @@
 //   compile time of the samples is reported (min in brackets).
 // * HOSTILE: schemas built to spend the compile budget or hit a limit; one
 //   warm compile each, wall time, budget units spent and the outcome.
-// * SIZE: esbuild bundles (from 3sln.me's node_modules, read-only) of the
+// * SIZE: esbuild bundles (bench/compare's pinned esbuild, or SNUG_ESBUILD) of the
 //   compiler entry point and of the verifier: raw, minified, gzip -9,
 //   brotli 11.
 import { readFileSync, readdirSync, writeFileSync, mkdirSync, existsSync } from 'node:fs';
@@ -95,7 +95,7 @@ for (const [label, text] of hostile) {
 
 // ---------------------------------------------------------------- size
 console.log('\n## size (esbuild bundle, ES module)');
-const esbuild = process.env.SNUG_ESBUILD ?? `${os.homedir()}/Projects/@3sln/3sln.me/node_modules/.bin/esbuild`;
+const esbuild = process.env.SNUG_ESBUILD ?? new URL('bench/compare/node_modules/.bin/esbuild', root).pathname;
 const sizes = buf => ({ raw: buf.length, gzip: gzipSync(buf, { level: 9 }).length, brotli: brotliCompressSync(buf, { params: { [constants.BROTLI_PARAM_QUALITY]: 11 } }).length });
 if (existsSync(esbuild)) {
   const bundle = (entry, minify) => execFileSync(esbuild, [entry, '--bundle', '--format=esm', '--log-level=error', ...(minify ? ['--minify'] : [])], { cwd: root.pathname });

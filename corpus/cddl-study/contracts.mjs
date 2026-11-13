@@ -1,6 +1,6 @@
 import {instantiate} from './load.mjs';
 import {readFileSync} from 'node:fs';
-import {encode,BindleDecimal,NDArray} from '/Users/raystubbs/Projects/@3sln/3sln.me/packages/core/cbor.mjs';
+import {encode,BindleDecimal,NDArray} from '../../bench/baseline/cbor-3sln.mjs';
 const w=instantiate();
 const src=n=>readFileSync(new URL('./contracts/'+n,import.meta.url),'utf8');
 const WORKAROUND=s=>s.replace('safe-uint = 0..9007199254740991','safe-uint = uint ; WORKAROUND: wasm32 cannot parse > 2^32-1');

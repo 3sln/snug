@@ -83,7 +83,7 @@ part of snug. It checks that the CSP really refuses `eval` and
 - **workerd**:
   - Main runs: **2026-11-02**, the native binary from `workerd` 1.20261102.1.
     That binary sat in another project's scratch `node_modules` and was used
-    read-only. `../3sln.me/node_modules` was not present on this machine.
+    read-only. No sibling 3sln.me `node_modules` was present on this machine.
   - Repeat run: **2025-12-17**, from the global bun install. All three workers
     passed the suite there as well (976/976 in every arm).
   - Config: `compatibilityDate = "2025-12-01"`, no compatibility flags, so no

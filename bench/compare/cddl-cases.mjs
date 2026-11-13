@@ -5,6 +5,7 @@
 // 1. The six study contracts with the study's probe values (copied from bench/vm-bench.mjs, encoded with cbor.mjs as
 //    there). 2. Schemas for this comparison's codec workloads (workloads.mjs), each validated against its bytes.
 import { readFileSync, writeFileSync, mkdirSync } from 'node:fs';
+import { relative } from 'node:path';
 import { encode, BindleDecimal, NDArray } from '../baseline/cbor-3sln.mjs';
 import { workloads } from './workloads.mjs';
 
@@ -91,5 +92,5 @@ if (import.meta.url === `file://${process.argv[1]}`) {
   });
   for (const [name, text] of schemas) writeFileSync(`${dir}/${name}.cddl`, text);
   writeFileSync(`${dir}/manifest.txt`, lines.join('\n') + '\n');
-  console.log(`${lines.length} cases, ${schemas.size} schemas -> ${dir}`);
+  console.log(`${lines.length} cases, ${schemas.size} schemas -> ${relative(process.cwd(), dir) || '.'}`);
 }

@@ -94,7 +94,7 @@ if ((args.tree ?? 'head') === 'head' && !args['in-snapshot']) {
   cpSync(join(repo, 'tools/proptest'), join(snap.dir, 'tools/proptest'), { recursive: true, filter: src => !src.includes('/findings/') || src.endsWith('triage.json') });
   const stamp = new Date().toISOString().replace(/[:.]/g, '-');
   const rest = process.argv.slice(2).filter(a => !/^--(tree|out|log-dir|in-snapshot|snapshot-of)=/.test(a));
-  console.log(`[proptest] running inside ${snap.describe}`);
+  console.log(`[proptest] running inside ${snap.describe} (${snap.dir})`);
   const child = spawnSync(process.execPath, [join(snap.dir, 'tools/proptest/campaign.mjs'), ...rest, '--tree=working', '--in-snapshot=true',
     `--out=${outDir}`, `--log-dir=${join(repo, '.cache/proptest', stamp)}`, `--snapshot-of=${snap.head}`], { stdio: 'inherit' });
   snap.cleanup();
@@ -105,7 +105,9 @@ if ((args.tree ?? 'head') === 'head' && !args['in-snapshot']) {
 const started = new Date();
 const head = args['snapshot-of'] ?? execFileSync('git', ['-C', repo, 'rev-parse', 'HEAD']).toString().trim();
 const dirty = args['in-snapshot'] ? [] : execFileSync('git', ['-C', repo, 'status', '--porcelain', '--', 'kin', 'gen', 'host', 'corpus', 'bench/baseline']).toString().trim().split('\n').filter(Boolean);
-const treeDescription = args['in-snapshot'] ? `git archive of HEAD ${head} (+ working tools/proptest) at ${repo}` : `checkout ${repo}`;
+// recorded paths are repository-relative (.cache/proptest/...), never this machine's absolute ones
+const shown = p => p && p.replace(/^.*?(?=\.cache\/proptest\/)/, '');
+const treeDescription = args['in-snapshot'] ? `git archive of HEAD ${head} (+ working tools/proptest) in a scratch snapshot` : 'the working checkout';
 mkdirSync(outDir, { recursive: true });
 for (const f of readdirSync(outDir)) if (/^P\d.*\.json$|^summary\.json$/.test(f)) rmSync(join(outDir, f));
 const logDir = args['log-dir'] ?? join(repo, '.cache/proptest', started.toISOString().replace(/[:.]/g, '-'));
@@ -195,7 +197,7 @@ if (props.includes(6)) {
     tree = prepareTree('working');
     log(`gates in ${tree.describe}`);
     gateResults = await runGates({ tree, scale: Number(args['gate-scale'] ?? 10), seedBase: seedLo * 1000 + 1, budgetMs, logDir: join(logDir, 'gates'),
-      only: args.gates?.split(','), onResult: r => (gateCount++, r.exit !== 0 && record({ sig: `P6/${r.gate}`, prop: 6, seed: r.seed, index: r.round, cls: 'gate-failed', detail: `${r.gate} ${r.args.join(' ')} exited ${r.exit}${r.signal ? ' ' + r.signal : ''}`, actual: { fails: r.fails, context: r.context }, repro: { gate: r.gate, args: r.args, log: r.log } }), log(`gate ${r.gate} round ${r.round} seed ${r.seed} args [${r.args.join(' ')}]: exit ${r.exit} in ${(r.ms / 1000).toFixed(0)} s${r.fails.length ? ' -- ' + r.fails[0].trim() : ''}`)) });
+      only: args.gates?.split(','), onResult: r => (gateCount++, r.exit !== 0 && record({ sig: `P6/${r.gate}`, prop: 6, seed: r.seed, index: r.round, cls: 'gate-failed', detail: `${r.gate} ${r.args.join(' ')} exited ${r.exit}${r.signal ? ' ' + r.signal : ''}`, actual: { fails: r.fails, context: r.context }, repro: { gate: r.gate, args: r.args, log: shown(r.log) } }), log(`gate ${r.gate} round ${r.round} seed ${r.seed} args [${r.args.join(' ')}]: exit ${r.exit} in ${(r.ms / 1000).toFixed(0)} s${r.fails.length ? ' -- ' + r.fails[0].trim() : ''}`)) });
   })());
 }
 const progress = setInterval(() => log(Object.entries(perProp).map(([p, x]) => `P${p} ${x.stats.cases ?? 0} cases/${x.failures} failures`).join(', ') + ` | ${sigs.size} signatures | gate runs ${gateCount}`), 60_000);
@@ -216,7 +218,7 @@ const summary = {
   machine: { node: process.version, platform: `${process.platform} ${process.arch}`, cpus: cpus().length, cpu: cpus()[0]?.model, memGB: Math.round(totalmem() / 2 ** 30) },
   properties: Object.fromEntries(Object.entries(perProp).map(([p, x]) => [p, { workers: x.workers, cases: x.stats.cases ?? 0, stats: x.stats, failures: x.failures, hangs: x.hangs, workerCrashes: x.crashes }])),
   gates: gateResults.map(r => ({ gate: r.gate, round: r.round, seed: r.seed, args: r.args, exit: r.exit, signal: r.signal, seconds: Math.round(r.ms / 1000), fails: r.fails, summary: r.summary })),
-  tree: treeDescription, gateTree: tree?.describe, logDir,
+  tree: treeDescription, gateTree: tree?.describe, logDir: shown(logDir),
   findings,
   warnings: [...warns].sort().map(([sig, w]) => ({ sig, count: w.count, examples: w.examples })),
 };

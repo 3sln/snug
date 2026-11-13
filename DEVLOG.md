@@ -57,7 +57,7 @@ vectors, fuzz and limits are scripts that print `ok`/`FAIL`, not prose.
   emon/nome (`Copyright (c) 2026 3sln`).
   *Files*: `LICENSE`, `.gitignore`.
   *Done when*: repository exists with no remote.
-  *Done 2026-10-29.* Name `snug` (D001). No collision in `~/Projects/@3sln`.
+  *Done 2026-10-29.* Name `snug` (D001). No collision in `<workspace>`.
 
 - [x] **P0.2 — Corpus import.**
   *Brief*: copy the study's six transcribed contracts, 66 probes, differential
@@ -1329,10 +1329,10 @@ considered, so a later reader does not reopen it by accident. The sign-off
 box is the owner's.
 
 ### D001 — The project is called `snug`
-**Decision**: `snug`, at `~/Projects/@3sln/snug`.
+**Decision**: `snug`, at `<workspace>/snug`.
 **Why**: CDDL is pronounced "cuddle"; a value that fits its schema is snug.
 Four letters, lower case, in the style of `emon`/`nome`/`kin`; no collision
-in `~/Projects/@3sln`.
+in `<workspace>`.
 **Alternatives**: `hug` (too generic), `dill` (no meaning), `cuddle` (long).
 - [ ] **Signed off** (owner)
 
@@ -9323,7 +9323,7 @@ are answered as provisional decisions D082–D085. None is open now.
   consumer printed 7 and all seven bare exports loaded. No npm install.
   The documented main.ts + strict ES2022/NodeNext configuration passed
   semantic checking with offline TypeScript **5.8.3**, read-only from
-  `/Users/raystubbs/.nvm/versions/node/v18.20.5/lib/node_modules/@vtsls/language-server/node_modules/typescript/bin/tsc`;
+  `<home>/.nvm/versions/node/v18.20.5/lib/node_modules/@vtsls/language-server/node_modules/typescript/bin/tsc`;
   `bench/compare/node_modules/.bin/tsc` and PATH tsc were absent.
   Final guide snippets checked Decimal factory cases, Unicode and regexp
   escaping/matching, limits, ownership mutation, choice witness, known-length

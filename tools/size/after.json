@@ -14486,12 +14486,12 @@
                 {
                   "path": "host/js/src/index.mjs",
                   "kind": "import-statement",
-                  "original": "/Users/raystubbs/Projects/@3sln/snug/host/js/src/index.mjs"
+                  "original": "./host/js/src/index.mjs"
                 },
                 {
                   "path": "host/js/src/public-schema.mjs",
                   "kind": "import-statement",
-                  "original": "/Users/raystubbs/Projects/@3sln/snug/host/js/src/public-schema.mjs"
+                  "original": "./host/js/src/public-schema.mjs"
                 }
               ],
               "format": "esm"
@@ -16164,12 +16164,12 @@
               {
                 "path": "host/js/src/index.mjs",
                 "kind": "import-statement",
-                "original": "/Users/raystubbs/Projects/@3sln/snug/host/js/src/index.mjs"
+                "original": "./host/js/src/index.mjs"
               },
               {
                 "path": "host/js/src/public-schema.mjs",
                 "kind": "import-statement",
-                "original": "/Users/raystubbs/Projects/@3sln/snug/host/js/src/public-schema.mjs"
+                "original": "./host/js/src/public-schema.mjs"
               }
             ],
             "format": "esm"
@@ -17696,12 +17696,12 @@
               {
                 "path": "host/js/src/index.mjs",
                 "kind": "import-statement",
-                "original": "/Users/raystubbs/Projects/@3sln/snug/host/js/src/index.mjs"
+                "original": "./host/js/src/index.mjs"
               },
               {
                 "path": "host/js/src/public-schema.mjs",
                 "kind": "import-statement",
-                "original": "/Users/raystubbs/Projects/@3sln/snug/host/js/src/public-schema.mjs"
+                "original": "./host/js/src/public-schema.mjs"
               }
             ],
             "format": "esm"
@@ -19484,27 +19484,27 @@
                 {
                   "path": "host/js/src/index.mjs",
                   "kind": "import-statement",
-                  "original": "/Users/raystubbs/Projects/@3sln/snug/host/js/src/index.mjs"
+                  "original": "./host/js/src/index.mjs"
                 },
                 {
                   "path": "host/js/src/public-schema.mjs",
                   "kind": "import-statement",
-                  "original": "/Users/raystubbs/Projects/@3sln/snug/host/js/src/public-schema.mjs"
+                  "original": "./host/js/src/public-schema.mjs"
                 },
                 {
                   "path": "host/js/src/public-view.mjs",
                   "kind": "import-statement",
-                  "original": "/Users/raystubbs/Projects/@3sln/snug/host/js/src/public-view.mjs"
+                  "original": "./host/js/src/public-view.mjs"
                 },
                 {
                   "path": "host/js/src/public-writer.mjs",
                   "kind": "import-statement",
-                  "original": "/Users/raystubbs/Projects/@3sln/snug/host/js/src/public-writer.mjs"
+                  "original": "./host/js/src/public-writer.mjs"
                 },
                 {
                   "path": "host/js/src/public-sources.mjs",
                   "kind": "import-statement",
-                  "original": "/Users/raystubbs/Projects/@3sln/snug/host/js/src/public-sources.mjs"
+                  "original": "./host/js/src/public-sources.mjs"
                 }
               ],
               "format": "esm"
@@ -21406,27 +21406,27 @@
               {
                 "path": "host/js/src/index.mjs",
                 "kind": "import-statement",
-                "original": "/Users/raystubbs/Projects/@3sln/snug/host/js/src/index.mjs"
+                "original": "./host/js/src/index.mjs"
               },
               {
                 "path": "host/js/src/public-schema.mjs",
                 "kind": "import-statement",
-                "original": "/Users/raystubbs/Projects/@3sln/snug/host/js/src/public-schema.mjs"
+                "original": "./host/js/src/public-schema.mjs"
               },
               {
                 "path": "host/js/src/public-view.mjs",
                 "kind": "import-statement",
-                "original": "/Users/raystubbs/Projects/@3sln/snug/host/js/src/public-view.mjs"
+                "original": "./host/js/src/public-view.mjs"
               },
               {
                 "path": "host/js/src/public-writer.mjs",
                 "kind": "import-statement",
-                "original": "/Users/raystubbs/Projects/@3sln/snug/host/js/src/public-writer.mjs"
+                "original": "./host/js/src/public-writer.mjs"
               },
               {
                 "path": "host/js/src/public-sources.mjs",
                 "kind": "import-statement",
-                "original": "/Users/raystubbs/Projects/@3sln/snug/host/js/src/public-sources.mjs"
+                "original": "./host/js/src/public-sources.mjs"
               }
             ],
             "format": "esm"
@@ -23154,27 +23154,27 @@
               {
                 "path": "host/js/src/index.mjs",
                 "kind": "import-statement",
-                "original": "/Users/raystubbs/Projects/@3sln/snug/host/js/src/index.mjs"
+                "original": "./host/js/src/index.mjs"
               },
               {
                 "path": "host/js/src/public-schema.mjs",
                 "kind": "import-statement",
-                "original": "/Users/raystubbs/Projects/@3sln/snug/host/js/src/public-schema.mjs"
+                "original": "./host/js/src/public-schema.mjs"
               },
               {
                 "path": "host/js/src/public-view.mjs",
                 "kind": "import-statement",
-                "original": "/Users/raystubbs/Projects/@3sln/snug/host/js/src/public-view.mjs"
+                "original": "./host/js/src/public-view.mjs"
               },
               {
                 "path": "host/js/src/public-writer.mjs",
                 "kind": "import-statement",
-                "original": "/Users/raystubbs/Projects/@3sln/snug/host/js/src/public-writer.mjs"
+                "original": "./host/js/src/public-writer.mjs"
               },
               {
                 "path": "host/js/src/public-sources.mjs",
                 "kind": "import-statement",
-                "original": "/Users/raystubbs/Projects/@3sln/snug/host/js/src/public-sources.mjs"
+                "original": "./host/js/src/public-sources.mjs"
               }
             ],
             "format": "esm"

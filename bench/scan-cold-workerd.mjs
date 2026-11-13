@@ -1,4 +1,4 @@
-// P1.4 cold start in workerd (local, 3sln.me's pinned binary). workerd freezes
+// P1.4 cold start in workerd (local; ci/tools's pinned binary). workerd freezes
 // performance.now() between I/O, so nothing can be timed INSIDE a worker; this
 // times from spawning `workerd serve` to the first HTTP response, per worker:
 //
@@ -20,8 +20,8 @@ import { encode } from './baseline/cbor-3sln.mjs';
 const [wasmPath, samplesArg] = process.argv.slice(2);
 const SAMPLES = Number(samplesArg ?? 15), PORT = 18961;
 const root = fileURLToPath(new URL('..', import.meta.url));
-const workerd = process.env.SNUG_WORKERD ?? `${process.env.HOME}/Projects/@3sln/3sln.me/node_modules/.bin/workerd`;
-const esbuild = process.env.SNUG_ESBUILD ?? `${process.env.HOME}/Projects/@3sln/3sln.me/node_modules/.bin/esbuild`;
+const workerd = process.env.SNUG_WORKERD ?? `${root}ci/tools/node_modules/.bin/workerd`;
+const esbuild = process.env.SNUG_ESBUILD ?? `${root}bench/compare/node_modules/.bin/esbuild`;
 if (!existsSync(workerd) || !existsSync(esbuild) || !wasmPath) { console.log('SKIP workerd cold start (needs workerd, esbuild and a wasm path)'); process.exit(0); }
 
 const dir = `${root}.cache/workerd`;
@@ -50,7 +50,7 @@ const config :Workerd.Config = (
 );
 const w :Workerd.Worker = (
   modules = [ (name = "worker.mjs", esModule = embed "${name}.mjs")${w.extra} ],
-  compatibilityDate = "2026-10-01",
+  compatibilityDate = "2025-12-01",   # at most the pinned workerd's (ci/tools: 1.20251217.0)
 );
 `);
 }
@@ -73,8 +73,8 @@ async function once(name) {
       }
     }
   } finally {
-    p.kill('SIGKILL');
-    await new Promise(r => p.once('exit', r));
+    // a workerd that refused its config has exited already; waiting for 'exit' would never settle
+    if (p.exitCode === null && p.signalCode === null) { p.kill('SIGKILL'); await new Promise(r => p.once('exit', r)); }
   }
 }
 const names = Object.keys(workers), times = Object.fromEntries(names.map(n => [n, []]));

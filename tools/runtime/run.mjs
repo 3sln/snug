@@ -14,8 +14,8 @@
 //             fresh directory under os.tmpdir())
 // Tools (read-only; override with environment variables):
 //   SNUG_ESBUILD  esbuild binary   (default bench/compare/node_modules/.bin/esbuild)
-//   SNUG_WORKERD  workerd binary   (default: the first that exists of ../3sln.me
-//                 and the global bun install's workerd)
+//   SNUG_WORKERD  workerd binary   (default: the first that exists of ci/tools's pinned
+//                 workerd, `npm ci` in ci/tools, and the global bun install's workerd)
 //   SNUG_CHROME   Chrome binary    (default /Applications/Google Chrome.app/…)
 // Writes OUT/results.json and prints Markdown tables for tools/runtime/README.md.
 import { spawn, execFileSync } from 'node:child_process';
@@ -40,8 +40,8 @@ const out = arg('out') ? resolve(arg('out')) : mkdtempSync(join(tmpdir(), 'snug-
 mkdirSync(out, { recursive: true });
 const HOME = process.env.HOME;
 const firstExisting = (...paths) => paths.find(p => p && existsSync(p));
-const esbuild = firstExisting(process.env.SNUG_ESBUILD, join(repo, 'bench/compare/node_modules/.bin/esbuild'), `${HOME}/Projects/@3sln/3sln.me/node_modules/.bin/esbuild`);
-const workerdPath = firstExisting(process.env.SNUG_WORKERD, `${HOME}/Projects/@3sln/3sln.me/node_modules/.bin/workerd`,
+const esbuild = firstExisting(process.env.SNUG_ESBUILD, join(repo, 'bench/compare/node_modules/.bin/esbuild'));
+const workerdPath = firstExisting(process.env.SNUG_WORKERD, join(repo, 'ci/tools/node_modules/.bin/workerd'),
   `${HOME}/.bun/install/global/node_modules/@cloudflare/workerd-darwin-arm64/bin/workerd`);
 // The npm `workerd/bin/workerd` is a Node launcher that spawns the native binary;
 // use the native one so killing the process really stops the isolate.

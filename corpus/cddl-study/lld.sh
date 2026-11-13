@@ -1,2 +1,3 @@
 #!/bin/sh
-DYLD_LIBRARY_PATH=/Users/raystubbs/.rustup/toolchains/nightly-2026-10-01-aarch64-apple-darwin/lib exec /Users/raystubbs/.rustup/toolchains/nightly-2026-10-01-aarch64-apple-darwin/lib/rustlib/aarch64-apple-darwin/bin/rust-lld "$@"
+T=$(rustup run nightly-2026-10-01 rustc --print sysroot)
+DYLD_LIBRARY_PATH=$T/lib exec $T/lib/rustlib/aarch64-apple-darwin/bin/rust-lld "$@"

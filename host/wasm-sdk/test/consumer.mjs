@@ -52,7 +52,7 @@ mkdirSync(scratch, { recursive: true });
 const npmEnv = { ...process.env, npm_config_cache: join(scratch, 'npm-cache'), npm_config_update_notifier: 'false',
   npm_config_fund: 'false', npm_config_audit: 'false' };
 const servers = [];
-const workerd = nativeWorkerd(firstExisting(process.env.SNUG_WORKERD, `${HOME}/Projects/@3sln/3sln.me/node_modules/.bin/workerd`,
+const workerd = nativeWorkerd(firstExisting(process.env.SNUG_WORKERD, join(ROOT, 'ci/tools/node_modules/.bin/workerd'),
   `${HOME}/.bun/install/global/node_modules/@cloudflare/workerd-darwin-arm64/bin/workerd`));
 
 try {

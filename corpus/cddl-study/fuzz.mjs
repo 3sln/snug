@@ -1,7 +1,7 @@
 // Robustness: (1) strict-codec outputs, (2) raw mutated bytes straight into the wasm decoder, (3) crafted hostile bytes.
 import {instantiate,reinstantiate} from './load.mjs';
 import {readFileSync} from 'node:fs';
-import {encode,decode,BindleDecimal,NDArray} from '/Users/raystubbs/Projects/@3sln/3sln.me/packages/core/cbor.mjs';
+import {encode,decode,BindleDecimal,NDArray} from '../../bench/baseline/cbor-3sln.mjs';
 let w=instantiate();
 const SEED=Number(process.env.SEED??7),N=Number(process.env.N??20000);
 let s=SEED>>>0;const rnd=()=>{s^=s<<13;s>>>=0;s^=s>>>17;s^=s<<5;s>>>=0;return s/2**32;};

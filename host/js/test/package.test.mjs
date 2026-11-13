@@ -96,9 +96,10 @@ test('every declaration parses with Node and matches the entry point exports', a
     for (const [, path] of source.matchAll(/from '([^']+)'/g))
       assert.ok(existsSync(new URL(path.replace(/\.js$/, '.d.ts'), url)));
   }
-  const offline = new URL('../../../../3sln.me/node_modules/typescript/lib/typescript.js', import.meta.url);
-  if (existsSync(offline)) {
-    const ts = createRequire(import.meta.url)(offline.pathname);
+  // an offline TypeScript, when SNUG_TYPESCRIPT names its lib/typescript.js (none is installed by default)
+  const offline = process.env.SNUG_TYPESCRIPT;
+  if (offline && existsSync(offline)) {
+    const ts = createRequire(import.meta.url)(offline);
     const program = ts.createProgram(roots, { noEmit: true, strict: true, target: ts.ScriptTarget.ES2022,
       module: ts.ModuleKind.NodeNext, moduleResolution: ts.ModuleResolutionKind.NodeNext });
     const diagnostics = ts.getPreEmitDiagnostics(program);

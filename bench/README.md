@@ -71,7 +71,7 @@ No dependencies, network access, or installations are involved.
 ## Method
 
 Baseline: the unchanged `baseline/cbor-3sln.mjs` snapshot, byte-identical to
-`../3sln.me/packages/core/cbor.mjs` when checked in this session. Both codecs
+3sln.me's `packages/core/cbor.mjs` when checked in this session. Both codecs
 receive the same options and values, translating only the wrapper class
 identities (`BindleDecimal` ↔ `Decimal`, `NDArray`, `Float16Bytes`). Fixture
 creation, baseline validation, wrapper translation and answer comparisons

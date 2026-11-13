@@ -15,7 +15,7 @@ Apple M1 Pro (10 cores, 32 GiB), macOS 14.6.1 (23G93), Node v24.6.0 (V8
 13.6.233.10-node.24), rustc 1.92.0 (Homebrew). The machine was shared and
 loaded (load average 10–16 during the runs; other agents were building),
 so absolute numbers are pessimistic; medians are reported to damp that.
-esbuild from `../3sln.me/node_modules/.bin/esbuild` (read-only) for bundle
+esbuild from a sibling 3sln.me checkout's `node_modules` (read-only) for bundle
 sizes; gzip -9 and brotli 11 by Node's zlib.
 
 ## Method

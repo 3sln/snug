@@ -17,7 +17,7 @@
    4000,
    600
   ],
-  "log": "/Users/raystubbs/Projects/@3sln/snug/.cache/proptest/2026-11-03T21-44-27-660Z/gates/vmsession-test-r0.log"
+  "log": ".cache/proptest/2026-11-03T21-44-27-660Z/gates/vmsession-test-r0.log"
  },
  "triage": {
   "class": "environment",

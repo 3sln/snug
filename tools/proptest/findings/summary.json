@@ -362,9 +362,9 @@
    ]
   }
  ],
- "tree": "git archive of HEAD 2434b0671bc6eb94d02ec8abf2a2487817e551f9 (+ working tools/proptest) at /private/tmp/claude-501/-Users-raystubbs-Projects--3sln-3sln-me/8f763b0e-277c-4c0c-b7f0-8c3d4fc70450/scratchpad/snug-proptest-AHzSOk/snug",
+ "tree": "git archive of HEAD 2434b0671bc6eb94d02ec8abf2a2487817e551f9 (+ working tools/proptest) in a scratch snapshot",
  "gateTree": "working tree",
- "logDir": "/Users/raystubbs/Projects/@3sln/snug/.cache/proptest/2026-11-03T21-44-27-660Z",
+ "logDir": ".cache/proptest/2026-11-03T21-44-27-660Z",
  "findings": [
   {
    "sig": "P1/session-verdict",

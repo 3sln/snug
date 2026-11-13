@@ -43,7 +43,7 @@ export function prepareTree(mode, scratch) {
     catch { /* no clone support: the gates rebuild their crates */ }
   }
   const head = execFileSync('git', ['-C', repo, 'rev-parse', 'HEAD']).toString().trim();
-  return { dir, describe: `git archive of HEAD ${head} at ${dir}`, head, cleanup() { rmSync(base, { recursive: true, force: true }); } };
+  return { dir, describe: `git archive of HEAD ${head} in a scratch directory`, head, cleanup() { rmSync(base, { recursive: true, force: true }); } };
 }
 
 function run(dir, gate, args, logFile, timeoutMs) {

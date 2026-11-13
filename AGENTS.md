@@ -7,8 +7,8 @@ anything.
 Rules for every contributor, human or agent:
 
 * Work only inside this directory (and, for scratch files, the scratch
-  directory you were given). Never modify `../kin`, `../emon`, `../nome` or
-  `../3sln.me`; they are read-only references. If kin itself needs a change,
+  directory you were given). Never modify the sibling checkouts (kin, emon,
+  nome, 3sln.me); they are read-only references. If kin itself needs a change,
   stop and report it under DEVLOG "Found in kin".
 * Behaviour that decides accept/refuse lives in `kin/*.kin`; hosts only build
   values, encode and expose the API. Run `bb emit` and commit `gen/` with the

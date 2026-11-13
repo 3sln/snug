@@ -1,10 +1,12 @@
 // Differential: CDDL (wasm) vs in-house JSON-Schema-subset validator on seeded random object-storage requests.
 import {instantiate} from './load.mjs';
 import {readFileSync} from 'node:fs';
-import {encode,decode} from '/Users/raystubbs/Projects/@3sln/3sln.me/packages/core/cbor.mjs';
-import {compileContractVersion} from '/Users/raystubbs/Projects/@3sln/3sln.me/packages/federation/integrations.mjs';
+import {encode,decode} from '../../bench/baseline/cbor-3sln.mjs';
+// the in-house validator and the contract body come from a 3sln.me checkout: SNUG_3SLN_ME=<its root>
+const ME=process.env.SNUG_3SLN_ME;if(!ME)throw new Error('set SNUG_3SLN_ME to a 3sln.me checkout');
+const {compileContractVersion}=await import(ME+'/packages/federation/integrations.mjs');
 const w=instantiate();
-const body=JSON.parse(readFileSync('/Users/raystubbs/Projects/@3sln/3sln.me/docs/artefacts/object-storage-v1.json','utf8'));
+const body=JSON.parse(readFileSync(ME+'/docs/artefacts/object-storage-v1.json','utf8'));
 const oracle=compileContractVersion(body.body??body);
 const SEED=Number(process.env.SEED??20261029),N=Number(process.env.N??20000);
 let s=SEED>>>0;const rnd=()=>{s^=s<<13;s>>>=0;s^=s>>>17;s^=s<<5;s>>>=0;return s/2**32;};

@@ -1,5 +1,5 @@
 snug commit: 0f85e8e28d341e89c69e5af26e30607540364f1e
-31 cases, 15 schemas -> /Users/raystubbs/Projects/@3sln/snug/bench/compare/rust/target/cases
+31 cases, 15 schemas -> bench/compare/rust/target/cases
 rustc 1.92.0 (ded5c06cf 2025-12-08) (Homebrew)
 {"rounds":9,"targetMs":25,"timing":"thread CPU"}
 

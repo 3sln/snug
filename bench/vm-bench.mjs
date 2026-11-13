@@ -83,7 +83,7 @@ function snugWasm(js) {
     },
   };
 }
-const CRATE = process.env.CDDL_CRATE_PKG ?? '/private/tmp/claude-501/-Users-raystubbs-Projects--3sln-3sln-me/8f763b0e-277c-4c0c-b7f0-8c3d4fc70450/scratchpad/cddlproj-oracle/pkg/';
+const CRATE = process.env.CDDL_CRATE_PKG ?? new URL('../.cache/cddlproj-oracle/pkg/', import.meta.url).pathname;
 let glue = null, crateModule = null;
 if (existsSync(CRATE + 'bindle_cddl_study_bg.wasm')) {
   glue = await import(CRATE + 'bindle_cddl_study.js');

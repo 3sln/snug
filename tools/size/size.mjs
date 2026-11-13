@@ -46,7 +46,7 @@ const entries = Object.entries(pkg.exports).map(([name, spec]) => [
   name === '.' ? 'snug' : `snug/${name.slice(2)}`, resolve(root, 'host/js', spec.default),
 ]);
 const entry = name => entries.find(([n]) => n === name)[1];
-const reexports = names => names.map((name, i) => `export * as entry${i} from ${JSON.stringify(entry(name))};`).join('\n');
+const reexports = names => names.map((name, i) => `export * as entry${i} from ${JSON.stringify('./' + relative(root, entry(name)))};`).join('\n');
 const workloads = entries.map(([name, path]) => [name, { entryPoints: [path] }]);
 // all-runtime: every entry a validating application loads, not the compiler or the optional
 // modules loaded only where a schema needs them (unicode tables, the ABNF engine, D334)

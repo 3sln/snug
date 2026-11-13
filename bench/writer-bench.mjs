@@ -150,7 +150,7 @@ console.log('Answers checked equal to the Phase 2 encoder\'s outside the timed r
 {
   const { existsSync } = await import('node:fs');
   const { gzipSync } = await import('node:zlib');
-  const esbuild = process.env.SNUG_ESBUILD ?? `${process.env.HOME}/Projects/@3sln/3sln.me/node_modules/.bin/esbuild`;
+  const esbuild = process.env.SNUG_ESBUILD ?? new URL('compare/node_modules/.bin/esbuild', import.meta.url).pathname;
   if (!existsSync(esbuild)) console.log(`(no esbuild at ${esbuild}: sizes skipped)`);
   else {
     const size = entry => { const b = execFileSync(esbuild, [entry, '--bundle', '--format=esm', '--minify', '--log-level=error']); return [b.length, gzipSync(b, { level: 9 }).length]; };

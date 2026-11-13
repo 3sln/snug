@@ -1,6 +1,6 @@
 // Feature probes: each probe compiles CDDL and checks verdicts on encoded values. Values encoded by the repo's strict codec.
 import {instantiate} from './load.mjs';
-import {encode,BindleDecimal,NDArray} from '/Users/raystubbs/Projects/@3sln/3sln.me/packages/core/cbor.mjs';
+import {encode,BindleDecimal,NDArray} from '../../bench/baseline/cbor-3sln.mjs';
 const w=instantiate();
 const hex=s=>Uint8Array.from(s.replace(/\s/g,'').match(/../g),b=>parseInt(b,16));
 const B=v=>v instanceof Uint8Array&&v.__raw?v:encode(v);

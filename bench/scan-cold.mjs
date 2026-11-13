@@ -25,7 +25,7 @@ const put = d => ({ resource: 'https://resource.example/r/1', addressedResource:
 let small = encode(put(1)); small = encode(put(1 + 287 - small.length));
 const hex = Buffer.from(small).toString('hex');
 
-const esbuild = process.env.SNUG_ESBUILD ?? `${process.env.HOME}/Projects/@3sln/3sln.me/node_modules/.bin/esbuild`;
+const esbuild = process.env.SNUG_ESBUILD ?? `${root}bench/compare/node_modules/.bin/esbuild`;
 let bundled = null;
 if (existsSync(esbuild)) {
   mkdirSync(`${root}.cache`, { recursive: true });

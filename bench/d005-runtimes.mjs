@@ -26,7 +26,7 @@ const out = resolve(arg('out', mkdtempSync(join(tmpdir(), 'snug-d005-'))));
 mkdirSync(out, { recursive: true });
 const HOME = process.env.HOME;
 const firstExisting = (...p) => p.find(x => x && existsSync(x));
-const esbuild = firstExisting(process.env.SNUG_ESBUILD, join(repo, 'bench/compare/node_modules/.bin/esbuild'), `${HOME}/Projects/@3sln/snug/bench/compare/node_modules/.bin/esbuild`);
+const esbuild = firstExisting(process.env.SNUG_ESBUILD, join(repo, 'bench/compare/node_modules/.bin/esbuild'));
 const nativeWorkerd = p => {
   if (!p) return p;
   p = realpathSync(p);
@@ -34,7 +34,7 @@ const nativeWorkerd = p => {
   const native = resolve(p, '../../../@cloudflare', `workerd-${process.platform}-${process.arch}`, 'bin/workerd');
   return existsSync(native) ? native : p;
 };
-const workerd = nativeWorkerd(firstExisting(process.env.SNUG_WORKERD, `${HOME}/.bun/install/global/node_modules/@cloudflare/workerd-darwin-arm64/bin/workerd`));
+const workerd = nativeWorkerd(firstExisting(process.env.SNUG_WORKERD, join(repo, 'ci/tools/node_modules/.bin/workerd'), `${HOME}/.bun/install/global/node_modules/@cloudflare/workerd-darwin-arm64/bin/workerd`));
 const chrome = firstExisting(process.env.SNUG_CHROME, '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome');
 const sh = (cmd, args, opts = {}) => execFileSync(cmd, args, { encoding: 'utf8', ...opts }).trim();
 const log = (...a) => console.error('[d005]', ...a);

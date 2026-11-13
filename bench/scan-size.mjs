@@ -14,7 +14,7 @@ import { execFileSync } from 'node:child_process';
 import { gzipSync, brotliCompressSync, constants } from 'node:zlib';
 
 const [wasmPath, wasmSizePath] = process.argv.slice(2);
-const esbuild = process.env.SNUG_ESBUILD ?? `${process.env.HOME}/Projects/@3sln/3sln.me/node_modules/.bin/esbuild`;
+const esbuild = process.env.SNUG_ESBUILD ?? new URL('compare/node_modules/.bin/esbuild', import.meta.url).pathname;
 const sizes = buf => ({
   raw: buf.length,
   gzip: gzipSync(buf, { level: 9 }).length,
