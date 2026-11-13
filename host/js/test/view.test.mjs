@@ -8,6 +8,7 @@ import assert from 'node:assert/strict';
 import { view, View, directoryWords, messageOf } from '../src/view.mjs';
 import { build } from '../src/build.mjs';
 import { compile } from '../src/schema.mjs';
+import { compile as publicCompile } from '../src/public-compile.mjs';
 import { snug, baseline, profile, oracle, expected, fromHex } from './values.mjs';
 import { createRandom, randomMap, randomValue, mutate } from './corpus.mjs';
 
@@ -265,4 +266,28 @@ test('view: the step budget bounds one walk, not the view\'s life; a failed walk
   messageOf(v).o[5] = 100;                                           // N_BUDGET: 100 heads per walk
   for (let k = 0; k < 20; k++) assert.equal(a.at(50).int(), 50);
   assert.throws(() => a.at(500), /navigation failed/);
+});
+
+// D351: a view under a schema reads valid input that is not its own deterministic form through its
+// canonical copy -- with a public Schema (it has no `check`; the view used to walk the raw indefinite
+// bytes and throw "navigation failed"), and with a Program using `.cbor` (its embedded scans overwrote
+// the item's outcome bits: no copy, and a map out of canonical order was binary-searched)
+test('regression D351: schema views of valid, non-deterministic input read the canonical copy', async () => {
+  const indef = Uint8Array.of(0x5f, 0x41, 0x00, 0x42, 0x01, 0x02, 0xff), canon = [0x43, 0x00, 0x01, 0x02];
+  for (const make of [compile, publicCompile]) {
+    for (const src of ['r = any', 'r = bstr', 'r = bstr .cbor {a: int} / bstr .size (0..16)']) {
+      const v = view(indef, { schema: await make(src), rule: 'r', wire: 'valid' });
+      assert.deepEqual([...v.raw()], canon, src);
+      assert.deepEqual([...v.bytes()], [0, 1, 2], src);
+    }
+    for (const [a, c] of [[[0x9f, 0x01, 0xff], [0x81, 0x01]], [[0xbf, 0x61, 0x61, 0x01, 0xff], [0xa1, 0x61, 0x61, 0x01]], [[0x18, 0x17], [0x17]]])
+      assert.deepEqual([...view(Uint8Array.from(a), { schema: await make('r = any'), rule: 'r', wire: 'valid' }).raw()], c);
+    // [ {"b": 1, "a": 2}, h'01' ]: keys out of order, then embedded content in order
+    const b = Uint8Array.of(0x82, 0xa2, 0x61, 0x62, 0x01, 0x61, 0x61, 0x02, 0x41, 0x01);
+    for (const src of ['r = [ {* tstr => int}, bstr ]', 'r = [ {* tstr => int}, bstr .cbor int ]']) {
+      const m = view(b, { schema: await make(src), rule: 'r', wire: 'valid' }).at(0);
+      assert.deepEqual([m.get('a')?.int(), m.get('b')?.int()], [2, 1], src);
+    }
+  }
+  await assert.rejects(async () => view(indef, { schema: await publicCompile('r = bstr'), rule: 'nope', wire: 'valid' }), TypeError);
 });

@@ -482,6 +482,24 @@ test('sequences under wire valid: indefinite-length items, unsorted keys, duplic
   t.done();
 });
 
+// D351: schema views of valid, non-deterministic input read the canonical copy on both hosts, also under a
+// Program with `.cbor` (its embedded scans used to overwrite the item's outcome bits: no copy, keys out of
+// order searched as sorted)
+test('regression D351: schema views over the canonical copy under .cbor == native', async () => {
+  const unhex = h => Uint8Array.from(Buffer.from(h, 'hex'));
+  const inputs = { '5f4100420102ff': '43000102', '825f4100420102ff4101': '82430001024101', '82a26162016161024101': null };
+  for (const src of ['r = any', 'r = bstr .cbor {a: int} / bstr .size (0..16) / [* any]', 'r = [ bstr .cbor {a: int} / bstr / {* tstr => int}, bstr .cbor int / bstr ]']) {
+    const sn = await ncompile(src), sw = await wcompile(src);
+    for (const [h, canon] of Object.entries(inputs)) {
+      const open = (view, schema) => outcome(() => { const v = view(unhex(h), { schema, rule: 'r', wire: 'valid' }); return { raw: hex(v.raw()), all: viewAll(v), a: v.kind === 'array' && v.at(0).kind === 'map' ? v.at(0).get('a')?.int() : null }; });
+      const w = open(wview, sw), n = open(nview, sn);
+      assert.deepEqual(w, n, `${src} ${h}`);
+      if (canon && w.ok) assert.equal(w.ok.raw, canon, `${src} ${h}`);
+      if (h.startsWith('82a2') && w.ok) assert.equal(w.ok.a, 2, `${src} ${h}`);
+    }
+  }
+});
+
 test('sequences: API behaviours and privacy (read-only messages, private View/Cursor state, no trusted opener)', async () => {
   const t = tally('sequence API behaviours');
   const text = 'r = uint .count 0';

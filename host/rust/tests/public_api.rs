@@ -782,3 +782,28 @@ fn d348_normalized_bignum_key_collisions_refuse_to_encode() {
     // the deterministic preset refuses the non-preferred bignum on decode already
     assert_eq!(decode(&unhex("a200f6c240f6"), &DecodeOptions::deterministic()).unwrap_err().code(), "bignum");
 }
+
+/// D351: a Program with `.cbor` re-scans embedded content after the item's canonical copy;
+/// that used to overwrite the item's outcome bits, so valid input that is not its own
+/// deterministic form lost its copy (a view then walked the raw indefinite bytes) and a
+/// map out of canonical order was searched as if sorted.
+#[test]
+fn regression_d351_embedded_content_keeps_the_items_copy_and_order() {
+    let mut s = Scratch::new();
+    let v = ValidationOptions::default();
+    let indef = [0x5f, 0x41, 0x00, 0x42, 0x01, 0x02, 0xff];
+    for src in ["r = bstr", "r = bstr .cbor {a: int} / bstr .size (0..16)"] {
+        let schema = Schema::compile(src, &CompileOptions::default()).unwrap();
+        let doc = schema.document(&indef, "r", &v, &mut s).unwrap();
+        assert_eq!(doc.view().raw(), &[0x43, 0x00, 0x01, 0x02], "{src}");
+        assert!(schema.view(&indef, "r", &mut s).is_err(), "{src}: not borrowable");
+    }
+    // [ {"b": 1, "a": 2}, h'01' ]: keys out of order, then embedded content in order
+    let b = [0x82, 0xa2, 0x61, 0x62, 0x01, 0x61, 0x61, 0x02, 0x41, 0x01];
+    for src in ["r = [ {* tstr => int}, bstr ]", "r = [ {* tstr => int}, bstr .cbor int ]"] {
+        let schema = Schema::compile(src, &CompileOptions::default()).unwrap();
+        let doc = schema.document(&b, "r", &v, &mut s).unwrap();
+        let m = doc.view().at(0).unwrap();
+        assert!(m.get("a").is_some() && m.get("b").is_some(), "{src}");
+    }
+}

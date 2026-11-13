@@ -197,6 +197,15 @@ These matter only to users of pre-release builds from this repository.
   used to panic (`capacity overflow`) or reserve that much (P9.16).
 - `[rust]` A decoded decimal fraction whose mantissa is a bignum outside
   preferred serialization stays a `Value::Tag`, as in JS (D342).
+- A view under a schema of valid input that is not its own deterministic
+  form (an indefinite-length item, a non-preferred head) reads its canonical
+  copy again under a Program with `.cbor` (or a tag-24 payload). It used to
+  walk the raw bytes and throw `navigation failed` (`[rust]`
+  `Schema::view` borrowed them). A map out of canonical order in such an
+  item was searched as if sorted, so lookups could miss keys (D351).
+- `[js]` `view(bytes, { schema, rule })` with a Schema from `snug/compile`
+  or `snug/schema` reads valid, non-deterministic input through its
+  canonical copy; it threw `navigation failed` (D351).
 
 ### Security
 
