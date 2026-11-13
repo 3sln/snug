@@ -7136,7 +7136,14 @@ release.
 **Gate:** `bb versions`, `bb stamp-test`, `bb gates land` and
 `bb identity` on the placeholder tree; `bb identity` on a stamped tree.
 Results are in the P9.15 (rework) item.
-- [ ] **Signed off** (manager)
+- [x] **Signed off** (manager, 2026-11-12). Checked on main at `c299fab`,
+  which the coordinator pushed:
+  - `bb gates versions check npm-test`: 3/3 ok;
+  - drift ok, size ok, gate map ok, no conflict markers;
+  - version.edn holds `0.1.0` with the placeholder `0.0.0-unreleased`;
+  - SECURITY.md is present.
+  The engineer's full runs, on the placeholder tree and on a stamped tree,
+  are recorded in the P9.15 (rework) item.
 
 ## Findings
 
@@ -9878,7 +9885,11 @@ review.
   - The manager forwarded O1–O8 to the coordinator.
   - D338's own sign-off is open. The repository changes the policy needs
     are tracked as P9.15.
-- [ ] **P9.15 — Release-readiness fixes** (manager, 2026-11-12, from
+- [x] **P9.15 — Release-readiness fixes** *(done 2026-11-12. Owner
+  decisions O1–O8 are recorded in D338. The rework landed at `c299fab`
+  (D343), engines/rust-version in P9.18 (D344), the SDK packaging in P9.17
+  (D345), and `#[non_exhaustive]` and the gate map in D339. Hosted CI stays
+  the owner's call.)* (manager, 2026-11-12, from
   docs/release-policy.md §8; D338). Each item names its gate. None of them
   publishes anything.
   - **Version sites.**
