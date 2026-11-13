@@ -31,12 +31,22 @@
 #
 # Why macOS arm64: the gates were written and recorded there (tools/runtime/run.mjs
 # reads sysctl and sw_vers, the Chrome default path is macOS's, wasm-build wraps
-# rust-lld with DYLD_LIBRARY_PATH). A Linux leg is future work.
+# rust-lld with DYLD_LIBRARY_PATH).
+#
+# Linux. The `linux` matrix (ubuntu-24.04, x86_64) runs the two gates whose
+# commands are portable, on every run: npm-test on Node 20, 22 and 24, and
+# rust-api-test (kin/scripts/rust-crate's assembled crate: cargo test, doctests,
+# rustdoc, and Clippy where the toolchain has it) on Rust 1.87 and stable. Both
+# are POSIX sh and Node, with no kin checkout and no Babashka, so each cell runs
+# its gate the way `bb gates` does (kin/scripts/gates run-gate): under
+# kin/scripts/watchdog.mjs with the gate map's caps, failing on a non-zero exit
+# or on a SKIP line on stdout. The macOS gate sets stay the only full runs.
 #
 # timeout-minutes: above the sum of the job's gates' watchdog wall caps (the
 # caps still apply per gate), and at most GitHub's 360. Sums: land 286 min;
 # release shards core 281, vm 300, rust 280, wasm 310, long 220 (`bb gates
-# --check` refuses a shard past 330); npm-test 30; rust-api-test 20.
+# --check` refuses a shard past 330); npm-test 30; rust-api-test 20 (both
+# platforms).
 name: CI
 
 on:
@@ -139,11 +149,72 @@ jobs:
           # Node 20 lacks a test-only oracle (node-oldest runs npm test the same way)
           SNUG_NODE_OLDEST: ${{ matrix.oldest-env }}
 
+  # npm-test and rust-api-test on Linux (see the header): the gate's command under the
+  # watchdog, as kin/scripts/gates runs it, with its ci/gate-map.edn caps
+  linux:
+    name: linux (${{ matrix.gate }}, ${{ matrix.label }})
+    runs-on: ubuntu-24.04
+    timeout-minutes: ${{ matrix.timeout }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { gate: npm-test,      label: Node 20,     node: '20',     rust: none,   oldest-env: '1', dir: host/js, cmd: 'npm test --gate-wall=1800 --gate-cpu=3600', timeout: 45 }
+          - { gate: npm-test,      label: Node 22,     node: '22',     rust: none,   oldest-env: '',  dir: host/js, cmd: 'npm test --gate-wall=1800 --gate-cpu=3600', timeout: 45 }
+          - { gate: npm-test,      label: Node 24,     node: '24',     rust: none,   oldest-env: '',  dir: host/js, cmd: 'npm test --gate-wall=1800 --gate-cpu=3600', timeout: 45 }
+          - { gate: rust-api-test, label: Rust 1.87,   node: '24.6.0', rust: msrv,   oldest-env: '',  dir: .,       cmd: 'sh host/rust/tests/run',                    timeout: 35 }
+          # required, as on macOS: red until D357 lands
+          - { gate: rust-api-test, label: Rust stable, node: '24.6.0', rust: stable, oldest-env: '',  dir: .,       cmd: 'sh host/rust/tests/run',                    timeout: 35 }
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          path: snug
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: ${{ matrix.node }}
+      - name: Rust
+        if: matrix.rust != 'none'
+        env:
+          RUST: ${{ matrix.rust }}
+        run: |
+          set -euo pipefail
+          command -v rustup >/dev/null || { echo "::error::rustup is not on the runner"; exit 1; }
+          # msrv: host/rust/Cargo.toml's rust-version, without Clippy (D344), as on macOS
+          case "$RUST" in
+            msrv) v=$(sed -n 's/^rust-version *= *"\([0-9.]*\)".*/\1/p' host/rust/Cargo.toml)
+                  [ -n "$v" ] || { echo "::error::no rust-version in host/rust/Cargo.toml"; exit 1; }
+                  rustup toolchain install "$v" --profile minimal --no-self-update; rustup default "$v" ;;
+            *)    rustup toolchain install "$RUST" --profile minimal --component clippy --no-self-update; rustup default "$RUST" ;;
+          esac
+          want=$(rustup run "$(rustup default | cut -d' ' -f1)" rustc --version)
+          [ "$(rustc --version)" = "$want" ] || { echo "::error::rustc on PATH is '$(rustc --version)', not '$want'"; exit 1; }
+          rustc --version; cargo --version
+      - name: ${{ matrix.gate }}
+        working-directory: snug/${{ matrix.dir }}
+        env:
+          GATE: ${{ matrix.gate }}
+          CMD: ${{ matrix.cmd }}
+          # Node 20 lacks a test-only oracle (node-oldest runs npm test the same way)
+          SNUG_NODE_OLDEST: ${{ matrix.oldest-env }}
+        run: |
+          set +e -uo pipefail   # the gate's status is read below (the default shell is bash -e)
+          echo "Node $(node --version) on $(uname -sm)"
+          # stdout is read for SKIP, as run-gate reads it; stderr passes through
+          # shellcheck disable=SC2086 # CMD is the gate map's argv, split on spaces
+          node "$GITHUB_WORKSPACE/snug/kin/scripts/watchdog.mjs" "$GATE" -- $CMD | tee "$RUNNER_TEMP/gate.out"
+          status=${PIPESTATUS[0]}
+          [ "$status" = 0 ] || { echo "::error::$GATE exited $status"; exit 1; }
+          if skip=$(grep -E -m1 '^[[:space:]]*SKIP\b' "$RUNNER_TEMP/gate.out"); then
+            echo "::error::$GATE NOT RUN: $skip"; exit 1
+          fi
+          echo "ok $GATE"
+
   # one status to require: every job that ran passed, and on a release run every shard ran
   ci:
     name: ci
     if: always()
-    needs: [land, release, compat]
+    needs: [land, release, compat, linux]
     runs-on: ubuntu-24.04
     timeout-minutes: 5
     defaults:
@@ -154,8 +225,9 @@ jobs:
           LAND: ${{ needs.land.result }}
           RELEASE: ${{ needs.release.result }}
           COMPAT: ${{ needs.compat.result }}
+          LINUX: ${{ needs.linux.result }}
           IS_RELEASE: ${{ github.event_name == 'workflow_dispatch' || startsWith(github.ref, 'refs/tags/') }}
         run: |
-          echo "land: $LAND  release: $RELEASE  compat: $COMPAT  (release run: $IS_RELEASE)"
-          [ "$COMPAT" = success ] || exit 1
+          echo "land: $LAND  release: $RELEASE  compat: $COMPAT  linux: $LINUX  (release run: $IS_RELEASE)"
+          [ "$COMPAT" = success ] && [ "$LINUX" = success ] || exit 1
           if [ "$IS_RELEASE" = true ]; then [ "$RELEASE" = success ]; else [ "$LAND" = success ]; fi

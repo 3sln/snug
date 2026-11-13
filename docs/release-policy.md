@@ -468,8 +468,8 @@ locally or in CI.
 
 | Trigger | What runs |
 | --- | --- |
-| a pull request, a push to `main` | `bb gates land`, and the compat matrix |
-| a `v*` or `src/v*` tag, a manual run | the `release` set, and the compat matrix |
+| a pull request, a push to `main` | `bb gates land`, the compat matrix and the Linux matrix |
+| a `v*` or `src/v*` tag, a manual run | the `release` set, the compat matrix and the Linux matrix |
 
 - **Primary toolchain:** macOS arm64 (`macos-15`), Node 24.6.0 (the Node
   that the Unicode tables pin) and Rust 1.92.0 (pinned). Every gate of both sets
@@ -480,6 +480,16 @@ locally or in CI.
   `rust-api-test` on Rust 1.87 (without Clippy, as in `msrv`) and on the
   latest stable Rust. The release
   set's `node-oldest` and `msrv` gates test the declared floors.
+- **Linux matrix:** the same five cells on Linux x86_64 (`ubuntu-24.04`):
+  `npm-test` on Node 20, 22 and 24, and `rust-api-test` on Rust 1.87 and
+  stable. These two gates are plain POSIX `sh` and Node, so each cell runs
+  the gate's command under the watchdog with its caps, as `bb gates` does,
+  and fails on a non-zero exit or a SKIP line. The full gate sets run only
+  on macOS, because the gate scripts use macOS tools.
+- **Required:** one `ci` job sums up the run. It fails unless every compat
+  and Linux cell passed, and `land` passed (or, on a release run, every
+  release shard passed). The stable-Rust cells are required too, so they
+  stay red until D357 fixes a stack overflow on Rust 1.98.1.
 - **Release shards:** the release set's wall caps add up to about 23
   hours, and a hosted job stops at 6. CI runs the set as five parallel
   shards, the sets `release-core`, `-vm`, `-rust`, `-wasm` and `-long`.
