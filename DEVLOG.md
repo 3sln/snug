@@ -8578,6 +8578,14 @@ Depth stays capped at 256, and counts below 2³¹ − 1, as
 **Breaking (pre-release):** it is recorded in CHANGELOG → Breaking.
 docs/rust.md and the crate README show the new shape. Every test host and
 example is updated.
+- **Follow-up (2026-11-13, SEC-F2 parity):** a schema-less `Sequence::new`
+  (and so `read_sequence`, `read_sequence_async`) now resolves its limits
+  and checks them as `DecodeOptions` does. Depth over 256, or a count of
+  2³¹ − 1 or more, is `Error::Usage("options")` at construction, as JS's
+  `sequenceReader` throws. Before this, 257 and 999 were accepted and
+  silently capped at the built-in `any`'s depth of 256. A schema-bound
+  sequence still accepts larger values. Regression test:
+  host/rust/tests/sequence.rs.
 - [x] **Signed off** (manager, 2026-11-13). WP2 is merged at 3f8f65c, and
   my re-run on the merged main gave `bb gates land runtime`, all 12 ok.
   WP1's new Rust fields move onto this shape when WP1 rebases.

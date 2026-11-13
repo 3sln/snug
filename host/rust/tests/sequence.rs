@@ -242,3 +242,33 @@ fn a_predicate_panic_poisons_the_sequence_and_an_over_reporting_reader_is_an_err
     let first = snug::read_sequence(OverRead, &SequenceOptions::default()).unwrap().next();
     assert!(matches!(first, Some(Err(snug::Error::Io(_)))));
 }
+
+#[test]
+fn regression_schemaless_depth_over_256_is_an_options_error() {
+    // 2026-11-13: a profile-only sequence's limits are a codec's, as JS's sequenceReader
+    // and DecodeOptions: max_depth over 256 (or a count of 2^31 - 1 or more) is a usage
+    // error at construction. Before, 257 and 999 were accepted and silently capped at 256.
+    let mut deep = vec![0x81u8; 300];
+    deep.push(0x00);
+    let refused_for_depth = |out: Vec<Result<snug::Message<'_>, Error>>| {
+        matches!(out.as_slice(), [Err(Error::Sequence(f))] if f.failure.reason == "cbor/depth")
+    };
+    for d in [257u32, 999] {
+        let o = SequenceOptions { max_depth: Some(d), ..SequenceOptions::default() };
+        assert_eq!(Sequence::new(&o).err(), Some(Error::Usage("options")), "max_depth {d}");
+        assert_eq!(read_sequence(&deep[..], &o).err(), Some(Error::Usage("options")), "max_depth {d}");
+        assert_eq!(snug::read_sequence_async(&deep[..], &o).err(), Some(Error::Usage("options")), "max_depth {d}");
+    }
+    for count in [SequenceOptions { max_message_bytes: Some(i32::MAX as u32), ..SequenceOptions::default() },
+                  SequenceOptions { max_entries: Some(i32::MAX as u32), ..SequenceOptions::default() },
+                  SequenceOptions { max_items: Some(u32::MAX), ..SequenceOptions::default() }] {
+        assert_eq!(Sequence::new(&count).err(), Some(Error::Usage("options")));
+    }
+    // 256 schema-less: accepted, and 300-deep input is a depth refusal
+    let mut at = Sequence::new(&SequenceOptions { max_depth: Some(256), ..SequenceOptions::default() }).unwrap();
+    assert!(refused_for_depth(at.feed(&deep)));
+    // under a schema a larger value only leaves the compiled depth in force
+    let schema = Schema::compile("r = any", &CompileOptions::default()).unwrap();
+    let mut bound = schema.sequence("r", &SequenceOptions { max_depth: Some(999), ..SequenceOptions::default() }).unwrap();
+    assert!(refused_for_depth(bound.feed(&deep)));
+}
