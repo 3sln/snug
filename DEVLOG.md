@@ -8613,6 +8613,228 @@ engineer).
     so a blanket cap broke an existing sequence-test case. Rust matches.
   - Post-RC nits list: CODE N4, N5, N6, N8 and S4.
 
+### D362 — The map cursor counts its probes in its own word only for map-pre: map-keyq no longer adds to s[O_LO], which still held a head argument (an overflow panic in the overflow-checked Rust VM); wide integer heads feed every vm-test arm (P9.13 WP1 SEC-F1)
+**Decision** (P8.5 VM engineer, provisional):
+* **The finding (security review SEC-F1, blocking).** Schema
+  `r = { b: uint // c: uint, * tstr => any }` and input
+  `a261621a7fffffff616300` ({"b": 2³¹−1, "c": 0}) panicked the Rust VM
+  built with overflow checks (`vm/map.rs`, the probe counter's `+ 1`).
+  `map-cursor` counted its probes in `s[O_LO]`. `map-pre` resets that word
+  first, but `map-keyq`'s multi-block path (kin/vm-map.kin) reached
+  `map-cursor` with `O_LO` still holding the previous head's argument, here
+  2³¹−1. A release build wrapped silently. The probe count is only read
+  on the `map-pre` path.
+* **The fix.** `map-cursor` takes `cnt`: `map-pre` passes 1 and counts as
+  before; `map-keyq` passes 0 and counts nothing. No verdict, offset or
+  budget changes (JS == Rust over the whole out array, below).
+* **Audit of counters held in shared scratch words.**
+  - `O_ITEMS` is bounded by `maxItems` before every increment.
+  - `O_S_UNITS` (canon.kin) sums comparison units, bounded by the input and
+    reset by its owner; it is not a word that a head argument passes through.
+  - rscan's `O_ERR_POS` adds `base`, a window offset below 2³¹.
+  - No other counter is kept in `O_HI`/`O_LO` or in another word that
+    carries a head argument.
+* **The gate.** vm-test already had a JS == Rust arm built in debug with
+  overflow checks (in the `land` and `release-vm` sets), and vmsession-test
+  runs the same case set. No input reached this path with a wide head.
+  vm-allcases now adds "wide integer heads": every corpus and PEG-oracle
+  input with each integer head rewritten to 2³¹−1, 2³²−1, 2⁶³−1 and 2⁶⁴−1,
+  in every arm.
+* **The gate catches the old code.** The proof was run on the final tree
+  with only the fix reverted (`map-keyq` passing 1, the old count). The
+  quick run (`bb vm-test 300 1 60`) gave:
+  - `FAIL JS == Rust (debug, overflow checks on): 29220/29545 cases`;
+  - 61 `Rust PANIC` lines, among them
+    `regressions: map cursor after a 2^31 - 1 head … [a261621a7fffffff616300]`
+    and `wide heads (D362): study: probe: group choice in map // […]`;
+  - 1,011 failures in all.
+
+  With the fix every arm is identical and nothing panics.
+* **Regression.** The corpus suite "map cursor after a 2^31 - 1 head"
+  (regressions.json) has the reviewer's input, its 2³¹−2 twin and the
+  `//`-reversed schema.
+
+### D363 — One rule for bignums under `valid`: type names and literals select data items, ranges and numeric controls compare numeric values (RFC 8949 §3.4.3); `biguint`/`bignint`/`bigint`/`#6.2/3(bstr)` match every bignum, leading zeroes included (P9.13 WP1 SPEC-F1)
+**Decision** (P8.5 VM engineer, provisional):
+* **The finding (spec review F1, blocking).** Under `valid`, `biguint`,
+  `bignint`, `bigint` and `#6.2(bstr)` refused valid non-preferred
+  bignums such as `2(h'01')` and `2(h'0001')`, and the result depended on
+  how the schema was spelled: `#6.2(b)` with `b = bstr` accepted. D031 had
+  lowered a bignum tag to an INT range of the bignum region only (values
+  of 2⁶⁴ and above), on the premise that smaller values never arrive as
+  bignums. D260/D342 made that premise false. RFC 8949 §3.4.3: decoders
+  MUST accept leading zeroes, and its extended generic data model compares
+  bignums by numeric value.
+* **The rule.**
+  - Type names and literals select data items. `uint`, `nint`, `int`,
+    `#0`, `#1` and integer literals never match a bignum. `biguint`,
+    `bignint`, `bigint` and `#6.2/3(bstr)`, however the bstr is spelled,
+    match every tag 2/3 bignum, any value, leading zeroes allowed.
+  - Ranges and numeric controls compare numeric values. `0..5`,
+    `unsigned .le 5`, `integer .le 5` and `integer .eq 1` match
+    `2(h'01')`. `uint .le 5` and `int .le 5` do not, because a control
+    keeps its target's data items, so `integer .le 5` and
+    `unsigned .le 5` agree.
+  - Map literal keys stay identity-based (D342).
+  - The deterministic and Bindle presets refuse non-preferred bignums
+    before the schema runs, so there nothing changes.
+* **How it is lowered.** The INT leaf flags are bit 0 `BIGOK` (bignums
+  admitted, compared by value) and bit 1 `BIGONLY` (bignums only; implies
+  BIGOK).
+  - Leaf mask: BIGOK adds bit 11; BIGONLY is bit 11 alone.
+  - The VM's `leaf-int` refuses a major 0/1 item under BIGONLY, and the
+    verifier checks the mask.
+  - A bignum tag over bstr is a BIGONLY leaf over every non-negative (or
+    negative) value. A range is BIGOK.
+  - Controls carry the target's flags. `meet` keeps BIGOK only if both
+    sides have it, and BIGONLY if either has it.
+  - Unions merge only leaves with equal flags.
+  - `~` and the bignum unwrap test BIGONLY.
+  - A `.size`/`.bits` controller that is a union of INT leaves with
+    different flags (RFC 8610 figure 10's `&(...) / (4..7)`) is read as
+    one interval set. The rfc-corpus gate caught this on the first cut,
+    and it now has its own corpus vector.
+  - peg2-ref and the PEG oracle follow the same rule (the oracle already
+    compared ranges by value).
+* **Evidence.**
+  - The corpus suite "non-preferred bignums under valid" (66 cases: every
+    row of the reviewer's table, plus each type, range and control form)
+    and its deterministic twin (5).
+  - **On the old compiler** (main at 2ffbed2), 24 of the 66 fail:
+    `biguint`/`bignint`/`bigint`/`#6.2/3(bstr)` on non-preferred
+    bignums, `0..5`, `-5..-1`, `unsigned .le 5`, `integer .eq 1`, and
+    `{0..5 => int}` with a bignum key.
+* **Docs.** profiles.md (the "Values" paragraph), cddl-support.md (the
+  prelude row and the semantic notes) and program.md (the INT leaf row,
+  notes and failure table).
+
+### D358 — Under `valid` a tag-24 payload need only be well-formed (RFC 8949 §3.4.5.1); `tag24: 'valid'` asks for a valid item; `.cbor T` and the deterministic and Bindle presets are unchanged (P9.13 WP1 decision 1)
+**Decision** (coordinator-decided, P9.13 decision 1; implemented by the P8.5 VM engineer):
+* **Why.** RFC 8949 §3.4.5.1 requires a tag-24 byte string to hold a
+  well-formed encoded item, not a valid one. Under `valid`, snug walked
+  the payload as a valid item under the profile (D121), so
+  `d81845a201000100` (a duplicate key inside) was `duplicate_key` and
+  `d8184261ff` was `text`.
+* **The rule.**
+  - Under `valid`, the payload is one well-formed item that fills its byte
+    string. The walk refuses only `truncated`, `malformed`, `trailing` and
+    the limits (`depth`, `too_many_entries`, `too_many_items`, at the
+    scanner's offsets). Its items still count toward `maxItems`. Nothing
+    else is checked: keys, duplicates, UTF-8, tag rules, floats, simple
+    values.
+  - Inner validity is the option `tag24: 'valid'` (JS, the wasm SDK) or
+    `Profile { tag24: Tag24::Valid, .. }` (Rust), which sets profile bit 11
+    `PF_T24V` (a host bit; `PF_HOST` is 2431). The option is read only
+    under `valid`.
+  - `.cbor T` still requires a valid item matching T.
+  - The deterministic preset (and Bindle) keeps the full walk: its
+    guarantee (one encoding per value, no duplicate keys, valid text)
+    then holds for the embedded CBOR that a signature or hash also covers.
+    profiles.md says so.
+* **How.** `head.kin` has the well-formed walk (`wf-item`, `wf-one`;
+  `wf-payload` decides when it applies). These share it:
+  - the scanner, for a payload in a definite string and for a deferred
+    payload gathered from chunks;
+  - the VM's `dead-std-check` (the buffer walk, the live walk and the
+    resumable session), charging 1 unit per item it counted, over the
+    payload's bytes, which a canonical copy keeps as they are;
+  - vcopy's `if-24`, which no longer embeds such payloads.
+
+  The resumable scanner refuses `PF_VALID` (it falls back), so it is
+  unchanged.
+* **Evidence.**
+  - Corpus suites in regressions.json:
+    - "well-formed only" (12): the reviewer's two examples, a tag 65535
+      and a chunked duplicate, against `.cbor any`;
+    - "tag24 'valid'" (6);
+    - "deterministic" (3);
+    - item counting with `maxItems` (2).
+  - det-cases runs the D353 payload vectors and half the valid-CBOR
+    mutations with `PF_T24V`, so the old walk stays identity-gated.
+  - Host tests in JS profiles.test and Rust public_api.
+  - **On the old code** (main at 2ffbed2), "well-formed only" passes 8 of
+    12; all four new acceptances fail. The `tag24` option does not exist
+    there, so its suite throws (0 of 6).
+* **Names, for WP2's options shape (D360).**
+  - JS: the preset field `tag24: 'well-formed' | 'valid'`
+    (host/js/src/options.mjs `preset` shape and profiles.mjs; it is in
+    every pick list of sources.mjs, the SDK's sources.mjs, view.mjs and
+    view-core.mjs; the types are in index.d.ts `ProfileOptions` and
+    `profiles`).
+  - Rust: `snug::Tag24 { WellFormed, Valid }` (`#[non_exhaustive]`) and the
+    field `Profile::tag24` (host/rust/src/decode.rs). `Profile::flags()`
+    adds 2048 when `valid && tag24 == Valid`.
+  - The core reads only profile bit 11.
+
+### D359 — `.default` carries RFC 8610 §3.8.6's implied `.ne` by default; `defaultControl: 'annotation'` keeps the annotation-only reading of erratum 9229 (status Reported) and is bound into the source key (P9.13 WP1 decision 2)
+**Decision** (coordinator-decided, P9.13 decision 2; implemented by the P8.5 VM engineer):
+* **Why.** RFC 8610 §3.8.6 gives `.default` an "implied .ne control".
+  snug followed the annotation-only reading that RFC 8610 erratum 9229
+  proposes, but that erratum's status is Reported, not verified. S46 had
+  been reclassified non-conformant.
+* **The rule.**
+  - `.default v` lowers as `.ne v`, so `uint .default 1` refuses `1`.
+  - The compile option `defaultControl: 'annotation'` (Rust
+    `CompileOptions::default_control = DefaultControl::Annotation`) gives
+    the old reading. It is option word 22: `OPT_WORDS` is now 23 and the
+    extension registry starts at word 23.
+  - The source-key preimage's option array gains a 20th element, `1`, only
+    in annotation mode, so default preimages are unchanged (program-2 §1).
+  - `.eq`/`.ne` now take a single simple value (`false`, `null`, ...) on a
+    SIMPLE target, so `bool .default false` compiles.
+  - A default whose `.ne` would be composite (an array, a map, a range, or
+    the target `any`) is refused as that `.ne` is, and cddl-support says so.
+* **S46.** It is conformant again.
+  - conformance.md: the S46 row, the control table and the totals note
+    (144/43/20/9).
+  - RFC 8610's default-timer vector loses its contested classification,
+    now that it passes.
+  - The adversarial and study vectors, their generators, and the PEG
+    oracle (`defaultControl` option; README F6) follow.
+  - Docs say "Reported": cddl-support, api.md, rust.md, compile.d.ts and
+    the rustdoc.
+* **Evidence.**
+  - Corpus suite "D359: .default carries the implied .ne".
+  - JS schema-api.test: verdicts and source keys in both modes, plus a
+    bad option value.
+  - Rust public_api: the same in both modes.
+  - **On the old code** (2ffbed2) the suite passes 3 of 5: both
+    default-equal cases are accepted. The study and adversarial vectors
+    change the same way.
+* **Names, for WP2's options shape (D360).**
+  - JS: the compile option `defaultControl: 'ne' | 'annotation'`
+    (host/js/src/options.mjs compile shape, compile.mjs `OPT_DEFAULT`,
+    the SDK's compile.mjs word 22, compile.d.ts).
+  - Rust: `snug::DefaultControl { Ne, Annotation }` (`#[non_exhaustive]`,
+    host/rust/src/compile.rs), the field `default_control` on both
+    `snug::CompileOptions` (api.rs) and `compile::CompileOptions`, and
+    host/wasm/src/cc.rs, which reads word 22 with the registry from word 23.
+
+### P9.13 WP1 should-fixes (spec review F3–F6, F12)
+* **`.det` over CR LF lines (F3).** RFC 9165 §2.3 counts a blank line's
+  spaces as no indent. A line of spaces ending in CR LF is now blank. Its
+  CR used to make it non-blank with indent 0, so a CRLF schema such as
+  Figure 3 did not dedent. The PEG oracle matches.
+* **A negative `.size` controller (F4)** used to be clamped to 0. Now
+  `tstr .size -1` matches nothing, and `(-2..1)` means `0..1`.
+* **`-0` (F5).** The integer literal `-0` (and `-0x0`) is 0. The float
+  `-0.0` is unchanged.
+* **`#0.n` to `#3.n` (F6)** are implemented by value, as D328 reads
+  `#7.25`:
+  - below 24: the argument n;
+  - 24..27: an argument of 1, 2, 4 or 8 bytes;
+  - 31: any byte or text string (indefinite), but no integer;
+  - 28..30: nothing.
+
+  `#4.n` and `#5.n` stay refused (`major`) and are listed in cddl-support.
+* **`int .size` and `.bits` (F12).** On an integer type that admits
+  negative values, these are now `control_target` errors, as cddl-support
+  already promised. They used to narrow silently to `uint`.
+* **Evidence.** The corpus suite "P9.13 should-fixes" (22 cases), with
+  three refusal suites (`int .size 1`, `nint .bits 3`, `#4.1`). On the old
+  compiler the main suite does not compile (`major` at `#0.24`), and
+  `int .size 1` and `nint .bits 3` compile.
+
 ## Findings
 
 - 2026-11-11 (manager): **the 6½-day `scan-test.mjs 300 1` process

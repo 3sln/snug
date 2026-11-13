@@ -101,6 +101,31 @@ compare it with development builds from the repository.
 These matter only to code written against development builds from the
 repository.
 
+- `.default` now carries RFC 8610 §3.8.6's implied `.ne`: `uint .default 1`
+  refuses `1` (D359). The compile option `defaultControl: 'annotation'`
+  (`[rust]` `CompileOptions::default_control = DefaultControl::Annotation`)
+  restores the annotation-only reading, which RFC 8610 erratum 9229 (status
+  Reported) proposes. It is bound into the source key. A `.default` whose
+  `.ne` cannot be lowered (an array, a map or a range default, or the target
+  `any`) is refused with `unsupported_control`.
+- Under `valid`, a tag-24 payload need only be well-formed, as RFC 8949
+  §3.4.5.1 asks: a duplicate key or invalid UTF-8 inside it is no longer
+  refused (D358). Pass `tag24: 'valid'` (`[rust]` `Profile { tag24:
+  Tag24::Valid, .. }`) to require a valid item. `.cbor T` still requires
+  one, and so do `deterministic` and Bindle.
+- Bignums under `valid` follow one rule (D363). `biguint`, `bignint`,
+  `bigint` and `#6.2/3(bstr)` match every tag 2/3 bignum, leading zeroes
+  and small values included. Ranges and numeric controls compare bignums by
+  value: `0..5` and `unsigned .le 5` match `2(h'01')`, while `uint .le 5`
+  and the literal `1` do not.
+- `.size` and `.bits` on an integer type that admits negative values
+  (`int .size 1`) are refused with `control_target`. They used to narrow it
+  to `uint`.
+- `[rust]` `Profile` has a new field, `tag24`, and `CompileOptions` has a
+  new field, `default_control`: struct literals that name every field need
+  them. The low-level compile option array is 23 words; the
+  extension-control registry starts at word 23, and word 22 is the
+  `.default` reading.
 - Package names (D343): the npm package is `@3sln/snug`, so imports read
   `@3sln/snug`, `@3sln/snug/compile` and so on, not `snug`. The wasm SDK
   is `@3sln/snug-wasm` (was `snug-wasm-sdk`). `[rust]` The crate is
@@ -212,6 +237,14 @@ repository.
 
 ### Fixed
 
+- `.det` dedents lines that end in CR LF: a line of spaces before CR LF is
+  blank, as RFC 9165 §2.3 says.
+- `tstr .size -1` matches nothing; a negative size was read as 0.
+- The integer literal `-0` is 0; it matched nothing.
+- `#0.n` to `#3.n` compile, by value (RFC 8610 §2.2.3: `n` is the head's
+  additional information, so `#0.24` is 0..255). `#4.n` and `#5.n` are still
+  refused with `major`.
+- `bool .default false` and `.ne` on a single simple value compile.
 - A recursive Program's session arena grows with the input read instead of
   reserving the whole message's bound up front (D337).
 - `[rust]` The unknown-length reader no longer panics when a positive
@@ -294,3 +327,8 @@ repository.
   input first.
 - `[wasm-sdk]` Loading a Program sizes the verifier's scratch from its
   words, not from an unverified count in them (also `[js]` `[rust]`).
+- `[rust]` A map with alternative members, after a head whose argument was
+  2³¹−1 or more, overflowed a counter in the VM's map cursor. A build with
+  overflow checks panicked on valid input such as `a261621a7fffffff616300`,
+  and a release build wrapped the counter, which was never read on that
+  path. The counter is now kept only where it is read (D362).
