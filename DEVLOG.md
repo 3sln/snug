@@ -7410,6 +7410,87 @@ exceeded as well (75,854 > 75,810; 65,780 > 65,731) and rise to 77,372 and
   - Rust's `Error::Cbor` gains a field, a breaking pre-release change in
     the CHANGELOG.
 
+### D351 — A schema view of valid, non-deterministic input reads its canonical copy: the item's outcome bits survive `.cbor` content, and a public Schema gets the copy (P8.4/D262 fix; found by P9.9's sequence-test)
+**Decision** (engineer, 2026-11-13, at the manager's request).
+
+**Symptom:** with D349's regression corpus, `sequence-test`'s every-fifth
+view walk threw `snug view: navigation failed (-1); were borrowed bytes
+modified?`. The case was C7/A4 (`r = bstr .cbor {a: int} / bstr .size
+(0..16)`, seed 437440410, chunks of 1..7): the message `5f4100420102ff`
+under wire `valid`, completed in the same chunk as a following message that
+is refused.
+
+**Not a lifetime bug.** The throw came from the harness's reference View,
+`view(m.bytes.slice(), { schema, ... })`, not from the reader's message
+View. Without any sequence, `view(5f4100420102ff, { schema, rule, wire:
+'valid' }).raw()` throws on main, deterministically, with or without the
+pool scribble. The sequence messages are sound:
+- the message's View is minted with the profile scanner's own canonical
+  copy (`mintView`, `scanInfo` → `cb.slice`);
+- `m.bytes` is a chunk subarray or a fresh assembly;
+- nothing of the reader's pooled arrays is reachable from either;
+- the harness walks views within their documented lifetime (D215, §18).
+
+Rust `Sequence` messages (`decode::check`, owned or borrowed under the
+borrow checker) and the wasm SDK reader (messages copied into linear
+memory) have no such issue either.
+
+**Two bugs**, both in the schema path of views and decode:
+1. **kin (`vcopy.kin` `canon-build`), every host.**
+   - **Mechanism:** under a Program with `.cbor` (embeds 2), or a tag-24
+     payload, the canonical path visits each byte string's content. Each
+     visit (`embed-check` → `scan-seq`) resets and rewrites `o[O_VCTL]`, so
+     after the visits it holds the last content's outcome bits, not the
+     item's.
+   - **Effect:** the hosts read `vs[12]` after the run (JS `schema-core`,
+     Rust `schema::run`, wasm `sdk.rs`). An item that is not its own DC
+     form lost its copy, so views, `Schema::document` and decode used the
+     raw input: a view walked indefinite-length bytes and threw, and Rust
+     `Schema::view` borrowed them. An item with a map out of canonical
+     order lost `VC_UNSORTED`, so lookups binary-searched it and missed
+     keys **silently**. For example, `[ {"b": 1, "a": 2}, h'01' ]` under
+     `[ {* tstr => int}, bstr .cbor int ]` answered `get('a')` undefined.
+   - **Verdicts were never affected:** only the copy and order bits were
+     wrong.
+   - **Fix:** `canon-build` restores the item's bits (`vc0`) after the
+     visits; gen/ re-emitted.
+2. **JS: `view()` with a public Schema.**
+   - **Mechanism:** the public `Schema` (snug/compile, snug/schema) has no
+     `check`, so `view()` fell back to `validate` and never asked for the
+     canonical copy. Every schema view of valid, non-deterministic input
+     (an indefinite item, a non-preferred head) walked the raw bytes.
+     Schema-less views, decode, the wasm SDK and Rust were not affected.
+   - **Fix:** `view()` runs any snug Schema through its Program
+     (`schemaPrograms`) with the copy request; an unknown rule is the
+     public `TypeError`.
+
+**Tests:**
+- `host/js/test/view.test.mjs` "regression D351": both Schema kinds, with
+  and without `.cbor`; the canonical bytes; the unsorted lookup.
+- `host/js/test/sequence.test.mjs` "regression D351": the
+  sequence-test shape, deterministic, with no GC and no pool involvement.
+- `host/rust/tests/public_api.rs` `regression_d351_...`:
+  `Schema::document` copy and order, and `Schema::view` refuses to borrow.
+- The wasm SDK parity test "regression D351": SDK == native, plus the
+  canonical bytes.
+
+Each JS test fails without its fix. The JS ones fail with the kin fix alone,
+because both repro tests use the public Schema.
+- **Re-run:** the sequence-test host arm on D349's corpus (`SEQ_HOSTONLY`)
+  is now ok: 36,365 host runs and 605,562 view walks equal.
+
+**Size:** `bb size` passes (`snug/view` 76,955 / 26,116 / 22,957).
+
+**Gates** (branch `p351` on main `3e0b613`, a clean worktree; then rebased
+onto `7037508`, which only changes DEVLOG):
+- `bb gates land`: all 9 ok, including `npm-test`, `wasm-sdk-test` and
+  `vm-test`.
+- `vmsession-test`: ok.
+- `sequence-test`: ok (761,112 JS runs).
+- `rust-api-test full`: ok.
+- `node-oldest`: ok on Node 20, 1506/1506.
+- [ ] **Signed off** (manager)
+
 ## Findings
 
 - 2026-11-11 (manager): **the 6½-day `scan-test.mjs 300 1` process

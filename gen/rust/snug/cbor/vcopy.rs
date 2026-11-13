@@ -1246,6 +1246,11 @@ pub fn canon_build(b: &[u8], o: &mut [i32], cb: &mut [u8], start: i32, end: i32,
             }
             j += 1;
         }
+        // D351: embed-check rescans each content with o's outcome bits
+        // (scan-seq), so they are the last content's now: restore the item's,
+        // which the hosts read (VC_NONDET: the copy is not the input;
+        // VC_UNSORTED: a map out of canonical order)
+        o[(O_VCTL) as usize] = vc0;
     }
     // D277: the units, over the main copy and every embedded copy (the
     // events so far sorted for the lookups)

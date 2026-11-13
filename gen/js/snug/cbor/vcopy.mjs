@@ -1289,6 +1289,11 @@ export function canonBuild(b, o, cb, start, end, embeds, refused) {
             }
             j += 1;
         }
+        // D351: embed-check rescans each content with o's outcome bits
+        // (scan-seq), so they are the last content's now: restore the item's,
+        // which the hosts read (VC_NONDET: the copy is not the input;
+        // VC_UNSORTED: a map out of canonical order)
+        o[O_VCTL] = vc0;
     }
     // D277: the units, over the main copy and every embedded copy (the
     // events so far sorted for the lookups)

@@ -32,6 +32,7 @@ import { TYPED_BY_TAG } from './values.mjs';
 import { profileFlags, keysOf, validOk } from './profiles.mjs';
 import { Writer } from './writer.mjs';
 import { validateOptions, selectOptions } from './options.mjs';
+import { schemaPrograms } from './schema-state.mjs';
 
 const decoder = new TextDecoder('utf-8', { ignoreBOM: true });
 const encoder = new TextEncoder();
@@ -530,10 +531,17 @@ export function view(bytes, opts = {}) {
   // view owns: offsets are positions in it, raw() its canonical encodings, map order the wire's.
   if (opts.schema) {
     if (typeof opts.rule !== 'string') throw new TypeError('snug view: a schema needs a rule');
-    const copy = {};
-    const r = typeof opts.schema.check === 'function'
-      ? opts.schema.check(b, opts.rule, selectOptions(opts, 'validation'), copy)
-      : opts.schema.validate(b, opts.rule, selectOptions(opts, 'validation'));
+    const copy = {}, vo = selectOptions(opts, 'validation');
+    // D351: a snug Schema (the public one has no `check`) runs through its Program, so the view gets the
+    // canonical copy of valid input that is not its own deterministic form
+    const program = schemaPrograms.get(opts.schema);
+    let r;
+    if (program) {
+      const rule = program.ruleIndex(opts.rule);
+      if (rule < 0) throw new TypeError('snug: unknown rule');
+      validateOptions(vo, 'validation');
+      r = program.result(program.run(rule, b, vo, undefined, copy));
+    } else r = typeof opts.schema.check === 'function' ? opts.schema.check(b, opts.rule, vo, copy) : opts.schema.validate(b, opts.rule, vo);
     if (!r.ok) { const e = new Error(`snug: ${r.reason}`); e.reason = r.reason; e.path = r.path; e.offset = r.offset; if (r.subcode) e.subcode = r.subcode; throw e; }
     if (copy.bytes) { b = copy.bytes; borrowed = false; }
     unsorted = copy.unsorted === true;

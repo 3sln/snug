@@ -232,3 +232,20 @@ test('regression 2026-11-11: a complete 65,541-byte message followed by more tha
     }
   }
 });
+
+// D351: the shape sequence-test met -- an indefinite byte string completed in the same chunk as a following
+// message that is refused and ends the reader, under valid CBOR and a Program with `.cbor`. The message's
+// view equals a view opened on its bytes, and both read the canonical copy.
+test('regression D351: an indefinite bstr message, then a refusal in the same chunk, under valid', async () => {
+  const schema = await compile('r = bstr .cbor {a: int} / bstr .size (0..16)');
+  const msg = [0x5f, 0x41, 0x00, 0x42, 0x01, 0x02, 0xff], bad = [0x51, ...new Array(17).fill(0xff)];
+  const opts = { schema, rule: 'r', wire: 'valid' };
+  const chunk = Uint8Array.of(0x44, 0xa1, 0x61, 0x61, 0x01, ...msg, ...bad);
+  const seen = [];
+  await assert.rejects(async () => {
+    for await (const m of readSequence([chunk], opts)) seen.push([m.index, [...m.view.raw()], [...view(m.bytes.slice(), opts).raw()]]);
+  }, e => e.index === 2);
+  assert.deepEqual(seen, [[0, [0x44, 0xa1, 0x61, 0x61, 0x01], [0x44, 0xa1, 0x61, 0x61, 0x01]], [1, [0x43, 0, 1, 2], [0x43, 0, 1, 2]]]);
+  const res = sequenceReader(opts).feed(chunk);
+  assert.deepEqual([res.messages.map(m => [...m.view.raw()]), res.error?.index], [[[0x44, 0xa1, 0x61, 0x61, 0x01], [0x43, 0, 1, 2]], 2]);
+});

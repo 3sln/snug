@@ -976,7 +976,12 @@
                             (set y2 (visit b o cb y2 elim all 0 0 (ia o (+ e 7))))
                             (if (== y2 (neg 2)) (set y2 elim))
                             (if (< y2 0) (return y2)))))))
-                (set j (+ j 1))))))
+                (set j (+ j 1))))
+            (comment "D351: embed-check rescans each content with o's outcome bits"
+                     "(scan-seq), so they are the last content's now: restore the item's,"
+                     "which the hosts read (VC_NONDET: the copy is not the input;"
+                     "VC_UNSORTED: a map out of canonical order)")
+            (iset o O_VCTL vc0)))
       (comment "D277: the units, over the main copy and every embedded copy (the"
                "events so far sorted for the lookups)")
       (ev-sort o)
