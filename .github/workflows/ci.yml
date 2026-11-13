@@ -12,12 +12,15 @@
 #
 # Matrix choice. The primary toolchain is macOS arm64, Node 24.6.0 (the exact
 # Node that tools/unicode/gen-tables.mjs pins, which unicode-test's --check
-# needs) and stable Rust: every gate of both sets runs on it, once, including
+# needs) and Rust 1.92.0 (pinned in .github/actions/setup: the toolchain
+# release-policy §2 records every Rust gate on, so a new Rust release cannot
+# turn a land run red by itself): every gate of both sets runs on it, once, including
 # the heavy identity, fuzz and proptest gates, whose subject is JS == Rust on
 # one machine, not a toolchain. The `compat` matrix adds only the cells a
 # toolchain can change: npm-test (host/js) on the latest Node 20, 22 and 24 (20
 # is engines.node's floor, with SNUG_NODE_OLDEST=1 as node-oldest runs it), and
-# rust-api-test on Rust 1.87 (rust-version). The release set holds node-oldest
+# rust-api-test on Rust 1.87 (rust-version) and on the latest stable, where a
+# new Rust release shows up first. The release set holds node-oldest
 # and msrv too, which test the floors on the primary job's runner.
 #
 # proptest (release-long) runs on the primary Node 24 by design: its failing
@@ -119,6 +122,7 @@ jobs:
           - { gate: npm-test,      label: Node 22,   node: '22',     rust: none, oldest-env: '',  timeout: 45 }
           - { gate: npm-test,      label: Node 24,   node: '24',     rust: none, oldest-env: '',  timeout: 45 }
           - { gate: rust-api-test, label: Rust 1.87, node: '24.6.0', rust: msrv, oldest-env: '',  timeout: 35 }
+          - { gate: rust-api-test, label: Rust stable, node: '24.6.0', rust: stable, oldest-env: '', timeout: 35 }
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:

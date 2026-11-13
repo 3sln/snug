@@ -114,7 +114,7 @@
   ;; the routine set before landing a change that touches kin or a host
   :land     [versions check drift size npm-test rust-api-test wasm-sdk-test vm-test compile-test]
   ;; the release set's CI shards (:partitions). Tools: core and vm need Node and
-  ;; stable Rust; rust also Rust 1.87 and bench/compare; wasm also the pinned
+  ;; Rust 1.92.0; rust also Rust 1.87 and bench/compare; wasm also the pinned
   ;; nightly, Node 20, workerd and Chrome; long also bench/compare (valid-test's
   ;; cbor2 arm).
   :release-core [versions check drift stamp-test scan-test rscan-test

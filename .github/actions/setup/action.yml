@@ -5,7 +5,9 @@
 #   Node           node-version (the primary is the exact 24.6.0 that
 #                  tools/unicode/gen-tables.mjs pins); node-oldest adds the
 #                  engines.node major from host/js/package.json
-#   Rust           `stable`, or `msrv`: host/rust/Cargo.toml's rust-version;
+#   Rust           the primary 1.92.0 (pinned: the toolchain release-policy §2
+#                  records every Rust gate on), `stable` (the moving latest),
+#                  or `msrv`: host/rust/Cargo.toml's rust-version;
 #                  wasm adds kin/scripts/wasm-build's default nightly with
 #                  rust-src and wasm32-unknown-unknown (-Zbuild-std)
 #   bench/compare  `npm ci` (lockfile): esbuild and binaryen's wasm-opt
@@ -24,8 +26,8 @@ inputs:
     description: "'true': also the engines.node major, as SNUG_NODE_OLDEST_NODE (node-oldest)"
     default: 'false'
   rust:
-    description: "'stable', 'msrv' (rust-version) or 'none': the default toolchain"
-    default: 'stable'
+    description: "a version such as '1.92.0', 'stable', 'msrv' (rust-version) or 'none': the default toolchain"
+    default: '1.92.0'
   msrv:
     description: "'true': also the rust-version toolchain (msrv)"
     default: 'false'
@@ -120,13 +122,13 @@ runs:
       run: |
         set -euo pipefail
         command -v rustup >/dev/null || { echo "::error::rustup is not on the runner"; exit 1; }
-        # stable keeps clippy (rust-api-test); the MSRV toolchain does not (D344: clippy's lints
-        # change between releases, so clippy stays on the current toolchain)
+        # a named toolchain keeps clippy (rust-api-test); the MSRV toolchain does not (D344:
+        # clippy's lints change between releases, so clippy stays on the current toolchain)
         case "$RUST" in
-          stable) rustup toolchain install stable --profile minimal --component clippy --no-self-update; rustup default stable ;;
           msrv) rustup toolchain install "$V" --profile minimal --no-self-update; rustup default "$V" ;;
           none) ;;
-          *) echo "::error::rust must be stable, msrv or none, not $RUST"; exit 1 ;;
+          stable|[0-9]*.[0-9]*) rustup toolchain install "$RUST" --profile minimal --component clippy --no-self-update; rustup default "$RUST" ;;
+          *) echo "::error::rust must be a version, stable, msrv or none, not $RUST"; exit 1 ;;
         esac
         [ "$MSRV" != true ] || rustup toolchain install "$V" --profile minimal --no-self-update
         [ "$WASM" != true ] || rustup toolchain install "$NIGHTLY" --profile minimal --component rust-src --target wasm32-unknown-unknown --no-self-update
