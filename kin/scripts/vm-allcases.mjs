@@ -166,7 +166,8 @@ for (const file of ['study', 'adversarial', 'audit-2026-11-04', 'numbers', 'head
       if (rule < 0) { fail(`${file}: ${su.name}: no rule ${k.rule}`); continue; }
       corpus.cases++;
       const opt = su.options ?? {};
-      cases.push({ prog: pi, rule, lim: LIM(1, opt.cose ? 1 : 0, -1, -1, -1, opt.maxItems ?? -1, -1, -1, opt.wire === 'deterministic' ? 122 : opt.wire === 'valid' ? 378 : 0), bytes: unhex(k.hex),
+      const t24 = opt.tag24 === 'valid' ? 2048 : 0;  // D358: PF_T24V
+      cases.push({ prog: pi, rule, lim: LIM(1, opt.cose ? 1 : 0, -1, -1, -1, opt.maxItems ?? -1, -1, -1, opt.wire === 'deterministic' ? 122 : opt.wire === 'valid' ? 378 | t24 : 0), bytes: unhex(k.hex),
         label: `${file}: ${su.name} [${k.hex.slice(0, 40)}]`, corpus: true,
         check: o => { const ok = o.split(' ')[0] === '0'; return ok === k.expect ? null : `verdict ${ok}, expected ${k.expect} (out ${o})`; } });
       // the PEG oracle in both cut modes (P8.5, D279): the same suite's Program in each mode,
@@ -213,7 +214,7 @@ for (const { cddl, values } of pegSchemas(SCHEMAS, 8, SEED * 7919 + 1)) {
   }
 }
 for (const { file, su, k, text, opt } of corpusOracle) {
-  if (opt.cose || opt.wire === 'deterministic' || opt.maxItems !== undefined) continue;
+  if (opt.cose || opt.wire === 'deterministic' || opt.maxItems !== undefined || opt.tag24 !== undefined) continue;
   const os = pegCompile(text);
   if (os.error) continue;
   for (const cuts of ['rfc', 'branch']) {

@@ -25,7 +25,7 @@ Status: implemented and gated (DEVLOG P1.3). Integer-only (D009).
 | JS (`gen/js/snug/cbor/scan.mjs`) | Rust (`snug::cbor::scan`) | |
 | --- | --- | --- |
 | `scanOptions(o, topAny, cose, maxBytes, maxDepth, maxEntries, maxItems)` | `scan_options` | fill an `Int32Array(16)` / `[i32; 16]`; the profile flags to 0 (Bindle) |
-| `scanProfile(o, flags)` | `scan_profile` | the profile flags (PF_*, host bits 0–6), after `scanOptions` |
+| `scanProfile(o, flags)` | `scan_profile` | the profile flags (PF_*, host bits 0–6, 8 and 11), after `scanOptions` |
 | `scan(bytes, o)` | `scan` | 0, or a code (below) |
 | `errorOffset(o)` | `error_offset` | offset the refusal was decided at, -1 if accepted |
 | `itemsScanned(o)` | `items_scanned` | the item counter |
@@ -158,6 +158,17 @@ only where it lies no later than the framer's own stop.
   are checked after their chunks are gathered (recorded, run after the walk
   in walk order); tags 2/3 accept any bignum of at most 128 content bytes;
   tags 4/40 take any array head (D265).
+* Tag-24 payloads (D358): without `PF_T24V` (bit 11; the valid preset leaves it
+  clear) a payload is walked by `head.kin wf-one`: one **well-formed** item
+  (RFC 8949 §3.4.5.1) — heads of any width, indefinite strings of definite
+  chunks, indefinite containers to a break; **malformed** for ai 28–30, a
+  misplaced break, a wrong chunk and `f8` below 32; **truncated**,
+  **trailing**; the depth, entry and item limits as the walk's (the same
+  order and offsets); nothing else (no key kinds, duplicates, UTF-8, tag or
+  float rules). It records nothing for after the walk. With `PF_T24V` the
+  payload is walked as before, a valid item under the profile. The VM
+  (buffer, live and resumable) uses the same `wf-one`, charging 1 unit per
+  item it counted; the canonical copy does not embed such payloads.
 * The scanner notes in `o[O_VCTL]` whether the input is its own deterministic
   form (`VC_NONDET`), whether some map's keys may be out of canonical order
   (`VC_UNSORTED`) and whether an EC-sensitive key occurred (`VC_ECS`); the

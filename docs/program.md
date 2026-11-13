@@ -1011,7 +1011,7 @@ before evaluating a live child: `INDEX`, `KEY`/`ANYKEY`, `TAG`, `EMBED`).
 | 6 | bignum bytes | min(given, `LIM_BIGNUM_BYTES`) |
 | 7 | budget | min(given, `LIM_BUDGET`) |
 | 8 | VM extension: bit 0 forces the generic path (D044), bit 1 the legacy schedule 1 (D045) | as given; absent = 0 |
-| 9 | VM extension: the profile flags (D120, snug.cbor.codes `PF_*`; host bits 0–6) | as given; absent (fewer than 10 words) or negative = 0, the Bindle profile; `PF_SUB` added when the span's depth is not 0 |
+| 9 | VM extension: the profile flags (D120, snug.cbor.codes `PF_*`; host bits 0–6, 8 `PF_VALID` and 11 `PF_T24V`, D358) | as given; absent (fewer than 10 words) or negative = 0, the Bindle profile; `PF_SUB` added when the span's depth is not 0 |
 
 The VM copies the effective values into the scanner block and the VM block.
 Words 8 and 9 are API extensions of the call, not Program words: a Program

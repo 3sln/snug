@@ -617,6 +617,22 @@ fn shared_schemas_independent_scratch_and_source_errors() {
 }
 
 #[test]
+fn tag24_payload_well_formed_under_valid_d358() {
+    use snug::{Profile, Tag24};
+    assert_eq!(Profile::VALID.tag24, Tag24::WellFormed);
+    assert_eq!(Profile::VALID.flags(), 378);
+    let strict = Profile { tag24: Tag24::Valid, ..Profile::VALID };
+    assert_eq!(strict.flags(), 378 | 2048);
+    assert_eq!(Profile { tag24: Tag24::WellFormed, ..Profile::DETERMINISTIC }.flags(), 122);
+    // a duplicate key inside the payload: well-formed is enough under valid
+    let dup = unhex("d81845a201000100");
+    assert!(matches!(decode(&dup, &DecodeOptions::default()).unwrap(), Value::Tag(24, _)));
+    let opts = DecodeOptions { profile: strict, ..DecodeOptions::default() };
+    assert_eq!(decode(&dup, &opts).unwrap_err().code(), "duplicate_key");
+    assert_eq!(decode(&unhex("d81842f800"), &DecodeOptions::default()).unwrap_err().code(), "malformed");
+}
+
+#[test]
 fn any_tag_level_d180() {
     use snug::{Profile, Tags};
     assert_eq!(Profile::DETERMINISTIC.tags, Tags::Any);

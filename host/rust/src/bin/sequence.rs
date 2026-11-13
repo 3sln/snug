@@ -102,7 +102,7 @@ fn chunk_ends(n: usize, kind: i32, w: i32, seed: u32, k: i32) -> Vec<usize> {
 
 /// The Profile whose flags these are (D120).
 fn profile_of(f: i32) -> Profile {
-    use snug::{Floats, Keys, Tags};
+    use snug::{Floats, Keys, Tag24, Tags};
     Profile {
         keys: match f & 3 { 0 => Keys::Text, 1 => Keys::Integer, _ => Keys::Any },
         tags: match f & 12 { 0 => Tags::Bindle, 4 => Tags::Standard, _ => Tags::Any },
@@ -110,6 +110,7 @@ fn profile_of(f: i32) -> Profile {
         undefined_value: f & 32 != 0,
         noncharacters: f & 64 != 0,
         valid: f & 256 != 0,
+        tag24: if f & 2048 != 0 { Tag24::Valid } else { Tag24::WellFormed },
     }
 }
 

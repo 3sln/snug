@@ -4,7 +4,7 @@
 import { chunkPos, dupFinish, dupForms, dupFormsWithin, dupInput, dupPairs, fits16, fits32, gather, gatherWithin, headShort, kclass, targ, tlength } from './canon.mjs';
 import { CODE_BIGNUM, CODE_DECIMAL, CODE_DEPTH, CODE_DUPLICATE_KEY, CODE_FLOAT, CODE_INDEFINITE, CODE_KEY_ORDER, CODE_KEY_TYPE, CODE_MALFORMED, CODE_NDARRAY, CODE_NON_SHORTEST, CODE_NOT_MAP, CODE_SCRATCH, CODE_SIMPLE, CODE_TAG, CODE_TEXT, CODE_TOO_LARGE, CODE_TOO_MANY_ENTRIES, CODE_TOO_MANY_ITEMS, CODE_TRAILING, CODE_TRUNCATED, CODE_TYPED_ARRAY, MAX_BIGNUM_BYTES, O_COSE, O_CSTART, O_ERR_POS, O_HI, O_ITEMS, O_LO, O_MAX_BYTES, O_MAX_DEPTH, O_MAX_ENTRIES, O_MAX_ITEMS, O_PROFILE, O_S_CBTOP, O_S_DLOW, O_S_DUPK, O_S_DUPO, O_S_DUPP, O_S_EXTRA, O_S_FIRST, O_S_NDEF, O_S_RTOP, O_S_SRC, O_S_UNITS, O_TOP, O_VCTL, O_VLEN, O_VNEEDB, O_VNEEDW, PF_FLOATS, PF_HOST, PF_KEYS, PF_NONCHAR, PF_TAGS, PF_UNDEFINED, PF_VALID, PF_VREL, VC_ECS, VC_NONDET, VC_UNSORTED } from './codes.mjs';
 import { checkF16, checkF32, checkF64, rfcF16, rfcF32, rfcF64 } from './float.mjs';
-import { be16, be32, bytesContent, countItem, enterContainer, fail, readArg, readArgV, takeLen } from './head.mjs';
+import { be16, be32, bytesContent, countItem, enterContainer, fail, readArg, readArgV, takeLen, wfOne, wfPayload } from './head.mjs';
 import { compareSpans } from './keys.mjs';
 import { dateTimeOk, ruleTag, stdAllowed, stdContentOk, stdInner, typedAnySize, uriOk } from './stdtags.mjs';
 import { dataCount, decimalV, exponentOk, mantissaOk, ndarrayV, shapeOk, typedSize, vcount } from './tags.mjs';
@@ -977,7 +977,7 @@ export function scanStd(b, o, pos, p, tag, depth, end) {
     // A standard-set tag (snug.cbor.stdtags, D121): its content is an item at
     // depth + 1, walked first; then the content rule (tag); then a tag-24 byte
     // string's content as one item at depth + 2, bounded by its end (trailing
-    // after it).
+    // after it): under PF_VALID without PF_T24V only well-formed (D358).
     const q = item(b, o, p, depth + 1, end);
     if (q < 0) {
         return q;
@@ -989,9 +989,16 @@ export function scanStd(b, o, pos, p, tag, depth, end) {
         return fail(o, pos, CODE_TAG);
     }
     if (tag === 24) {
-        const r = scanOne(b, o, stdInner(b, p), depth + 2, q);
-        if (r < 0) {
-            return r;
+        if (wfPayload(o)) {
+            const rw = wfOne(b, o, stdInner(b, p), depth + 2, q);
+            if (rw < 0) {
+                return rw;
+            }
+        } else {
+            const r = scanOne(b, o, stdInner(b, p), depth + 2, q);
+            if (r < 0) {
+                return r;
+            }
         }
     }
     return q;
@@ -1333,6 +1340,15 @@ export function deferText(b, o, cb, src, tag, tpos, cpos) {
     return 0;
 }
 
+export function payloadOne(b, o, cs, depth, ce) {
+    // A gathered tag-24 payload as one item: well-formed only under PF_VALID
+    // without PF_T24V (D358; records nothing), else scan-one.
+    if (wfPayload(o)) {
+        return wfOne(b, o, cs, depth, ce);
+    }
+    return scanOne(b, o, cs, depth, ce);
+}
+
 export function deferPayload(b, o, cb, src, e, cpos, depth, at) {
     // Kind 3: a tag-24 payload in an indefinite-length byte string, gathered into
     // cb and walked there as one item (scan-one) with the item count it would
@@ -1358,7 +1374,7 @@ export function deferPayload(b, o, cb, src, e, cpos, depth, at) {
     o[O_S_CBTOP] = ge;
     o[O_S_SRC] = 1;
     o[O_ITEMS] = it0;
-    let r = scanOne(cb, o, top, depth, ge);
+    let r = payloadOne(cb, o, top, depth, ge);
     if ((r >= 0) && (o[O_S_NDEF] > nd0)) {
         r = runDefer(b, o, cb, nd0, o[O_S_NDEF]);
     }

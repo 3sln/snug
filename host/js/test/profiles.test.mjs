@@ -80,8 +80,14 @@ test('option resolution: presets, overrides, refusals of unknown values', () => 
   assert.equal(profileFlags({ wire: 'deterministic', keys: 'integer' }), 121);
   assert.equal(profileFlags({ wire: 'bindle', keys: 'any', tags: 'standard' }), 6);
   assert.equal(profileFlags({ wire: 'bindle', floats: 'deterministic', undefinedValue: true, noncharacters: true }), 112);
+  // D358: tag24 under valid sets PF_T24V (2048); the other presets always require a valid payload
+  assert.equal(profileFlags({ tag24: 'well-formed' }), 378);
+  assert.equal(profileFlags({ tag24: 'valid' }), 378 | 2048);
+  assert.equal(profileFlags({ wire: 'deterministic', tag24: 'well-formed' }), 122);
+  assert.equal(profileFlags({ wire: 'bindle', tag24: 'valid' }), 0);
+  assert.equal(profiles.valid.tag24, 'well-formed'); assert.equal(profiles.deterministic.tag24, 'valid');
   assert.equal(codecTop({}), 'any'); assert.equal(codecTop(B), 'map'); assert.equal(codecTop({ wire: 'bindle', top: 'any' }), 'any');
-  for (const bad of [{ wire: 'cde' }, { keys: 'int' }, { tags: 'all' }, { floats: 'rfc' }, { undefinedValue: 1 }, { noncharacters: 'yes' }, { keys: 'toString' }])
+  for (const bad of [{ wire: 'cde' }, { keys: 'int' }, { tags: 'all' }, { floats: 'rfc' }, { undefinedValue: 1 }, { noncharacters: 'yes' }, { keys: 'toString' }, { tag24: 'wf' }])
     assert.throws(() => decode(Uint8Array.of(0), bad), TypeError);
   // each option alone turns one acceptance on or off
   assert.throws(() => decode(fromHex('a10100'), { keys: 'text' }), { code: 'key_type' });
@@ -91,6 +97,10 @@ test('option resolution: presets, overrides, refusals of unknown values', () => 
   assert.throws(() => decode(fromHex('f97e00'), { floats: 'bindle' }), { code: 'float' });
   assert.throws(() => decode(fromHex('f7'), { undefinedValue: false }), { code: 'simple' });
   assert.throws(() => decode(fromHex('63efbfbf'), { noncharacters: false }), { code: 'text' });
+  // a duplicate key inside a tag-24 payload: well-formed is enough under valid, not with tag24 'valid'
+  assert.equal(decode(fromHex('d81845a201000100')).tag, 24);
+  assert.throws(() => decode(fromHex('d81845a201000100'), { tag24: 'valid' }), { code: 'duplicate_key' });
+  assert.throws(() => decode(fromHex('d81842f800')), { code: 'malformed' });
   assert.equal(decode(fromHex('f7'), { wire: 'bindle', top: 'any', undefinedValue: true }), undefined);
   // cose stays the Bindle option: integer labels in the top-level map only, under keys 'text'
   assert.deepStrictEqual(decode(fromHex('a10100'), { ...B, cose: true }), new Map([[1, 0]]));

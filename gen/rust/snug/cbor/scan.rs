@@ -944,7 +944,7 @@ pub(crate) fn scan_std(b: &[u8], o: &mut [i32], pos: i32, p: i32, tag: i32, dept
     // A standard-set tag (snug.cbor.stdtags, D121): its content is an item at
     // depth + 1, walked first; then the content rule (tag); then a tag-24 byte
     // string's content as one item at depth + 2, bounded by its end (trailing
-    // after it).
+    // after it): under PF_VALID without PF_T24V only well-formed (D358).
     let q: i32 = item(b, o, p, depth + 1, end);
     if q < 0 {
         return q;
@@ -956,9 +956,16 @@ pub(crate) fn scan_std(b: &[u8], o: &mut [i32], pos: i32, p: i32, tag: i32, dept
         return fail(o, pos, CODE_TAG);
     }
     if tag == 24 {
-        let r: i32 = scan_one(b, o, std_inner(b, p), depth + 2, q);
-        if r < 0 {
-            return r;
+        if wf_payload(o) {
+            let rw: i32 = wf_one(b, o, std_inner(b, p), depth + 2, q);
+            if rw < 0 {
+                return rw;
+            }
+        } else {
+            let r: i32 = scan_one(b, o, std_inner(b, p), depth + 2, q);
+            if r < 0 {
+                return r;
+            }
         }
     }
     return q;
@@ -1277,6 +1284,14 @@ pub(crate) fn defer_text(b: &[u8], o: &mut [i32], cb: &mut [u8], src: i32, tag: 
     }
     return 0;
 }
+pub(crate) fn payload_one(b: &[u8], o: &mut [i32], cs: i32, depth: i32, ce: i32) -> i32 {
+    // A gathered tag-24 payload as one item: well-formed only under PF_VALID
+    // without PF_T24V (D358; records nothing), else scan-one.
+    if wf_payload(o) {
+        return wf_one(b, o, cs, depth, ce);
+    }
+    return scan_one(b, o, cs, depth, ce);
+}
 pub(crate) fn defer_payload(b: &[u8], o: &mut [i32], cb: &mut [u8], src: i32, e: i32, cpos: i32, depth: i32, at: i32) -> i32 {
     // Kind 3: a tag-24 payload in an indefinite-length byte string, gathered into
     // cb and walked there as one item (scan-one) with the item count it would
@@ -1302,7 +1317,7 @@ pub(crate) fn defer_payload(b: &[u8], o: &mut [i32], cb: &mut [u8], src: i32, e:
     o[(O_S_CBTOP) as usize] = ge;
     o[(O_S_SRC) as usize] = 1;
     o[(O_ITEMS) as usize] = it0;
-    let mut r: i32 = scan_one(cb, o, top, depth, ge);
+    let mut r: i32 = payload_one(cb, o, top, depth, ge);
     if (r >= 0) && (o[(O_S_NDEF) as usize] > nd0) {
         r = run_defer(b, o, cb, nd0, o[(O_S_NDEF) as usize]);
     }

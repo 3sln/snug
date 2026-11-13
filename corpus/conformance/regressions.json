@@ -124,6 +124,53 @@
         {"rule": "r05", "hex": "c24101", "expect": false},
         {"rule": "unle", "hex": "c24101", "expect": false}
       ]
+    },
+    {
+      "category": "regression", "name": "tag-24 payloads under valid: well-formed only (D358, P9.13 decision 1)", "options": {"wire": "valid"},
+      "cddl": "a = any\ne = #6.24(bstr .cbor any)\n",
+      "cases": [
+        {"rule": "a", "hex": "d81845a201000100", "expect": true, "note": "RFC 8949 3.4.5.1: a duplicate key inside the payload; was duplicate_key"},
+        {"rule": "a", "hex": "d8184261ff", "expect": true, "note": "invalid UTF-8 inside the payload; was text"},
+        {"rule": "a", "hex": "d81844d9ffff00", "expect": true, "note": "tag 65535 inside the payload; was tag"},
+        {"rule": "a", "hex": "d8185f42a2004200004100ff", "expect": true, "note": "a duplicate key in a payload gathered from chunks"},
+        {"rule": "a", "hex": "d81843a10000", "expect": true},
+        {"rule": "a", "hex": "d81842f800", "expect": false, "note": "f8 00 is not well-formed"},
+        {"rule": "a", "hex": "d8184201ff", "expect": false, "note": "trailing bytes after the payload's item"},
+        {"rule": "a", "hex": "d81841a1", "expect": false, "note": "truncated payload"},
+        {"rule": "a", "hex": "d81841ff", "expect": false, "note": "a lone break"},
+        {"rule": "e", "hex": "d81845a201000100", "expect": false, "note": ".cbor T still requires a valid item matching T"},
+        {"rule": "e", "hex": "d8184261ff", "expect": false},
+        {"rule": "e", "hex": "d81843a10000", "expect": true}
+      ]
+    },
+    {
+      "category": "regression", "name": "tag-24 payloads under valid with tag24 'valid' (D358)", "options": {"wire": "valid", "tag24": "valid"},
+      "cddl": "a = any\n",
+      "cases": [
+        {"rule": "a", "hex": "d81845a201000100", "expect": false},
+        {"rule": "a", "hex": "d8184261ff", "expect": false},
+        {"rule": "a", "hex": "d81844d9ffff00", "expect": false},
+        {"rule": "a", "hex": "d8185f42a2004200004100ff", "expect": false},
+        {"rule": "a", "hex": "d81843a10000", "expect": true},
+        {"rule": "a", "hex": "d81842f800", "expect": false}
+      ]
+    },
+    {
+      "category": "regression", "name": "tag-24 payloads under deterministic: valid items (D358)", "options": {"wire": "deterministic"},
+      "cddl": "a = any\n",
+      "cases": [
+        {"rule": "a", "hex": "d81845a201000100", "expect": false},
+        {"rule": "a", "hex": "d8184261ff", "expect": false},
+        {"rule": "a", "hex": "d81843a10000", "expect": true}
+      ]
+    },
+    {
+      "category": "regression", "name": "a well-formed tag-24 payload still counts its items (D358)", "options": {"wire": "valid", "maxItems": 4},
+      "cddl": "a = any\n",
+      "cases": [
+        {"rule": "a", "hex": "d81843820102", "expect": false, "note": "tag, byte string, then the payload's three items: five"},
+        {"rule": "a", "hex": "d8184101", "expect": true}
+      ]
     }
   ]
 }

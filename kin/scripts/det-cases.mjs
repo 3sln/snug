@@ -71,13 +71,14 @@ export function buildDetCases(MUTATIONS, SEED, { valid = false } = {}) {
     const NANS = ['f97e00', 'fa7fc00000', 'fb7ff8000000000000'];
     const pairs = [['f90000', 'f98000'], ['f98000', 'fb0000000000000000'], ['fa80000000', 'f90000'], ['f97e00', 'fb7ff8000000000000'], ['fa7fc00000', 'f97e00']];
     const LATER = ['ff', 'd842420000', 'd84243000000', '1c', '18', '5f41', 'f818'];
-    for (const [k1, k2] of pairs) for (const later of LATER) for (const flags of [PF_DET | 256, PF_STD | 256]) {
+    // D358: the payload's own checks run only with PF_T24V (2048); without it the payload need only be well-formed
+    for (const [k1, k2] of pairs) for (const later of LATER) for (const flags of [PF_DET | 256, PF_STD | 256, PF_DET | 256 | 2048, PF_STD | 256 | 2048]) {
       const map = 'a2' + k1 + 'f6' + k2 + 'f6';
       for (const payload of ['82' + map + later, '83' + map + '01' + later, 'a1' + '6161' + map + later])
         fixed.push([t24(payload), { ...DDEF, flags }], ['82' + t24(payload) + '00', { ...DDEF, flags }]);
       fixed.push(['82' + t24(map) + later, { ...DDEF, flags }]);
     }
-    for (const z of [...ZEROS, ...NANS]) fixed.push([t24('82a2' + z + 'f6' + z + 'f6ff'), { ...DDEF, flags: 378 }]);
+    for (const z of [...ZEROS, ...NANS]) for (const flags of [378, 378 | 2048]) fixed.push([t24('82a2' + z + 'f6' + z + 'f6ff'), { ...DDEF, flags }]);
   }
   for (const [h, opt] of fixed) add(`detfixed ${h.slice(0, 40)}${h.length > 40 ? '…' : ''} f${opt.flags}`, unhex(h), opt, undefined);
   // P9.13 WP3 (S6): depth boundaries with their expected code and offset, written down here (not
@@ -187,10 +188,12 @@ export function buildDetCases(MUTATIONS, SEED, { valid = false } = {}) {
   const randomOpt = () => {
     // P8.4 (valid: true): PF_VALID (256) on a third of them, the valid preset (378) among the presets; without it
     // the case set is the one before P8.4 (the wasm SDK's parity set: its host has no valid-CBOR buffers yet)
-    const flags = !valid
+    let flags = !valid
       ? (r() < 0.6 ? PF_DET : r() < 0.5 ? ri(128) : pick([0, 1, 2, 4, 8, 16, 32, 64, PF_STD, PF_DET & ~8, PF_DET & ~16]))
       : r() < 0.6 ? (r() < 0.5 ? PF_DET : PF_DET | 256) : r() < 0.5 ? ri(128) | (r() < 0.5 ? 256 : 0)
         : pick([0, 1, 2, 4, 8, 16, 32, 64, PF_STD, PF_DET & ~8, PF_DET & ~16, 256, 16 | 256, PF_STD | 256]);
+    // D358: half the valid-CBOR runs with PF_T24V (tag-24 payloads walked as valid items)
+    if (valid && (flags & 256) && r() < 0.5) flags |= 2048;
     if (r() < 0.7) return { ...DDEF, flags };
     return { top: r() < 0.8 ? 'any' : 'map', cose: r() < 0.2, maxBytes: r() < 0.85 ? 1_500_000 : ri(40), maxDepth: r() < 0.6 ? 32 : ri(6),
       maxEntries: r() < 0.6 ? 65_536 : ri(6), maxItems: r() < 0.6 ? 131_072 : ri(14), flags };

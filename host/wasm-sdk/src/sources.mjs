@@ -329,7 +329,7 @@ class ScanVm extends VmSession {
 }
 function scanOpts(options) {
   const limits = resolveLimits(options);
-  return { ...pick(options, ['wire', 'keys', 'tags', 'floats', 'undefinedValue', 'noncharacters', 'cose']),
+  return { ...pick(options, ['wire', 'keys', 'tags', 'floats', 'undefinedValue', 'noncharacters', 'tag24', 'cose']),
     top: codecTop(options), maxBytes: limits.maxBytes, maxDepth: limits.maxDepth,
     maxEntries: limits.maxEntries, maxItems: limits.maxItems };
 }
@@ -379,7 +379,7 @@ function scanUnknown(options, scheduling) {
   rt.ready();
   anyProgram ??= innerOf(new Program(ANY_P, ANY_B));
   const limits = resolveLimits(options);
-  const opts = { ...pick(options, ['wire', 'keys', 'tags', 'floats', 'undefinedValue', 'noncharacters', 'cose']),
+  const opts = { ...pick(options, ['wire', 'keys', 'tags', 'floats', 'undefinedValue', 'noncharacters', 'tag24', 'cose']),
     top: codecTop(options), maxBytes: limits.maxBytes, maxDepth: limits.maxDepth,
     maxEntries: limits.maxEntries, maxItems: limits.maxItems };
   return new VmSession(anyProgram, 0, undefined, opts, scheduling.quantum ?? 0);

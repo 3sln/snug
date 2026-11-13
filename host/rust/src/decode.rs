@@ -81,10 +81,25 @@ pub struct Profile {
     /// Valid, non-deterministic CBOR: indefinite lengths, longer
     /// heads and floats than needed, NaN payloads, keys in any order.
     pub valid: bool,
+    /// What a tag-24 payload (encoded CBOR data item) must be when `valid`
+    /// is set. Without `valid` it is always a valid item under this profile.
+    pub tag24: Tag24,
+}
+/// What a tag-24 payload must be under a `valid` profile.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum Tag24 {
+    /// One well-formed item that fills the byte string (RFC 8949 §3.4.5.1);
+    /// only the resource limits apply inside it.
+    WellFormed,
+    /// One valid item under the profile, as the deterministic and Bindle
+    /// profiles always require.
+    Valid,
 }
 impl Profile {
     /// The valid preset: the deterministic preset's options, admitting
-    /// every valid encoding (RFC 8949 §5.3).
+    /// every valid encoding (RFC 8949 §5.3). A tag-24 payload need only be
+    /// well-formed.
     pub const VALID: Profile = Profile {
         keys: Keys::Any,
         tags: Tags::Any,
@@ -92,6 +107,7 @@ impl Profile {
         undefined_value: true,
         noncharacters: true,
         valid: true,
+        tag24: Tag24::WellFormed,
     };
     /// The deterministic preset (RFC 8949 §4.2.1 checking).
     pub const DETERMINISTIC: Profile = Profile {
@@ -101,6 +117,7 @@ impl Profile {
         undefined_value: true,
         noncharacters: true,
         valid: false,
+        tag24: Tag24::Valid,
     };
     /// The Bindle profile.
     pub const BINDLE: Profile = Profile {
@@ -110,6 +127,7 @@ impl Profile {
         undefined_value: false,
         noncharacters: false,
         valid: false,
+        tag24: Tag24::Valid,
     };
     /// The core's profile flags (snug.cbor.codes PF_*).
     pub fn flags(&self) -> i32 {
@@ -128,6 +146,7 @@ impl Profile {
             | if self.undefined_value { 32 } else { 0 }
             | if self.noncharacters { 64 } else { 0 }
             | if self.valid { 256 } else { 0 }
+            | if self.valid && self.tag24 == Tag24::Valid { 2048 } else { 0 }
     }
 }
 impl Default for Profile {

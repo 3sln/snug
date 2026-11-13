@@ -3,7 +3,7 @@
 
 import { kclass } from '../cbor/canon.mjs';
 import { CODE_BIGNUM, CODE_DECIMAL, CODE_DEPTH, CODE_DUPLICATE_KEY, CODE_KEY_ORDER, CODE_KEY_TYPE, CODE_NDARRAY, CODE_TAG, CODE_TOO_MANY_ITEMS, CODE_TRAILING, CODE_TRUNCATED, CODE_TYPED_ARRAY, EV_EMB, EV_END, EV_HEAD, EV_KEY, EV_UNITS, EV_WORDS, MAX_BIGNUM_BYTES, O_COSE, O_CSTART, O_HI, O_ITEMS, O_LO, O_MAX_DEPTH, O_MAX_ITEMS, O_PROFILE, O_VCTL, PF_CANON, PF_TAGS, PF_VREL, VC_ECS } from '../cbor/codes.mjs';
-import { bytesContent, countItem, enterContainer, fail, readArg, takeLen } from '../cbor/head.mjs';
+import { bytesContent, countItem, enterContainer, fail, readArg, takeLen, wfOne, wfPayload } from '../cbor/head.mjs';
 import { compareSpans } from '../cbor/keys.mjs';
 import { keyLabel, keyPeek, scanFloat, scanSimple, textBad, typedNanAt } from '../cbor/scan.mjs';
 import { ruleTag, stdAllowed, stdContentOk, stdInner } from '../cbor/stdtags.mjs';
@@ -554,6 +554,20 @@ export function deadStdCheck(b, s, pos, tag, q, stop, depth) {
     }
     if (!stdContentOk(b, tag, q, stop)) {
         return fail(s, pos, CODE_TAG);
+    }
+    if ((tag === 24) && wfPayload(s)) {
+        // D358: a valid-CBOR run without PF_T24V: the payload's bytes (a byte
+        // string's content is the same in a canonical copy) walked as one
+        // well-formed item, the scanner's wf-one; 1 unit per item it counted
+        const i0 = s[O_ITEMS];
+        const rw = wfOne(b, s, stdInner(b, q), depth + 2, stop);
+        if (!charge(s, s[O_ITEMS] - i0, pos)) {
+            return -R_BUDGET;
+        }
+        if (rw < 0) {
+            return rw;
+        }
+        return stop;
     }
     if (tag === 24) {
         const cs = stdInner(b, q);

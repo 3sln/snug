@@ -38,8 +38,9 @@ and `SequenceOptions`: `Profile::VALID` (any valid CBOR)
 by default, `Profile::DETERMINISTIC` to require RFC 8949 §4.2.1 encoding,
 `Profile::BINDLE` for the Bindle restrictions (root `cose` integer labels an
 option there), or the fields `keys`, `tags`, `floats`, `undefined_value`,
-`noncharacters`, `valid`
-([profiles](profiles.md)). `CompileOptions::unicode`
+`noncharacters`, `valid`, `tag24` (`Tag24::WellFormed`, the valid preset's:
+a tag-24 payload need only be well-formed; `Tag24::Valid`; read only with
+`valid`) ([profiles](profiles.md)). `CompileOptions::unicode`
 accepts `Some(&tables)` from `snug::unicode_tables::tables()` for pinned
 Unicode 16.0 category regexps. Programs contain the compiled automata and do
 not need the category tables at validation time. `CompileOptions::cuts`

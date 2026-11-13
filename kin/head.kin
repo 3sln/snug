@@ -5,15 +5,18 @@
 ;; Every function returns a position (>= 0) or a NEGATED refusal code, and on
 ;; refusal records the offset it was decided at in o[O_ERR_POS].
 (ns snug.cbor.head
-  (:require [kin.lang :refer [defn let return set if do comment]]
-            [snug.lang :refer [I32 Bool Bytes Ints + - neg shl bit-or bit-and
-                               ushr < > <= >= == != or u8 ia iset]]
+  (:require [kin.lang :refer [defn let return set if do for comment declarefn forever]]
+            [snug.lang :refer [I32 Bool Bytes Ints IntsR + - * neg shl bit-or bit-and
+                               ushr < > <= >= == != and or not u8 ia iset]]
             [snug.cbor.codes :refer [CODE_TRUNCATED CODE_NON_SHORTEST
-                                     CODE_INDEFINITE CODE_MALFORMED
+                                     CODE_INDEFINITE CODE_MALFORMED CODE_TRAILING
                                      CODE_TOO_MANY_ITEMS CODE_DEPTH
                                      CODE_TOO_MANY_ENTRIES
                                      O_ERR_POS O_ITEMS O_MAX_ITEMS O_MAX_DEPTH
-                                     O_MAX_ENTRIES O_HI O_LO O_CSTART O_VCTL VC_NONDET]]))
+                                     O_MAX_ENTRIES O_HI O_LO O_CSTART O_VCTL VC_NONDET
+                                     O_PROFILE PF_VALID PF_VREL PF_T24V]]))
+
+(declarefn wf-item)
 
 (defn ^:pub ^I32 fail [^Ints o ^I32 at ^I32 code]
   (comment "Record where a refusal was decided; answer the negated code.")
@@ -162,3 +165,126 @@
       (iset o O_HI hi)
       (iset o O_LO v)
       (return (+ p w)))))
+
+;; ------------------------------------------------------------ well-formed only (D358)
+;; Under PF_VALID a tag-24 payload need only be well-formed (RFC 8949 §3.4.5.1):
+;; one item, bounded by its byte string's end. The scanner, the VM (buffer walk,
+;; live walk and resumable session) and so the identity gates share this walk.
+;; It keeps the resource bounds (items, depth, entries) and the scanner's codes
+;; and offsets for them; it checks nothing else: no key rule, no duplicate keys,
+;; no UTF-8, no tag rule, no float or simple-value rule beyond Appendix F.
+
+(defn ^:pub ^Bool wf-payload [^IntsR o]
+  (comment "Is a tag-24 payload walked as well-formed only: a valid-CBOR run"
+           "(PF_VALID, or PF_VREL in the VM) without PF_T24V?")
+  (let [pf (ia o O_PROFILE)]
+    (return (and (!= (bit-and pf (bit-or PF_VALID PF_VREL)) 0) (== (bit-and pf PF_T24V) 0)))))
+
+(defn ^I32 wf-arg [^Bytes b ^Ints o ^I32 pos ^I32 ai ^I32 end]
+  (comment "The argument of the head at pos, ai 24..27, at any width, into o[O_HI],"
+           "o[O_LO]: the position after the head, or truncated (at pos).")
+  (let [p (+ pos 1)
+        w (shl 1 (- ai 24))]
+    (if (> w (- end p)) (return (fail o pos CODE_TRUNCATED)))
+    (let [^:mut hi 0
+          ^:mut v (u8 b p)]
+      (if (== w 2) (set v (bit-or (shl v 8) (u8 b (+ p 1)))))
+      (if (== w 4) (set v (be32 b p)))
+      (if (== w 8)
+        (do (set hi (be32 b p))
+            (set v (be32 b (+ p 4)))))
+      (iset o O_HI hi)
+      (iset o O_LO v)
+      (return (+ p w)))))
+
+(defn ^I32 wf-istr [^Bytes b ^Ints o ^I32 pos ^I32 major ^I32 end]
+  (comment "An indefinite-length string: definite chunks of its major type to a"
+           "break (malformed otherwise, truncated at the end of input).")
+  (let [^:mut q (+ pos 1)]
+    (forever
+      (if (>= q end) (return (fail o q CODE_TRUNCATED)))
+      (let [ib (u8 b q)
+            ai (bit-and ib 31)]
+        (if (== ib 255) (return (+ q 1)))
+        (if (or (!= (ushr ib 5) major) (> ai 27)) (return (fail o q CODE_MALFORMED)))
+        (let [^:mut p (+ q 1)
+              ^:mut hi 0
+              ^:mut lo ai]
+          (if (>= ai 24)
+            (do (set p (wf-arg b o q ai end))
+                (if (< p 0) (return p))
+                (set hi (ia o O_HI))
+                (set lo (ia o O_LO))))
+          (set q (take-len o q p hi lo end))
+          (if (< q 0) (return q)))))))
+
+(defn ^I32 wf-icont [^Bytes b ^Ints o ^I32 pos ^I32 pairs ^I32 depth ^I32 end]
+  (comment "An indefinite-length array (pairs 0) or map (1): the depth bound, then"
+           "entries to a break, too_many_entries (at the head) before the entry that"
+           "would pass maxEntries; a break where a map value belongs is that value's"
+           "own refusal (malformed).")
+  (if (>= depth (ia o O_MAX_DEPTH)) (return (fail o pos CODE_DEPTH)))
+  (let [inner (+ depth 1)
+        ^:mut q (+ pos 1)
+        ^:mut k 0]
+    (forever
+      (if (>= q end) (return (fail o q CODE_TRUNCATED)))
+      (if (== (u8 b q) 255) (return (+ q 1)))
+      (if (>= k (ia o O_MAX_ENTRIES)) (return (fail o pos CODE_TOO_MANY_ENTRIES)))
+      (set q (wf-item b o q inner end))
+      (if (< q 0) (return q))
+      (if (!= pairs 0)
+        (do (set q (wf-item b o q inner end))
+            (if (< q 0) (return q))))
+      (set k (+ k 1)))))
+
+(defn ^:pub ^I32 wf-item [^Bytes b ^Ints o ^I32 pos ^I32 depth ^I32 end]
+  (comment "One well-formed item at pos, depth `depth`, bounded by end: its end, or a"
+           "negated code. Counted first, as the scanner counts.")
+  (let [c (count-item o pos)]
+    (if (< c 0) (return c)))
+  (if (>= pos end) (return (fail o pos CODE_TRUNCATED)))
+  (let [ib (u8 b pos)
+        major (ushr ib 5)
+        ai (bit-and ib 31)
+        ^:mut hi 0
+        ^:mut lo ai
+        ^:mut p (+ pos 1)]
+    (if (== ai 31)
+      (do (if (or (== major 2) (== major 3)) (return (wf-istr b o pos major end)))
+          (if (or (== major 4) (== major 5)) (return (wf-icont b o pos (- major 4) depth end)))
+          (return (fail o pos CODE_MALFORMED))))
+    (if (> ai 27) (return (fail o pos CODE_MALFORMED)))
+    (if (>= ai 24)
+      (do (set p (wf-arg b o pos ai end))
+          (if (< p 0) (return p))
+          (set hi (ia o O_HI))
+          (set lo (ia o O_LO))))
+    (if (<= major 1) (return p))
+    (if (<= major 3) (return (take-len o pos p hi lo end)))
+    (if (<= major 5)
+      (do (let [pairs (- major 4)
+                r (enter-container o pos p hi lo depth pairs end)
+                inner (+ depth 1)
+                ^:mut n lo
+                ^:mut q p]
+            (if (< r 0) (return r))
+            (if (!= pairs 0) (set n (* 2 lo)))
+            (for [^I32 _i 0 n]
+              (set q (wf-item b o q inner end))
+              (if (< q 0) (return q)))
+            (return q))))
+    (if (== major 6)
+      (do (if (>= depth (ia o O_MAX_DEPTH)) (return (fail o pos CODE_DEPTH)))
+          (return (wf-item b o p (+ depth 1) end))))
+    (comment "major 7: f8 with a value below 32 is not well-formed (Appendix F)")
+    (if (and (== ai 24) (< lo 32)) (return (fail o pos CODE_MALFORMED)))
+    (return p)))
+
+(defn ^:pub ^I32 wf-one [^Bytes b ^Ints o ^I32 cs ^I32 depth ^I32 ce]
+  (comment "One well-formed item at cs that must end exactly at ce (a tag-24 payload):"
+           "ce, or a negated code -- truncated when it runs past ce, trailing after it.")
+  (let [r (wf-item b o cs depth ce)]
+    (if (< r 0) (return r))
+    (if (!= r ce) (return (fail o r CODE_TRAILING)))
+    (return r)))

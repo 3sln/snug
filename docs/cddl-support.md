@@ -458,7 +458,9 @@ refused with `group_recursion`; recursion that consumes nothing is
   when the time, converted to UTC by its offset, is 23:59:60 on the last day
   of a month); tag 1 an integer or any float
   (non-finite floats are discouraged by RFC 8949 §3.4.2, not invalid); tag
-  24 one valid item; tag 32 an RFC 3986 `URI-reference` (scheme, authority
+  24 one well-formed item under `valid` (RFC 8949 §3.4.5.1; one valid item
+  with `tag24: 'valid'` and under `deterministic` and Bindle; `#6.24(bstr .cbor T)`
+  always asks for a valid item matching `T`); tag 32 an RFC 3986 `URI-reference` (scheme, authority
   with IPv6/IPvFuture literals, path, query, fragment; no RFC 6874 zone
   identifiers); tags 2/3 (byte-string content; minimal, with no leading
   zero byte and not below 2⁶⁴, under the deterministic and Bindle presets),

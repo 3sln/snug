@@ -66,7 +66,7 @@ pub mod async_source;
 pub mod sessions;
 pub use value::{Value, Integer, TypedArray};
 pub use error::{Error, IoError};
-pub use decode::{decode, DecodeOptions, Floats, Keys, Profile, Tags, Top};
+pub use decode::{decode, DecodeOptions, Floats, Keys, Profile, Tag24, Tags, Top};
 pub use encode::{encode, EncodeOptions};
 pub use writer::Writer;
 pub use program::Program;

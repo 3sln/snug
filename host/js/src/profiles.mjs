@@ -3,7 +3,7 @@
 // options; any option given explicitly overrides the preset's value. The
 // generated core decides every byte (snug.cbor.codes PF_* flags); this module only resolves
 // option objects to those flags.
-import { PF_DETERMINISTIC, PF_VALID, PF_VALID_PRESET } from '../../../gen/js/snug/cbor/codes.mjs';
+import { PF_DETERMINISTIC, PF_VALID, PF_VALID_PRESET, PF_T24V } from '../../../gen/js/snug/cbor/codes.mjs';
 
 const KEYS = { text: 0, integer: 1, any: 2 };
 const TAGS = { bindle: 0, standard: 4, any: 8 };
@@ -13,16 +13,20 @@ const UNDEFINED = 32, NONCHAR = 64;
 export const profiles = Object.freeze({
   // P8.4 (D260): any valid CBOR (RFC 8949 §5.3) -- the deterministic preset's options plus
   // non-deterministic encodings (indefinite lengths, longer heads and floats, keys in any order).
+  // D358: under valid a tag-24 payload need only be well-formed (RFC 8949 §3.4.5.1); the
+  // deterministic and Bindle presets always walk it as a valid item under their own rules.
   valid: Object.freeze({ wire: 'valid', top: 'any', cose: false, keys: 'any', tags: 'any',
-    floats: 'deterministic', undefinedValue: true, noncharacters: true, strictArrays: false }),
+    floats: 'deterministic', undefinedValue: true, noncharacters: true, strictArrays: false, tag24: 'well-formed' }),
   deterministic: Object.freeze({ wire: 'deterministic', top: 'any', cose: false, keys: 'any', tags: 'any',
-    floats: 'deterministic', undefinedValue: true, noncharacters: true, strictArrays: false }),
+    floats: 'deterministic', undefinedValue: true, noncharacters: true, strictArrays: false, tag24: 'valid' }),
   bindle: Object.freeze({ wire: 'bindle', top: 'map', cose: false, keys: 'text', tags: 'bindle', floats: 'bindle',
-    undefinedValue: false, noncharacters: false, strictArrays: true }),
+    undefinedValue: false, noncharacters: false, strictArrays: true, tag24: 'valid' }),
 });
 
 const BINDLE_FLAGS = 0;
-if (PF_DETERMINISTIC !== 122 || PF_VALID !== 256 || PF_VALID_PRESET !== 378) throw new Error('snug: profile flags out of step with kin');
+if (PF_DETERMINISTIC !== 122 || PF_VALID !== 256 || PF_VALID_PRESET !== 378 || PF_T24V !== 2048)
+  throw new Error('snug: profile flags out of step with kin');
+const TAG24 = { 'well-formed': 0, valid: PF_T24V };
 
 // The preset when `wire` is not given (D267).
 export const DEFAULT_WIRE = 'valid';
@@ -47,14 +51,16 @@ function bool(value, name) {
 /** The core's profile flags (snug.cbor.codes PF_*) for these options. */
 export function profileFlags(options) {
   const preset = presetOf(options);
-  const { keys, tags, floats, undefinedValue, noncharacters } = options;
-  if (keys === undefined && tags === undefined && floats === undefined && undefinedValue === undefined && noncharacters === undefined)
+  const { keys, tags, floats, undefinedValue, noncharacters, tag24 } = options;
+  if (keys === undefined && tags === undefined && floats === undefined && undefinedValue === undefined && noncharacters === undefined && tag24 === undefined)
     return preset === profiles.bindle ? BINDLE_FLAGS : preset === profiles.valid ? PF_VALID_PRESET : PF_DETERMINISTIC;
+  // without wire 'valid' the payload is always a valid item under the profile: tag24 is ignored
+  const t24 = pick(TAG24, tag24 ?? preset.tag24, 'tag24');
   return pick(KEYS, keys ?? preset.keys, 'keys') | pick(TAGS, tags ?? preset.tags, 'tags')
     | pick(FLOATS, floats ?? preset.floats, 'floats')
     | (bool(undefinedValue ?? preset.undefinedValue, 'undefinedValue') ? UNDEFINED : 0)
     | (bool(noncharacters ?? preset.noncharacters, 'noncharacters') ? NONCHAR : 0)
-    | (preset === profiles.valid ? PF_VALID : 0);
+    | (preset === profiles.valid ? PF_VALID | t24 : 0);
 }
 
 /** The root policy of the codec, views and profile sources: options.top, else the preset's. */

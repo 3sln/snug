@@ -171,7 +171,7 @@ export const PF_UNDEFINED = 32;
 
 export const PF_NONCHAR = 64;
 
-export const PF_HOST = 383;
+export const PF_HOST = 2431;
 
 export const PF_SUB = 128;
 
@@ -184,6 +184,8 @@ export const PF_VALID_PRESET = 378;
 export const PF_CANON = 512;
 
 export const PF_VREL = 1024;
+
+export const PF_T24V = 2048;
 
 export const MAX_BIGNUM_BYTES = 128;
 

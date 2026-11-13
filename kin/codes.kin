@@ -152,7 +152,7 @@
 (defconst ^:pub ^I32 PF_FLOATS 16)
 (defconst ^:pub ^I32 PF_UNDEFINED 32)
 (defconst ^:pub ^I32 PF_NONCHAR 64)
-(defconst ^:pub ^I32 PF_HOST 383)
+(defconst ^:pub ^I32 PF_HOST 2431)
 (defconst ^:pub ^I32 PF_SUB 128)
 (defconst ^:pub ^I32 PF_DETERMINISTIC 122)
 ;;   bit 8    PF_VALID    (P8.4, D260) valid CBOR: indefinite lengths, non-shortest
@@ -165,10 +165,15 @@
 ;;   bit 10   PF_VREL     internal: the VM's deterministic walk of a PF_VALID run --
 ;;                        admits what PF_VALID admits without changing bytes (a NaN
 ;;                        with payload in its shortest width, bignum leading zeros)
+;;   bit 11   PF_T24V     (D358) only with PF_VALID (or PF_VREL): a tag-24 payload
+;;                        must be a valid item under the profile, as without
+;;                        PF_VALID. Clear, PF_VALID asks only that it be one
+;;                        well-formed item (RFC 8949 §3.4.5.1): head.kin wf-one.
 (defconst ^:pub ^I32 PF_VALID 256)
 (defconst ^:pub ^I32 PF_VALID_PRESET 378)
 (defconst ^:pub ^I32 PF_CANON 512)
 (defconst ^:pub ^I32 PF_VREL 1024)
+(defconst ^:pub ^I32 PF_T24V 2048)
 
 ;; Profile bounds that are not options (cbor.mjs LIMITS).
 (defconst ^:pub ^I32 MAX_BIGNUM_BYTES 128)

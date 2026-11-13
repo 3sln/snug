@@ -9,11 +9,15 @@ deterministic bytes under every profile. Three presets exist:
   8949 §5.3) — indefinite lengths, non-shortest heads and floats, map keys in
   any order, NaN payloads — refusing what is not valid: a duplicate map key
   *by value* (RFC 8949 §5.6.1: `1` twice, or `"a"` in two encodings), invalid
-  UTF-8, invalid content of a tag snug knows (dates, URIs, bignums, tag-24
-  payloads, typed-array lengths, …) and everything not well-formed. Tags snug
+  UTF-8, invalid content of a tag snug knows (dates, URIs, bignums,
+  typed-array lengths, …) and everything not well-formed. Tags snug
   has no rule for are not content-checked: tag 5 (bigfloat) and tags 33/34
   (base64url / base64 text), like any other unlisted tag, accept any
-  well-formed content (see [Tag sets](#tag-sets)). Its other
+  well-formed content (see [Tag sets](#tag-sets)). A tag-24 payload
+  (encoded CBOR) need only be **well-formed**, as RFC 8949 §3.4.5.1 asks:
+  one item filling its byte string; a duplicate key or invalid UTF-8 inside
+  it is not refused. `tag24: 'valid'` asks for a valid item instead, and a
+  schema's `.cbor T` always does. Its other
   options are the deterministic preset's (unassigned simple values included).
   `valid` **preserves NaN payloads**: `f97e01` is accepted, and a View's
   `raw()` keeps its bytes (a JavaScript number cannot hold the payload).
@@ -29,7 +33,11 @@ deterministic bytes under every profile. Three presets exist:
   §4.2.1 alone is not offered as a preset. Any map key kind, any tag number with
   the content checks of the tags snug knows, RFC 8949 scalar floats,
   `undefined` and the unassigned simple values (`Simple`), and any
-  well-formed UTF-8 (noncharacters included). Choose it
+  well-formed UTF-8 (noncharacters included). A tag-24 payload must be one
+  valid item under these same rules, deterministic encoding included: what
+  the preset guarantees (one encoding per value, no duplicate keys, valid
+  text) then holds for the embedded CBOR a signature or hash also covers,
+  so `tag24` is not read here. Choose it
   for signing, hashing and protocols that require deterministic encoding
   (dCBOR, CTAP2, COSE inputs to be signed).
 * **`bindle`**: the Bindle/3sln.me wire profile, kept for that consumer:
@@ -152,6 +160,7 @@ and mixed keys show the difference: `{10, 100, -1}` is ordered `0a`, `1864`,
 | `floats` | `'bindle'`, `'deterministic'` | `'deterministic'` | `'deterministic'` | `'bindle'` |
 | `undefinedValue` | boolean: simple values other than `false`/`true`/`null` — `f7` and the unassigned ones | true | true | false |
 | `noncharacters` | boolean (U+FDD0..FDEF, U+xFFFE/xFFFF in text) | true | true | false |
+| `tag24` | `'well-formed'`, `'valid'`: what a tag-24 payload must be; read only under `valid` | `'well-formed'` | `'valid'` (always) | `'valid'` (always) |
 | `top` (codec, views, profile sources) | `'map'`, `'any'` | `'any'` | `'any'` | `'map'` |
 | `cose` | boolean: safe-integer labels in the top-level map under `keys: 'text'` | false | false | false |
 | `strictArrays` (encode, Writer) | boolean | false | false | true |
@@ -166,7 +175,7 @@ every preset, as before. `profiles.valid`, `profiles.deterministic` and
 `profiles.bindle` are frozen option objects spelling the presets out; spread
 them to override. Rust has the same model: `snug::Profile` (`VALID`,
 `DETERMINISTIC`, `BINDLE`, or the fields `keys`, `tags`, `floats`,
-`undefined_value`, `noncharacters`, `valid`) in `DecodeOptions`,
+`undefined_value`, `noncharacters`, `valid`, `tag24`) in `DecodeOptions`,
 `EncodeOptions`, `ValidationOptions` and `SequenceOptions`, all defaulting to
 the valid preset (`DecodeOptions::deterministic()` and `::bindle()`,
 `EncodeOptions::bindle()` select the others).
@@ -192,7 +201,7 @@ the top-level map only, which must be safe integers (−(2⁵³−1)..2⁵³−1
 | 0 | Text in RFC 3339 `date-time` form: `YYYY-MM-DDThh:mm:ss`, optional `.` fraction, `Z` or `±hh:mm`; upper-case `T` and `Z` (RFC 4287 §3.3); month, day within its month (leap years), hour, minute and offset ranges checked; second 60 only when the time, converted to UTC by its offset, is 23:59:60 on the last day of a month | standard |
 | 1 | An integer (major 0/1) or any float (non-finite floats are discouraged by RFC 8949 §3.4.2, not invalid) | standard |
 | 21, 22, 23 | Any item (expected base64url / base64 / base16 conversion hints) | standard |
-| 24 | A byte string whose content is exactly one item, itself valid under the same profile | standard |
+| 24 | A byte string whose content is exactly one item. Under `deterministic` and Bindle, and under `valid` with `tag24: 'valid'`, the item must be valid under the same profile; under `valid` (the default `tag24: 'well-formed'`) it need only be well-formed (RFC 8949 §3.4.5.1), within the same depth, entry and item limits | standard |
 | 32 | Text that is an RFC 3986 `URI-reference` (relative references included), parsed: scheme, authority with IPv6/IPvFuture literals, path, query, fragment; no RFC 6874 zone identifiers | standard |
 | 55799 | Any item, at any depth | standard |
 | 64–68, 73–75, 80–83, 87 | RFC 8746 typed arrays outside the Bindle set (uint8, big-endian forms, clamped, float128): a byte string holding whole elements (1, 2, 4, 8 or 16 bytes); no NaN rule | any |
@@ -217,7 +226,10 @@ refuses with `tag` at the tag's head. A tag-24 payload is then
 walked as one item two levels below the tag, bounded by its byte string: its
 refusals carry their own codes and offsets, `truncated` for an empty or short
 payload and `trailing` after its one item; its items count toward
-`maxItems`. "Top level" for 55799 means depth 0 of the document: not inside
+`maxItems`. When it need only be well-formed, the walk refuses only
+`truncated`, `malformed`, `trailing` and the limits (`depth`,
+`too_many_entries`, `too_many_items`); nothing else inside it is checked
+(keys, text, tags, simple values). "Top level" for 55799 means depth 0 of the document: not inside
 a tag-24 payload, a `.cbor` byte string, or a span validated by `validateAt`
 below the root.
 
@@ -319,7 +331,7 @@ fails:
 | --- | --- | --- |
 | `tag` | the content rules above (dates, epochs, URIs, tag-24 kind, typed-array lengths, 55799 only at the top); the test fails if the refused tag has no rule | few content checks |
 | `cbor2tags` | no rule for the tag (e.g. 33 base64url) | one of its tag decoders refuses the content; confirmed when cbor2 accepts with `ignoreGlobalTags` |
-| `tag24` | a tag-24 payload must be one valid item | not looked inside |
+| `tag24` | a tag-24 payload must be one well-formed item (one valid item under `deterministic`) | not looked inside |
 | `floatwidth` | non-shortest floats refused | checked only with `rejectLongFloats` (confirmed there) |
 | `intfloat` | integral floats (`f93c00`) accepted (RFC 8949 §4.2.1) | `rejectLongFloats` refuses them (a dCBOR rule) |
 | `nan` | only `f97e00` | also accepts `f9fe00` (sign bit) |

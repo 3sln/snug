@@ -60,7 +60,7 @@
                                      O_S_DUPK O_S_DUPP O_S_DUPO O_S_DUPC O_S_PLANT O_S_PMAJ O_S_PLEN
                                      O_S_STOPX O_S_CBASE O_S_PSTOP O_S_NSORT O_S_DUPCO O_S_PBAD O_S_EDEPTH O_S_FIRST
                                      EV_HEAD EV_END EV_KEY EV_WMARK EV_EMB EV_UNITS EV_WORDS VC_NONDET VC_UNSORTED VC_ECS]]
-            [snug.cbor.head :refer [head-size]]
+            [snug.cbor.head :refer [head-size wf-payload]]
             [snug.cbor.text :refer [utf8-invalid-at utf8-invalid-at-nc]]
             [snug.cbor.keys :refer [compare-spans]]
             [snug.cbor.canon :refer [targ tskip cw put-head move-within kclass chunk-pos head-short
@@ -671,7 +671,9 @@
 
 (defn ^I32 if-24 [^IntsR o ^I32 hi ^I32 lo]
   (comment "Is the tag hi:lo 24 with its payload walked as CBOR under the profile (as"
-           "the scanner and the VM walk it: a standard-set tag)?")
+           "the scanner and the VM walk it: a standard-set tag)? Not when it need only"
+           "be well-formed (D358): its bytes are then walked as they are.")
+  (if (wf-payload o) (return 0))
   (if (and (and (== hi 0) (== lo 24)) (std-allowed (ia o O_PROFILE) 24 0)) (return 1))
   (return 0))
 
