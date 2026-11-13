@@ -107,7 +107,7 @@ as `a100f6`.
 | `cose: boolean` | false | Under `keys: 'text'`: safe integer labels as well as text, top-level map only |
 | `objects: 'null' \| 'plain'` | `'null'` | Decode ordinary maps into null/ordinary-prototype objects |
 | `maxBytes` | decode: `LIMITS.maxBytes`; encode: unset | Input byte cap; encode/Writer check only when supplied, at finish: output acceptance, not peak allocation |
-| `maxDepth`, `maxEntries`, `maxItems` | `LIMITS` | Nesting, per-container entries and total item bounds; see operational accounting in the guide |
+| `maxDepth`, `maxEntries`, `maxItems` | `LIMITS` | Nesting, per-container entries and total item bounds; see operational accounting in the guide. `maxDepth` is at most 256: above that, codec options (decode, encode, `Writer`, and views, scans and sequences without a schema) throw `TypeError`. Under a schema, a per-call `maxDepth` only lowers the depth compiled into the Program, which is itself at most 256; a larger value such as 999 is accepted and changes nothing |
 | `omitUndefined: boolean` | false | Encode: leave out object members whose value is `undefined` (and symbol/non-enumerable members). **Off by default**: `undefined` is written as CBOR undefined (`f7`); see below |
 | `strictArrays: boolean` | preset (false; bindle true) | Encode: refuse extra array own properties with `unsupported` |
 

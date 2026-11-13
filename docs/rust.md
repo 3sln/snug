@@ -155,7 +155,10 @@ limit fields as its JS options bag: `max_bytes` (`max_message_bytes` for a
 sequence), `max_depth`, `max_entries`, `max_items` (and for schema validation
 `max_bignum_bytes`, `budget`), each an `Option<u32>` whose `None` is the
 default: the codec defaults below, or the Program's compiled caps (which a
-value only lowers). Compile-time caps stay grouped in `CompileOptions::limits`
+value only lowers). For the codec, `max_depth` is at most 256: a larger value
+in `DecodeOptions` or `EncodeOptions` is `Error::Usage("options")`. Under a schema a larger value is accepted and
+changes nothing, since the compiled depth is itself at most 256.
+Compile-time caps stay grouped in `CompileOptions::limits`
 (`CompileLimits`), as JS's `compile(text, { limits })`.
 
 ```rust
