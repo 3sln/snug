@@ -82,7 +82,8 @@ pub struct SequenceOptions {
     pub wire: Profile,
     /// The largest message, in bytes (P): a message that does not end within it is `too_large`.
     pub max_message_bytes: Option<u32>,
-    /// Depth cap per message.
+    /// Depth cap per message. Without a schema at most 256 (more is `Error::Usage("options")`);
+    /// with one, a larger value only leaves the compiled depth in force.
     pub max_depth: Option<u32>,
     /// Per-container entry cap.
     pub max_entries: Option<u32>,
@@ -271,8 +272,18 @@ impl Drop for Sequence<'_> {
 }
 
 impl Sequence<'static> {
-    /// A profile-only sequence reader (the VM against `any`).
+    /// A profile-only sequence reader (the VM against `any`). Its limits are a codec's,
+    /// as [`DecodeOptions`]'s: a depth above 256 or a count of 2³¹ − 1 or more is
+    /// `Error::Usage("options")`.
     pub fn new(options: &SequenceOptions) -> Result<Self, Error> {
+        let d = Limits::DEFAULT;
+        Limits {
+            max_bytes: options.max_message_bytes.unwrap_or(d.max_bytes),
+            max_depth: options.max_depth.unwrap_or(d.max_depth),
+            max_entries: options.max_entries.unwrap_or(d.max_entries),
+            max_items: options.max_items.unwrap_or(d.max_items),
+        }
+        .check()?;
         Sequence::start(any_program(), 0, options.words(true), options)
     }
 }
