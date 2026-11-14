@@ -367,7 +367,7 @@ as cbor.mjs counts them, and embedded `.cbor` content has its own accounting
 | `.and`, `.within` | folded when both sides are the same scalar kind (interval intersection); otherwise `AND` |
 | `.regexp` | XSD Appendix F (default) or RFC 9485 I-Regexp, anchored (§4.7) |
 | `.cbor T` / `.cborseq T` | `EMBED`: the content is validated as a **sub-validation**. Its profile, limit and schema failures kill only the `EMBED` leaf, never the message (`bstr .cbor {a: int} / bstr .size (0..16)` accepts `h'ff'`); if it is the reported failure the reason is `embedded` with a sub-code. Depth and item limits are accounted separately for the embedded document; only the budget is global. Exact span: the content must be fully consumed (`.cbor`: exactly one item; `.cborseq`: items to the end) (A4, C7). |
-| `.default` | annotation; no effect |
+| `.default` | RFC 8610 §3.8.6's implied `.ne` (lowered as `.ne`, D359); annotation only, no effect, under the compile option `defaultControl: 'annotation'` |
 | `.feature` | accepted as a no-op annotation (RFC 9165: it always matches) (A12) |
 | `.cat`, `.det`, `.plus` | compile-time folding (P3, not gated in revision 2) |
 | `.pcre` | refused (D013) |

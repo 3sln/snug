@@ -14,6 +14,10 @@ export interface CompileOptions {
   regexp?: 'xsd' | 'iregexp';
   /** Cut semantics: `rfc` (the literal RFC 8610 cut, default) or `branch` (rule A: a failed cut fails only its `//` branch). See the guide's "Discriminated unions under the RFC cut". */
   cuts?: 'rfc' | 'branch';
+  /** What `.default` means: 'ne' (default), RFC 8610 §3.8.6's implied `.ne`, so a present value equal to
+   *  the default does not match; or 'annotation', which changes no verdict, as RFC 8610 erratum 9229
+   *  (status Reported, not verified) proposes. Bound into the source key. */
+  defaultControl?: 'ne' | 'annotation';
   /** The PEG group arena cap in words (default 4,194,304; at most 2^24). */
   groupWords?: number;
   profile?: 'full' | 'bindle' | 'bus'; limits?: CompileLimits; unicode?: Int32Array;

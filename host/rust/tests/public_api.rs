@@ -617,6 +617,22 @@ fn shared_schemas_independent_scratch_and_source_errors() {
 }
 
 #[test]
+fn tag24_payload_well_formed_under_valid_d358() {
+    use snug::{Profile, Tag24};
+    assert_eq!(Profile::VALID.tag24, Tag24::WellFormed);
+    assert_eq!(Profile::VALID.flags(), 378);
+    let strict = Profile { tag24: Tag24::Valid, ..Profile::VALID };
+    assert_eq!(strict.flags(), 378 | 2048);
+    assert_eq!(Profile { tag24: Tag24::WellFormed, ..Profile::DETERMINISTIC }.flags(), 122);
+    // a duplicate key inside the payload: well-formed is enough under valid
+    let dup = unhex("d81845a201000100");
+    assert!(matches!(decode(&dup, &DecodeOptions::default()).unwrap(), Value::Tag(24, _)));
+    let opts = DecodeOptions { wire: strict, ..DecodeOptions::default() };
+    assert_eq!(decode(&dup, &opts).unwrap_err().code(), "duplicate_key");
+    assert_eq!(decode(&unhex("d81842f800"), &DecodeOptions::default()).unwrap_err().code(), "malformed");
+}
+
+#[test]
 fn any_tag_level_d180() {
     use snug::{Profile, Tags};
     assert_eq!(Profile::DETERMINISTIC.tags, Tags::Any);
@@ -734,6 +750,15 @@ fn p916_warnings_cut_subcode_and_root_reexports() {
     assert_eq!((e.reason, e.subcode), ("value", Some("cut")));
     let branch = Schema::compile(text, &CompileOptions { cuts: snug::Cuts::Branch, ..Default::default() }).unwrap();
     branch.validate(&kind_b, "r", &mut scratch).unwrap();
+    // D359: .default carries the implied .ne unless DefaultControl::Annotation
+    let dtext = "r = { ? n: uint .default 5 }";
+    let n5 = unhex("a1616e05");
+    let ne = Schema::compile(dtext, &CompileOptions::default()).unwrap();
+    assert_eq!(ne.validate(&n5, "r", &mut scratch).unwrap_err().reason, "range");
+    ne.validate(&unhex("a1616e04"), "r", &mut scratch).unwrap();
+    let ann = Schema::compile(dtext, &CompileOptions { default_control: snug::DefaultControl::Annotation, ..Default::default() }).unwrap();
+    ann.validate(&n5, "r", &mut scratch).unwrap();
+    assert_ne!(ne.program().source_key(), ann.program().source_key());
     // an ordinary wrong value has no subcode
     let plain = Schema::compile("r = { a: \"x\" }", &CompileOptions::default()).unwrap();
     let e = plain.validate(&unhex("a161616179"), "r", &mut scratch).unwrap_err();

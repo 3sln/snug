@@ -370,12 +370,14 @@ pub fn key_probe(p: &[i32], pool: &[u8], b: &[u8], s: &mut [i32], ks: i32, ke: i
     s[(O_LO) as usize] = units;
     return -1;
 }
-pub fn map_cursor(p: &[i32], s: &mut [i32], bo: i32, mt: i32, kid: i32, at: i32) -> i32 {
+pub fn map_cursor(p: &[i32], s: &mut [i32], bo: i32, mt: i32, kid: i32, at: i32, cnt: i32) -> i32 {
     // The pair's key in this map's named table (program-2 §6.1 step 1): while
     // keys ascend, the cursor advances to the first named key >= kid, 1 unit per
     // step; once they stopped ascending, a binary search, 1 unit per probe
-    // (each also counted in s[O_LO], for schedule 2's simple pair). The index
-    // (also s[bo + MB_NJ]) or -1; or a negated code.
+    // (each also counted in s[O_LO] when cnt is 1, for schedule 2's simple pair:
+    // map-pre zeroes O_LO first. D362: map-keyq passes 0, as O_LO there still
+    // holds a head argument, up to 2^31 - 1, that the count overflowed). The
+    // index (also s[bo + MB_NJ]) or -1; or a negated code.
     s[(bo + MB_NJ) as usize] = -1;
     if kid < 0 {
         return -1;
@@ -388,7 +390,9 @@ pub fn map_cursor(p: &[i32], s: &mut [i32], bo: i32, mt: i32, kid: i32, at: i32)
             if !charge(s, 1, at) {
                 return -R_BUDGET;
             }
-            s[(O_LO) as usize] = s[(O_LO) as usize] + 1;
+            if cnt == 1 {
+                s[(O_LO) as usize] = s[(O_LO) as usize] + 1;
+            }
             cur += 1;
         }
         s[(bo + MB_CUR) as usize] = cur;
@@ -404,7 +408,9 @@ pub fn map_cursor(p: &[i32], s: &mut [i32], bo: i32, mt: i32, kid: i32, at: i32)
         if !charge(s, 1, at) {
             return -R_BUDGET;
         }
-        s[(O_LO) as usize] = s[(O_LO) as usize] + 1;
+        if cnt == 1 {
+            s[(O_LO) as usize] = s[(O_LO) as usize] + 1;
+        }
         let mid: i32 = (lo + hi) >> 1;
         let k: i32 = p[(nb + (3 * mid)) as usize];
         if k == kid {

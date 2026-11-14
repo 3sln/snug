@@ -182,7 +182,7 @@ match whole classes and a prefilter for the rest.
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
 | 1 | `ANY` | 0 | – | – | – | – | – | `ALL` | `TS_ANY` |
 | 2 | `MAJOR` | 0 | major 0..7 | | | | | 0→`001` 1→`002` 2→`004` 3→`008` 4→`010` 5→`020` 6→`840` 7→`780` | majors 4, 5, 6: `TS_ANY` |
-| 3 | `INT` | bit 0 `BIGOK` | first interval id | interval count ≥ 1 | | | | bit 0 if an interval meets POS, bit 1 if one meets NEG, bit 11 if `BIGOK` and one meets NEG_BIG or POS_BIG | none |
+| 3 | `INT` | bit 0 `BIGOK`, bit 1 `BIGONLY` (implies `BIGOK`; D363) | first interval id | interval count ≥ 1 | | | | `BIGONLY`: bit 11 only. Otherwise bit 0 if an interval meets POS, bit 1 if one meets NEG, and bit 11 if `BIGOK` | none |
 | 4 | `FLOAT` | bits 0–2: f16, f32, f64 allowed (≠ 0) | first finterval id | count (0 = unbounded) | | | | `flags << 8` | none |
 | 5 | `SIMPLE` | 0 | lo | hi (lo ≤ hi; both in 0..23 or both in 32..255, D336) | | | | `080` | none |
 | 6 | `LIT` | 0 | byte offset of the encoding | length ≥ 1 | | | | class of the encoding | none |
@@ -207,7 +207,11 @@ Notes on kinds:
 * **INT** covers `uint`, `nint`, `int`, `integer`, `unsigned`, ranges, `.lt …
   .ne` on integers and `uint .size …` (arch §4.6: every `.size` on `uint` is
   the interval `[256^(lo−1), 256^hi − 1]`, or from 0 when lo = 0). Bignums
-  match only with `BIGOK`; the VM reads the bignum magnitude in place, and
+  match only with `BIGOK`, and are then compared by numeric value, leading
+  zeroes ignored (RFC 8949 §3.4.3; D363): a range or a numeric control sets
+  it, a type name or a literal does not. `BIGONLY` (`biguint`, `bignint`,
+  `bigint`, `#6.2/3(bstr)`) admits bignums and nothing else, whatever their
+  value. The VM reads the bignum magnitude in place, and
   the tag's content is not visited as a schema child unless a `TAG` leaf asks
   (§17 Q13).
 * **UINTX** is `uint .bits m` (optionally intersected with an interval list):
@@ -708,7 +712,7 @@ Leaf failure reasons, decided in this fixed order per kind:
 | Kind | Checks → reason |
 | --- | --- |
 | `ANY`, `MAJOR` | none once admitted |
-| `INT` | class ∉ {0, 1} and not (`BIGOK` and bignum) → `type`; intervals → `range` |
+| `INT` | class ∉ {0, 1} and not (`BIGOK` and bignum), or `BIGONLY` and class ∈ {0, 1} → `type`; intervals → `range` |
 | `UINTX` | intervals → `range`; bits → `bits` |
 | `FLOAT` | intervals → `range` |
 | `SIMPLE`, `LIT`, `LITSET` | equality → `value` |
@@ -1007,7 +1011,7 @@ before evaluating a live child: `INDEX`, `KEY`/`ANYKEY`, `TAG`, `EMBED`).
 | 6 | bignum bytes | min(given, `LIM_BIGNUM_BYTES`) |
 | 7 | budget | min(given, `LIM_BUDGET`) |
 | 8 | VM extension: bit 0 forces the generic path (D044), bit 1 the legacy schedule 1 (D045) | as given; absent = 0 |
-| 9 | VM extension: the profile flags (D120, snug.cbor.codes `PF_*`; host bits 0–6) | as given; absent (fewer than 10 words) or negative = 0, the Bindle profile; `PF_SUB` added when the span's depth is not 0 |
+| 9 | VM extension: the profile flags (D120, snug.cbor.codes `PF_*`; host bits 0–6, 8 `PF_VALID` and 11 `PF_T24V`, D358) | as given; absent (fewer than 10 words) or negative = 0, the Bindle profile; `PF_SUB` added when the span's depth is not 0 |
 
 The VM copies the effective values into the scanner block and the VM block.
 Words 8 and 9 are API extensions of the call, not Program words: a Program

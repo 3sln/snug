@@ -85,7 +85,8 @@ pub(crate) fn int_with(h: &mut [i32], l: i32, lr: i32, la: i32, lb: i32, hr: i32
     if iv_intersect(h, T_IVA, T_IVB, T_IVC) < 0 {
         return -1;
     }
-    return mk_int_from(h, T_IVC, 0);
+    // D363: the target's flags (which data items it admits) carry over.
+    return mk_int_from(h, T_IVC, lflags(h, l));
 }
 pub(crate) fn pow256_word(k: i32, minus1: i32, high: i32) -> i32 {
     // Word high (1) or low (0) of 256^k, or of 256^k - 1 when minus1; k 0..8
@@ -184,11 +185,45 @@ pub(crate) fn bits_pass(h: &[i32], bid: i32, mask: i32) -> bool {
 pub(crate) fn target_error(h: &mut [i32], pos: i32) -> i32 {
     return fail(h, ERR_CONTROL_TARGET, pos);
 }
+pub(crate) fn int_controller(h: &mut [i32], ts: i32) -> i32 {
+    // A .size / .bits controller as one INT leaf: its single INT leaf, or the
+    // union of its INT leaves' intervals (D363: a range admits bignums by value
+    // and a literal does not, so `0 / 4..7` is two leaves; as a controller only the
+    // numbers count). -1 when ts holds anything else.
+    let l: i32 = single_leaf(h, ts);
+    if l >= 0 {
+        return l;
+    }
+    if ts_n(h, ts) <= 1 {
+        return -1;
+    }
+    vtrunc(h, T_IVA, 0);
+    for i in 0..ts_n(h, ts) {
+        let li: i32 = ts_leaf(h, ts, i);
+        if lk(h, li) != K_INT {
+            return -1;
+        }
+        iv_load(h, T_IVA, ld(h, li, 0), ld(h, li, 1));
+    }
+    if iv_normalize(h, T_IVA, T_IVB) < 0 {
+        return -1;
+    }
+    let m: i32 = mk_int_from(h, T_IVB, 0);
+    if m < 0 {
+        return -1;
+    }
+    return m;
+}
+pub(crate) fn int_has_neg(h: &[i32], t: i32) -> bool {
+    // Does INT leaf t admit a negative value? Its intervals are sorted, so the
+    // first one's lower bound decides.
+    return vget(h, T_IV, 6 * ld(h, t, 0)) < R_POS;
+}
 pub fn ctl_size(h: &mut [i32], target: i32, ctl: i32, ranged: i32, pos: i32) -> i32 {
     // ranged: 1 when the controller is written as a range (`.size (lo..hi)`).
     // On uint it matters (§4.6): `uint .size n` is 0..256^n-1 (fits in n bytes),
     // `uint .size (lo..hi)` the values whose minimal byte length is in lo..hi.
-    let cl: i32 = single_leaf(h, ctl);
+    let cl: i32 = int_controller(h, ctl);
     let from: i32 = vlen(h, T_STK);
     if (cl < 0) || (lk(h, cl) != K_INT) {
         return fail(h, ERR_CONTROL_VALUE, pos);
@@ -200,49 +235,58 @@ pub fn ctl_size(h: &mut [i32], target: i32, ctl: i32, ranged: i32, pos: i32) -> 
             let o: i32 = 6 * (ld(h, cl, 0) + j);
             let lo: i32 = small_of(vget(h, T_IV, o), vget(h, T_IV, o + 1), vget(h, T_IV, o + 2));
             let hi: i32 = small_of(vget(h, T_IV, o + 3), vget(h, T_IV, o + 4), vget(h, T_IV, o + 5));
-            if (k == K_TEXT) || (k == K_BYTES) {
-                let mut nlo: i32 = ld(h, t, 0);
-                let mut nhi: i32 = ld(h, t, 1);
-                if lo > nlo {
-                    nlo = lo;
-                }
-                if hi < nhi {
-                    nhi = hi;
-                }
-                if nlo <= nhi {
-                    if k == K_TEXT {
-                        let nlt: i32 = mk_text(h, nlo, nhi, ld(h, t, 2));
-                        vpush1(h, T_STK, nlt);
-                    } else {
-                        let nlb: i32 = mk_bytes(h, nlo, nhi, ld(h, t, 2));
-                        vpush1(h, T_STK, nlb);
+            // P9.13: .size of an integer that may be negative is undefined (RFC 8610
+            // §3.8.1 sizes uint): a control_target error, not a silent narrowing to uint
+            if (k == K_INT) && int_has_neg(h, t) {
+                return target_error(h, pos);
+            }
+            // P9.13: a controller interval wholly below zero is no size: it matches
+            // nothing (small-of would clamp it to 0)
+            if vget(h, T_IV, o + 3) >= R_POS {
+                if (k == K_TEXT) || (k == K_BYTES) {
+                    let mut nlo: i32 = ld(h, t, 0);
+                    let mut nhi: i32 = ld(h, t, 1);
+                    if lo > nlo {
+                        nlo = lo;
                     }
-                }
-            } else if k == K_INT {
-                if (lo <= 8) || (ranged == 0) {
-                    let mut hk: i32 = hi;
-                    let mut llo: i32 = 0;
-                    let mut lhi: i32 = 0;
-                    if hk > 8 {
-                        hk = 8;
+                    if hi < nhi {
+                        nhi = hi;
                     }
-                    if (lo > 0) && (ranged != 0) {
-                        lhi = pow256_word(lo - 1, 0, 1);
-                        llo = pow256_word(lo - 1, 0, 0);
+                    if nlo <= nhi {
+                        if k == K_TEXT {
+                            let nlt: i32 = mk_text(h, nlo, nhi, ld(h, t, 2));
+                            vpush1(h, T_STK, nlt);
+                        } else {
+                            let nlb: i32 = mk_bytes(h, nlo, nhi, ld(h, t, 2));
+                            vpush1(h, T_STK, nlb);
+                        }
                     }
-                    let nl2: i32 = int_with(h, t, R_POS, lhi, llo, R_POS, pow256_word(hk, 1, 1), pow256_word(hk, 1, 0));
-                    if nl2 == (-1) {
-                        return -1;
+                } else if k == K_INT {
+                    if (lo <= 8) || (ranged == 0) {
+                        let mut hk: i32 = hi;
+                        let mut llo: i32 = 0;
+                        let mut lhi: i32 = 0;
+                        if hk > 8 {
+                            hk = 8;
+                        }
+                        if (lo > 0) && (ranged != 0) {
+                            lhi = pow256_word(lo - 1, 0, 1);
+                            llo = pow256_word(lo - 1, 0, 0);
+                        }
+                        let nl2: i32 = int_with(h, t, R_POS, lhi, llo, R_POS, pow256_word(hk, 1, 1), pow256_word(hk, 1, 0));
+                        if nl2 == (-1) {
+                            return -1;
+                        }
+                        vpush1(h, T_STK, nl2);
                     }
-                    vpush1(h, T_STK, nl2);
-                }
-            } else if (k == K_LIT) || (k == K_LITSET) {
-                if (leaf_mask(h, t) & 12) == 0 {
+                } else if (k == K_LIT) || (k == K_LITSET) {
+                    if (leaf_mask(h, t) & 12) == 0 {
+                        return target_error(h, pos);
+                    }
+                    filter_lits(h, t, 0, lo, hi);
+                } else {
                     return target_error(h, pos);
                 }
-                filter_lits(h, t, 0, lo, hi);
-            } else {
-                return target_error(h, pos);
             }
         }
     }
@@ -252,7 +296,7 @@ pub fn ctl_size(h: &mut [i32], target: i32, ctl: i32, ranged: i32, pos: i32) -> 
     return ts_make(h, from);
 }
 pub fn ctl_bits(h: &mut [i32], target: i32, ctl: i32, pos: i32) -> i32 {
-    let cl: i32 = single_leaf(h, ctl);
+    let cl: i32 = int_controller(h, ctl);
     let from: i32 = vlen(h, T_STK);
     let mut bhi: i32 = 0;
     let mut blo: i32 = 0;
@@ -330,7 +374,12 @@ pub fn ctl_bits(h: &mut [i32], target: i32, ctl: i32, pos: i32) -> i32 {
         let t2: i32 = ts_leaf(h, target, i2);
         let k2: i32 = lk(h, t2);
         if k2 == K_INT {
-            // uint .bits: UINTX over the target's non-negative values
+            // uint .bits: UINTX over the target's non-negative values; a target
+            // that may be negative is a control_target error (P9.13: RFC 8610
+            // §3.8.2 defines .bits on uint), not a silent narrowing
+            if int_has_neg(h, t2) {
+                return target_error(h, pos);
+            }
             let nl: i32 = int_with(h, t2, R_POS, 0, 0, R_POS, -1, -1);
             if nl == (-1) {
                 return -1;
@@ -762,6 +811,38 @@ pub fn ctl_compare(h: &mut [i32], target: i32, ctl: i32, op: i32, pos: i32) -> i
     }
     return ts_make(h, from);
 }
+pub(crate) fn simple_eq(h: &mut [i32], t: i32, v: i32, ne: i32) {
+    // D359: one simple value v (`false`, `null`, ...) as the controller of .eq
+    // (ne 0) / .ne (ne 1) on target leaf t, a SIMPLE range or a leaf that admits
+    // no simple value: the matching SIMPLE ranges, or t itself, pushed on T_STK.
+    if lk(h, t) != K_SIMPLE {
+        if ne == 1 {
+            vpush1(h, T_STK, t);
+        }
+        return;
+    }
+    let lo: i32 = ld(h, t, 0);
+    let hi: i32 = ld(h, t, 1);
+    if ne == 0 {
+        if (lo <= v) && (v <= hi) {
+            let s0: i32 = mk_simple_range(h, v, v);
+            vpush1(h, T_STK, s0);
+        }
+        return;
+    }
+    if (v < lo) || (v > hi) {
+        vpush1(h, T_STK, t);
+        return;
+    }
+    if lo < v {
+        let s1: i32 = mk_simple_range(h, lo, v - 1);
+        vpush1(h, T_STK, s1);
+    }
+    if v < hi {
+        let s2: i32 = mk_simple_range(h, v + 1, hi);
+        vpush1(h, T_STK, s2);
+    }
+}
 pub fn ctl_eq(h: &mut [i32], target: i32, ctl: i32, ne: i32, pos: i32) -> i32 {
     // ne 0: .eq; ne 1: .ne.
     let from: i32 = vlen(h, T_STK);
@@ -834,7 +915,7 @@ pub fn ctl_eq(h: &mut [i32], target: i32, ctl: i32, ne: i32, pos: i32) -> i32 {
                 let sb: i32 = hg(h, H_R2);
                 iv_push(h, T_IVB, sr, sa, sb, R_POS_INF, 0, 0);
                 iv_intersect(h, T_IVA, T_IVB, T_IVC);
-                let nl2: i32 = mk_int_from(h, T_IVC, 0);
+                let nl2: i32 = mk_int_from(h, T_IVC, lflags(h, t));
                 vpush1(h, T_STK, nl2);
             }
         } else if (isflt || fexact) && (k == K_FLOAT) {
@@ -908,6 +989,8 @@ pub fn ctl_eq(h: &mut [i32], target: i32, ctl: i32, ne: i32, pos: i32) -> i32 {
             if ne == 1 {
                 vpush1(h, T_STK, t);
             }
+        } else if ((lk(h, cl) == K_SIMPLE) && (ld(h, cl, 0) == ld(h, cl, 1))) && ((lk(h, t) == K_SIMPLE) || ((leaf_mask(h, t) & 128) == 0)) {
+            simple_eq(h, t, ld(h, cl, 0), ne);
         } else {
             // A composite controller: .eq is an AND; .ne has no lowering.
             if ne == 1 {
@@ -968,7 +1051,15 @@ pub(crate) fn meet(h: &mut [i32], a: i32, b: i32) -> i32 {
         vtrunc(h, T_IVB, 0);
         iv_load(h, T_IVB, ld(h, b, 0), ld(h, b, 1));
         iv_intersect(h, T_IVA, T_IVB, T_IVC);
-        let ni: i32 = mk_int_from(h, T_IVC, 0);
+        // D363: bignums pass both only if both admit them; bignums-only if either is.
+        let fa: i32 = lflags(h, a);
+        let fb: i32 = lflags(h, b);
+        let bok: i32 = (fa & fb) & 1;
+        let bonly: i32 = (fa | fb) & 2;
+        if (bonly != 0) && (bok == 0) {
+            return 0;
+        }
+        let ni: i32 = mk_int_from(h, T_IVC, bok | bonly);
         vpush1(h, T_STK, ni);
         return 0;
     }
@@ -1307,7 +1398,8 @@ pub(crate) fn if_neg_region(r: i32) -> i32 {
 pub(crate) fn dedent_into(h: &mut [i32], bid: i32, dst: i32) {
     // RFC 9165 .det: the literal's content with the longest run of leading
     // spaces common to its non-blank lines removed from every line (lines end
-    // at LF), appended to vector dst.
+    // at LF; a CR just before the LF ends the line too, so a CRLF line of
+    // spaces is blank), appended to vector dst.
     let hl: i32 = enc_head_len(h, bid);
     let n: i32 = bid_len(h, bid);
     let mut prefix: i32 = INF;
@@ -1319,7 +1411,7 @@ pub(crate) fn dedent_into(h: &mut [i32], bid: i32, dst: i32) {
             sp += 1;
             j += 1;
         }
-        if (j < n) && (bid_byte(h, bid, j) != 10) {
+        if (j < n) && ((bid_byte(h, bid, j) != 10) && (!((bid_byte(h, bid, j) == 13) && (((j + 1) == n) || (bid_byte(h, bid, j + 1) == 10))))) {
             if sp < prefix {
                 prefix = sp;
             }

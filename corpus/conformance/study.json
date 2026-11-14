@@ -732,7 +732,7 @@
    "note": "cborseq of items matched against array"
   },
   {
-   "name": "probe: .default (annotation)",
+   "name": "probe: .default (implied .ne, D359)",
    "cddl": "r = { ? n: uint .default 5 }",
    "cases": [
     {
@@ -744,6 +744,12 @@
      "rule": "r",
      "hex": "a1616e03",
      "expect": true
+    },
+    {
+     "rule": "r",
+     "hex": "a1616e05",
+     "expect": false,
+     "note": "RFC 8610 3.8.6: the default value is left out, so present it does not match"
     },
     {
      "rule": "r",

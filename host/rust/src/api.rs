@@ -105,6 +105,9 @@ pub struct CompileOptions<'a> {
     pub controls: Option<&'a crate::controls::Controls>,
     /// Cut semantics: the literal RFC 8610 cut (default) or rule A.
     pub cuts: crate::compile::Cuts,
+    /// What `.default` means: RFC 8610 §3.8.6's implied `.ne` (default) or an
+    /// annotation only (`DefaultControl::Annotation`). Bound into the source key.
+    pub default_control: crate::compile::DefaultControl,
     /// The PEG group arena's cap in words: `None` is the
     /// default 4,194,304; a run that needs more refuses with `group_limit`.
     pub group_words: Option<i32>,
@@ -244,6 +247,7 @@ impl Schema {
                 profile,
                 regexp: options.regexp,
                 cuts: options.cuts,
+                default_control: options.default_control,
                 group_words: options.group_words,
                 abnf: options.abnf,
                 limits: &limits,

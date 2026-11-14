@@ -8613,6 +8613,306 @@ engineer).
     so a blanket cap broke an existing sequence-test case. Rust matches.
   - Post-RC nits list: CODE N4, N5, N6, N8 and S4.
 
+### D362 — The map cursor counts its probes in its own word only for map-pre: map-keyq no longer adds to s[O_LO], which still held a head argument (an overflow panic in the overflow-checked Rust VM); wide integer heads feed every vm-test arm (P9.13 WP1 SEC-F1)
+**Decision** (P8.5 VM engineer, provisional):
+* **The finding (security review SEC-F1, blocking).** Schema
+  `r = { b: uint // c: uint, * tstr => any }` and input
+  `a261621a7fffffff616300` ({"b": 2³¹−1, "c": 0}) panicked the Rust VM
+  built with overflow checks (`vm/map.rs`, the probe counter's `+ 1`).
+  `map-cursor` counted its probes in `s[O_LO]`. `map-pre` resets that word
+  first, but `map-keyq`'s multi-block path (kin/vm-map.kin) reached
+  `map-cursor` with `O_LO` still holding the previous head's argument, here
+  2³¹−1. A release build wrapped silently. The probe count is only read
+  on the `map-pre` path.
+* **The fix.** `map-cursor` takes `cnt`: `map-pre` passes 1 and counts as
+  before; `map-keyq` passes 0 and counts nothing. No verdict, offset or
+  budget changes (JS == Rust over the whole out array, below).
+* **Audit of counters held in shared scratch words.**
+  - `O_ITEMS` is bounded by `maxItems` before every increment.
+  - `O_S_UNITS` (canon.kin) sums comparison units, bounded by the input and
+    reset by its owner; it is not a word that a head argument passes through.
+  - rscan's `O_ERR_POS` adds `base`, a window offset below 2³¹.
+  - No other counter is kept in `O_HI`/`O_LO` or in another word that
+    carries a head argument.
+* **The gate.** vm-test already had a JS == Rust arm built in debug with
+  overflow checks (in the `land` and `release-vm` sets), and vmsession-test
+  runs the same case set. No input reached this path with a wide head.
+  vm-allcases now adds "wide integer heads": every corpus and PEG-oracle
+  input with each integer head rewritten to 2³¹−1, 2³²−1, 2⁶³−1 and 2⁶⁴−1,
+  in every arm.
+* **The gate catches the old code.** The proof was run on the final tree
+  with only the fix reverted (`map-keyq` passing 1, the old count). The
+  quick run (`bb vm-test 300 1 60`) gave:
+  - `FAIL JS == Rust (debug, overflow checks on): 29220/29545 cases`;
+  - 61 `Rust PANIC` lines, among them
+    `regressions: map cursor after a 2^31 - 1 head … [a261621a7fffffff616300]`
+    and `wide heads (D362): study: probe: group choice in map // […]`;
+  - 1,011 failures in all.
+
+  With the fix every arm is identical and nothing panics.
+* **Regression.** The corpus suite "map cursor after a 2^31 - 1 head"
+  (regressions.json) has the reviewer's input, its 2³¹−2 twin and the
+  `//`-reversed schema.
+
+### D363 — One rule for bignums under `valid`: type names and literals select data items, ranges and numeric controls compare numeric values (RFC 8949 §3.4.3); `biguint`/`bignint`/`bigint`/`#6.2/3(bstr)` match every bignum, leading zeroes included (P9.13 WP1 SPEC-F1)
+**Decision** (P8.5 VM engineer, provisional):
+* **The finding (spec review F1, blocking).** Under `valid`, `biguint`,
+  `bignint`, `bigint` and `#6.2(bstr)` refused valid non-preferred
+  bignums such as `2(h'01')` and `2(h'0001')`, and the result depended on
+  how the schema was spelled: `#6.2(b)` with `b = bstr` accepted. D031 had
+  lowered a bignum tag to an INT range of the bignum region only (values
+  of 2⁶⁴ and above), on the premise that smaller values never arrive as
+  bignums. D260/D342 made that premise false. RFC 8949 §3.4.3: decoders
+  MUST accept leading zeroes, and its extended generic data model compares
+  bignums by numeric value.
+* **The rule.**
+  - Type names and literals select data items. `uint`, `nint`, `int`,
+    `#0`, `#1` and integer literals never match a bignum. `biguint`,
+    `bignint`, `bigint` and `#6.2/3(bstr)`, however the bstr is spelled,
+    match every tag 2/3 bignum, any value, leading zeroes allowed.
+  - Ranges and numeric controls compare numeric values. `0..5`,
+    `unsigned .le 5`, `integer .le 5` and `integer .eq 1` match
+    `2(h'01')`. `uint .le 5` and `int .le 5` do not, because a control
+    keeps its target's data items, so `integer .le 5` and
+    `unsigned .le 5` agree.
+  - Map literal keys stay identity-based (D342).
+  - The deterministic and Bindle presets refuse non-preferred bignums
+    before the schema runs, so there nothing changes.
+* **How it is lowered.** The INT leaf flags are bit 0 `BIGOK` (bignums
+  admitted, compared by value) and bit 1 `BIGONLY` (bignums only; implies
+  BIGOK).
+  - Leaf mask: BIGOK adds bit 11; BIGONLY is bit 11 alone.
+  - The VM's `leaf-int` refuses a major 0/1 item under BIGONLY, and the
+    verifier checks the mask.
+  - A bignum tag over bstr is a BIGONLY leaf over every non-negative (or
+    negative) value. A range is BIGOK.
+  - Controls carry the target's flags. `meet` keeps BIGOK only if both
+    sides have it, and BIGONLY if either has it.
+  - Unions merge only leaves with equal flags.
+  - `~` and the bignum unwrap test BIGONLY.
+  - A `.size`/`.bits` controller that is a union of INT leaves with
+    different flags (RFC 8610 figure 10's `&(...) / (4..7)`) is read as
+    one interval set. The rfc-corpus gate caught this on the first cut,
+    and it now has its own corpus vector.
+  - peg2-ref and the PEG oracle follow the same rule (the oracle already
+    compared ranges by value).
+* **Evidence.**
+  - The corpus suite "non-preferred bignums under valid" (66 cases: every
+    row of the reviewer's table, plus each type, range and control form)
+    and its deterministic twin (5).
+  - **On the old compiler** (main at 2ffbed2), 24 of the 66 fail:
+    `biguint`/`bignint`/`bigint`/`#6.2/3(bstr)` on non-preferred
+    bignums, `0..5`, `-5..-1`, `unsigned .le 5`, `integer .eq 1`, and
+    `{0..5 => int}` with a bignum key.
+* **Docs.** profiles.md (the "Values" paragraph), cddl-support.md (the
+  prelude row and the semantic notes) and program.md (the INT leaf row,
+  notes and failure table).
+
+### D358 — Under `valid` a tag-24 payload need only be well-formed (RFC 8949 §3.4.5.1); `tag24: 'valid'` asks for a valid item; `.cbor T` and the deterministic and Bindle presets are unchanged (P9.13 WP1 decision 1)
+**Decision** (coordinator-decided, P9.13 decision 1; implemented by the P8.5 VM engineer):
+* **Why.** RFC 8949 §3.4.5.1 requires a tag-24 byte string to hold a
+  well-formed encoded item, not a valid one. Under `valid`, snug walked
+  the payload as a valid item under the profile (D121), so
+  `d81845a201000100` (a duplicate key inside) was `duplicate_key` and
+  `d8184261ff` was `text`.
+* **The rule.**
+  - Under `valid`, the payload is one well-formed item that fills its byte
+    string. The walk refuses only `truncated`, `malformed`, `trailing` and
+    the limits (`depth`, `too_many_entries`, `too_many_items`, at the
+    scanner's offsets). Its items still count toward `maxItems`. Nothing
+    else is checked: keys, duplicates, UTF-8, tag rules, floats, simple
+    values.
+  - Inner validity is the option `tag24: 'valid'` (JS, the wasm SDK) or
+    `Profile { tag24: Tag24::Valid, .. }` (Rust), which sets profile bit 11
+    `PF_T24V` (a host bit; `PF_HOST` is 2431). The option is read only
+    under `valid`.
+  - `.cbor T` still requires a valid item matching T.
+  - The deterministic preset (and Bindle) keeps the full walk: its
+    guarantee (one encoding per value, no duplicate keys, valid text)
+    then holds for the embedded CBOR that a signature or hash also covers.
+    profiles.md says so.
+* **How.** No second walker: the scanner's own walk runs in a
+  well-formedness mode. `scan.kin wf-scan-one` runs `scan-one` under the
+  profile word `PF_WF_WALK`:
+  - `PF_VALID`, any key, any tag, RFC floats, every simple value,
+    noncharacters;
+  - the internal bit `PF_WF` (4096), which skips the UTF-8 refusal in
+    `scan-text`, the key-order and duplicate step in `scan-map` and
+    `scan-imap` (so nothing is deferred), and every tag's rule in
+    `scan-tag` (the content is an ordinary item).
+
+  It then restores the profile word, and `wf-payload` decides when it
+  applies. (A first cut had a separate walker in head.kin, +1,498 B
+  minified on the `snug` entry; the manager's cut pass replaced it with
+  this mode.) These share it:
+  - the scanner, for a payload in a definite string and for a deferred
+    payload gathered from chunks;
+  - the VM's `dead-std-check` (the buffer walk, the live walk and the
+    resumable session), charging 1 unit per item it counted, over the
+    payload's bytes, which a canonical copy keeps as they are;
+  - vcopy's `if-24`, which no longer embeds such payloads.
+
+  The resumable scanner refuses `PF_VALID` (it falls back), so it is
+  unchanged.
+* **Evidence.**
+  - Corpus suites in regressions.json:
+    - "well-formed only" (12): the reviewer's two examples, a tag 65535
+      and a chunked duplicate, against `.cbor any`;
+    - "tag24 'valid'" (6);
+    - "deterministic" (3);
+    - item counting with `maxItems` (2).
+  - det-cases runs the D353 payload vectors and half the valid-CBOR
+    mutations with `PF_T24V`, so the old walk stays identity-gated.
+  - Host tests in JS profiles.test and Rust public_api.
+  - **On the old code** (main at 2ffbed2), "well-formed only" passes 8 of
+    12; all four new acceptances fail. The `tag24` option does not exist
+    there, so its suite throws (0 of 6).
+* **Names, for WP2's options shape (D360).**
+  - JS: the preset field `tag24: 'well-formed' | 'valid'`
+    (host/js/src/options.mjs `preset` shape and profiles.mjs; it is in
+    every pick list of sources.mjs, the SDK's sources.mjs, view.mjs and
+    view-core.mjs; the types are in index.d.ts `ProfileOptions` and
+    `profiles`).
+  - Rust: `snug::Tag24 { WellFormed, Valid }` (`#[non_exhaustive]`) and the
+    field `Profile::tag24` (host/rust/src/decode.rs). `Profile::flags()`
+    adds 2048 when `valid && tag24 == Valid`. After D360 it is set through
+    the `wire` field: `DecodeOptions { wire: Profile { tag24: Tag24::Valid,
+    ..Profile::VALID }, .. }`, and the same for Encode, Validation and
+    SequenceOptions. `default_control` (D359) sits on `CompileOptions`,
+    which D360 left as it was.
+  - The core reads only profile bit 11.
+* **Size (P9.13 WP1, with D362/D363).** Bytes are min/gzip/brotli, the
+  static closure equal to the full one (esbuild 0.28.2).
+
+  | Entry | main cf5dc51 | before cuts | after cuts | new cap |
+  | --- | --- | --- | --- | --- |
+  | snug | 62967/21638/18951 | 64613/22059/19325 | 63428/21807/19144 | br 19083 → 19527 |
+  | snug/schema | 150669/54069/46874 | 152455/54471/47280 | 151278/54271/47147 | br 47137 → 48090 |
+  | snug/writer | 59066/20245/17731 | 60703/20684/18111 | 59527/20399/17904 | 59490/20376/17896 → 60718/20807/18263 |
+  | snug/sources | 183149/67462/57670 | 184948/67923/57996 | 183771/67673/57799 | gz 67658 → 69027 |
+  | all-runtime | 279180/100639/84826 | 280997/101073/85198 | 279820/100849/85049 | br 84894 → 86750 |
+  | snug/view, snug/sequence, runtime, snug/compile | | | | within caps |
+
+  - **The cut pass.** A first cut had a separate well-formed walker in
+    head.kin (+1,498 B minified). It was replaced by the scanner's own walk
+    under `PF_WF`, and the option plumbing was trimmed: `tag24` uses a pick
+    table, is in the valid preset only, and has no new import or check.
+  - **Attribution after cuts** (standalone esbuild per module, minified,
+    vs main):
+    - scan.kin +406: the `PF_WF` branches, `wf-on`/`wf-payload`/`wf-scan-one`,
+      and `payload-one`;
+    - vm/dead +120; codes +68; profiles.mjs +121; options.mjs +67;
+    - vm/leaf +25, vm/map +20 and verify +4 (D362/D363); vcopy +24;
+      vm/eval +4.
+
+    The writer carries the whole scanner, which it uses to check tag-24
+    and raw items, so it grows by the scanner's bytes; there is no import
+    leak.
+  - D303: approved by coordinator; the budget.json edit applied by the coordinator with the owner's explicit approval after a permission refusal, 2026-11-13
+  - **After the rebase over WP2 (main 9a448d4).** `snug` gzip measured
+    21840 against the 21825 cap, and `snug/compile` static gzip 1376
+    against 1374. A further cut fixed both without changing a cap:
+    - `profileFlags` no longer has the tag24 pick table. Its value is
+      checked with the other options, so the flag is
+      `tag24 === 'valid' ? 2048 : 0`;
+    - options.mjs lists `tag24`'s values as `('valid', 'well-formed')`,
+      which compresses against `wire`'s.
+
+    Now `snug` is 63477/21811/19119 (main 63077/21672/18986) and
+    `snug/compile` static is 2658/1374/1220 (main 2591/1339/1192).
+* **valid-test's recorded cbor2 differential (P9.13 WP3 S7).**
+  - The counts move from 1396/1502 to 1404/1511, and `limits` from 27 to
+    28. All of it comes from det-cases' nine new fixed vectors for the
+    well-formed payload walk, which the differential's inputs include.
+  - The nine are `nest(29, t24('8100'))`, `nest(30, t24('8100'))`,
+    `t24('818181818100')` twice, `t24(t24(t24('a200000000')))`,
+    `t24('820102')`, `t24('9f010203ff')`, and two restore-after-payload
+    vectors.
+  - Eight agree with cbor2: six are accepted by both, and the two restore
+    vectors are refused by both (`text`, `duplicate_key`).
+  - `nest(30, t24('8100'))` reaches the default depth 32: snug refuses
+    `depth` and accepts with the limits lifted, which is the `limits`
+    class.
+  - The counts were recorded after a byte fix in det-cases: three vectors
+    had `a2000000`, a truncated map, where the comment meant the duplicate
+    `a200000000`.
+  - The restore proof did not depend on those bytes. On a build that
+    leaks `PF_WF` past the payload, vm-test's profile identity fails 40
+    runs (10324/10364), the D353 payload vectors among them. `decode` then
+    accepts `82d8184261ff61ff` and `82d81848d81845a20100010063f09f80`,
+    which the fixed tree refuses with `text`. The corpus verdicts, run
+    through the VM, do not see the leak, so a JS host test now holds
+    `decode` to `text` and `duplicate_key` after a payload.
+
+### D359 — `.default` carries RFC 8610 §3.8.6's implied `.ne` by default; `defaultControl: 'annotation'` keeps the annotation-only reading of erratum 9229 (status Reported) and is bound into the source key (P9.13 WP1 decision 2)
+**Decision** (coordinator-decided, P9.13 decision 2; implemented by the P8.5 VM engineer):
+* **Why.** RFC 8610 §3.8.6 gives `.default` an "implied .ne control".
+  snug followed the annotation-only reading that RFC 8610 erratum 9229
+  proposes, but that erratum's status is Reported, not verified. S46 had
+  been reclassified non-conformant.
+* **The rule.**
+  - `.default v` lowers as `.ne v`, so `uint .default 1` refuses `1`.
+  - The compile option `defaultControl: 'annotation'` (Rust
+    `CompileOptions::default_control = DefaultControl::Annotation`) gives
+    the old reading. It is option word 22: `OPT_WORDS` is now 23 and the
+    extension registry starts at word 23.
+  - The source-key preimage's option array gains a 20th element, `1`, only
+    in annotation mode, so default preimages are unchanged (program-2 §1).
+  - `.eq`/`.ne` now take a single simple value (`false`, `null`, ...) on a
+    SIMPLE target, so `bool .default false` compiles.
+  - A default whose `.ne` would be composite (an array, a map, a range, or
+    the target `any`) is refused as that `.ne` is, and cddl-support says so.
+* **S46.** It is conformant again.
+  - conformance.md: the S46 row, the control table and the totals note
+    (144/43/20/9).
+  - RFC 8610's default-timer vector loses its contested classification,
+    now that it passes.
+  - The adversarial and study vectors, their generators, and the PEG
+    oracle (`defaultControl` option; README F6) follow.
+  - Docs say "Reported": cddl-support, api.md, rust.md, compile.d.ts and
+    the rustdoc.
+* **Evidence.**
+  - Corpus suite "D359: .default carries the implied .ne".
+  - JS schema-api.test: verdicts and source keys in both modes, plus a
+    bad option value.
+  - Rust public_api: the same in both modes.
+  - **On the old code** (2ffbed2) the suite passes 3 of 5: both
+    default-equal cases are accepted. The study and adversarial vectors
+    change the same way.
+* **Names, for WP2's options shape (D360).**
+  - JS: the compile option `defaultControl: 'ne' | 'annotation'`
+    (host/js/src/options.mjs compile shape, compile.mjs `OPT_DEFAULT`,
+    the SDK's compile.mjs word 22, compile.d.ts).
+  - Rust: `snug::DefaultControl { Ne, Annotation }` (`#[non_exhaustive]`,
+    host/rust/src/compile.rs), the field `default_control` on both
+    `snug::CompileOptions` (api.rs) and `compile::CompileOptions`, and
+    host/wasm/src/cc.rs, which reads word 22 with the registry from word 23.
+
+### P9.13 WP1 should-fixes (spec review F3–F6, F12)
+* **`.det` over CR LF lines (F3).** RFC 9165 §2.3 counts a blank line's
+  spaces as no indent. A line of spaces ending in CR LF is now blank. Its
+  CR used to make it non-blank with indent 0, so a CRLF schema such as
+  Figure 3 did not dedent. The PEG oracle matches.
+* **A negative `.size` controller (F4)** used to be clamped to 0. Now
+  `tstr .size -1` matches nothing, and `(-2..1)` means `0..1`.
+* **`-0` (F5).** The integer literal `-0` (and `-0x0`) is 0. The float
+  `-0.0` is unchanged.
+* **`#0.n` to `#3.n` (F6)** are implemented by value, as D328 reads
+  `#7.25`:
+  - below 24: the argument n;
+  - 24..27: an argument of 1, 2, 4 or 8 bytes;
+  - 31: any byte or text string (indefinite), but no integer;
+  - 28..30: nothing.
+
+  `#4.n` and `#5.n` stay refused (`major`) and are listed in cddl-support.
+* **`int .size` and `.bits` (F12).** On an integer type that admits
+  negative values, these are now `control_target` errors, as cddl-support
+  already promised. They used to narrow silently to `uint`.
+* **Evidence.** The corpus suite "P9.13 should-fixes" (22 cases), with
+  three refusal suites (`int .size 1`, `nint .bits 3`, `#4.1`). On the old
+  compiler the main suite does not compile (`major` at `#0.24`), and
+  `int .size 1` and `nint .bits 3` compile.
+
 ## Findings
 
 - 2026-11-11 (manager): **the 6½-day `scan-test.mjs 300 1` process

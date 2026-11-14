@@ -258,11 +258,13 @@
   (comment "INT: major 0 is the point POS(v), major 1 NEG(n), a bignum (only with"
            "BIGOK) POS_BIG / NEG_BIG over its content bytes, read in place (§4.3).")
   (let [bigok (!= (bit-and (ia p lb) 256) 0)
+        bigonly (!= (bit-and (ia p lb) 512) 0)
         ^:mut rg 0
         ^:mut a hi
         ^:mut c lo]
-    (if (== cls 1) (set rg 3))
-    (if (== cls 2) (set rg 2))
+    (comment "BIGONLY (D363): biguint / bignint / bigint match tag 2/3 items only.")
+    (if (and (== cls 1) (not bigonly)) (set rg 3))
+    (if (and (== cls 2) (not bigonly)) (set rg 2))
     (if (and (== cls 2048) bigok)
       (do (set a cs)
           (set c (- ce cs))

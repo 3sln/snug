@@ -403,8 +403,9 @@ pub fn mag_pow(h: &mut [i32]) -> i32 {
     return mag_add1(h, m, 1);
 }
 pub fn point_of(h: &mut [i32], negative: i32, mag: i32) {
-    // The bound of the integer (sign, magnitude bid) into h[H_R0..H_R2].
-    if negative == 0 {
+    // The bound of the integer (sign, magnitude bid) into h[H_R0..H_R2]. A
+    // negative zero (`-0`, `-0x0`) is the integer 0 (P9.13).
+    if (negative == 0) || ((bid_len(h, mag) <= 8) && ((mag_hi(h, mag) == 0) && (mag_lo(h, mag) == 0))) {
         if bid_len(h, mag) <= 8 {
             put3(h, R_POS, mag_hi(h, mag), mag_lo(h, mag));
         } else {
@@ -623,17 +624,23 @@ pub fn iv_load(h: &mut [i32], t: i32, first: i32, n: i32) {
         vpush1(h, t, x);
     }
 }
-pub fn mk_int_from(h: &mut [i32], t: i32, _bigok: i32) -> i32 {
-    // An INT leaf from the normalised records in temp vector t (-2 if empty).
-    // Canonical: BIGOK exactly when an interval reaches a bignum region (the
-    // argument is ignored), since a value beyond 64 bits IS a bignum.
+pub fn mk_int_from(h: &mut [i32], t: i32, flags: i32) -> i32 {
+    // An INT leaf from the normalised records in temp vector t (-2 if empty),
+    // with flags (D363): bit 0 BIGOK -- a bignum is admitted and compared by its
+    // numeric value (a range, a numeric control's result), always set when an
+    // interval reaches a bignum region, since a value beyond 64 bits IS a
+    // bignum; bit 1 BIGONLY -- only bignums are admitted (#6.2/3(bstr), the
+    // prelude's biguint and bignint), and it implies BIGOK.
     let n: i32 = vlen(h, t) / 6;
-    let mut big: i32 = 0;
+    let mut big: i32 = flags & 3;
     if n == 0 {
         return -2;
     }
+    if (big & 2) != 0 {
+        big = 3;
+    }
     if (vget(h, t, 0) <= R_NEG_BIG) || (vget(h, t, (6 * n) - 3) >= R_POS_BIG) {
-        big = 1;
+        big |= 1;
     }
     let first: i32 = iv_commit(h, t);
     stage(h, K_INT, big);
@@ -641,18 +648,19 @@ pub fn mk_int_from(h: &mut [i32], t: i32, _bigok: i32) -> i32 {
     stage_d(h, 1, n);
     return stage_intern(h);
 }
-pub fn mk_int_range(h: &mut [i32], lr: i32, la: i32, lb: i32, hr: i32, ha: i32, hb: i32) -> i32 {
-    // An INT leaf for one interval; BIGOK when it reaches a bignum region.
+pub fn mk_int_span(h: &mut [i32], lr: i32, la: i32, lb: i32, hr: i32, ha: i32, hb: i32, flags: i32) -> i32 {
+    // An INT leaf for one interval with mk-int-from's flags.
     vtrunc(h, T_IVS, 0);
     iv_push(h, T_IVS, lr, la, lb, hr, ha, hb);
     if bound_cmp(h, lr, la, lb, hr, ha, hb) > 0 {
         return -2;
     }
-    let mut big: i32 = 0;
-    if (lr <= R_NEG_BIG) || (hr >= R_POS_BIG) {
-        big = 1;
-    }
-    return mk_int_from(h, T_IVS, big);
+    return mk_int_from(h, T_IVS, flags);
+}
+pub fn mk_int_range(h: &mut [i32], lr: i32, la: i32, lb: i32, hr: i32, ha: i32, hb: i32) -> i32 {
+    // An INT leaf for one interval of plain integers (major 0/1); BIGOK when it
+    // reaches a bignum region.
+    return mk_int_span(h, lr, la, lb, hr, ha, hb, 0);
 }
 pub fn iv_contains(h: &[i32], first: i32, n: i32, r: i32, a: i32, b: i32) -> bool {
     // Is the point (r, a, b) in the committed run (first, n)?
@@ -941,16 +949,13 @@ pub fn leaf_mask(h: &[i32], l: i32) -> i32 {
         if iv_meets(h, f, n, R_NEG, -1, -1, R_NEG, 0, 0) {
             msk |= 2;
         }
-        // A bignum region is met when an interval spans into it (by region:
-        // big bounds compare by magnitude, so no fixed bound stands for them).
+        // D363: BIGOK admits any bignum (compared by its value, which may be
+        // small under the valid preset); BIGONLY admits nothing else.
         if (lflags(h, l) & 1) != 0 {
-            for i in 0..n {
-                let lr: i32 = vget(h, T_IV, 6 * (f + i));
-                let hr: i32 = vget(h, T_IV, (6 * (f + i)) + 3);
-                if ((lr <= R_NEG_BIG) && (hr >= R_NEG_BIG)) || ((lr <= R_POS_BIG) && (hr >= R_POS_BIG)) {
-                    msk |= 2048;
-                }
-            }
+            msk |= 2048;
+        }
+        if (lflags(h, l) & 2) != 0 {
+            msk = 2048;
         }
         return msk;
     }
@@ -1266,38 +1271,39 @@ pub(crate) fn next_epoch(h: &mut [i32]) -> i32 {
     return e;
 }
 pub(crate) fn merge_ints(h: &mut [i32], from: i32) -> i32 {
-    // Replace every INT leaf in T_STK[from..] by one merged INT leaf at the
-    // position of the first (BIGOK if any was). Answers -1 on error.
-    let n: i32 = vlen(h, T_STK);
-    let mut first: i32 = -1;
-    let mut count: i32 = 0;
-    let mut big: i32 = 0;
-    vtrunc(h, T_IVA, 0);
-    for i in from..n {
-        let l: i32 = vget(h, T_STK, i);
-        if lk(h, l) == K_INT {
-            if first < 0 {
-                first = i;
+    // Replace the INT leaves in T_STK[from..] of each flags value (D363: plain,
+    // BIGOK, BIGONLY admit different items, so only equal flags merge) by one
+    // merged INT leaf at the position of the first. Answers -1 on error.
+    for fl in 0..4 {
+        let n: i32 = vlen(h, T_STK);
+        let mut first: i32 = -1;
+        let mut count: i32 = 0;
+        vtrunc(h, T_IVA, 0);
+        for i in from..n {
+            let l: i32 = vget(h, T_STK, i);
+            if (l >= 0) && ((lk(h, l) == K_INT) && ((lflags(h, l) & 3) == fl)) {
+                if first < 0 {
+                    first = i;
+                }
+                count += 1;
+                iv_load(h, T_IVA, ld(h, l, 0), ld(h, l, 1));
             }
-            count += 1;
-            big |= lflags(h, l) & 1;
-            iv_load(h, T_IVA, ld(h, l, 0), ld(h, l, 1));
         }
-    }
-    if count < 2 {
-        return 0;
-    }
-    if iv_normalize(h, T_IVA, T_IVB) < 0 {
-        return -1;
-    }
-    let m: i32 = mk_int_from(h, T_IVB, big);
-    if m < 0 {
-        return -1;
-    }
-    vset(h, T_STK, first, m);
-    for j in first + 1..n {
-        if lk(h, vget(h, T_STK, j)) == K_INT {
-            vset(h, T_STK, j, -1);
+        if count >= 2 {
+            if iv_normalize(h, T_IVA, T_IVB) < 0 {
+                return -1;
+            }
+            let m: i32 = mk_int_from(h, T_IVB, fl);
+            if m < 0 {
+                return -1;
+            }
+            vset(h, T_STK, first, m);
+            for j in first + 1..n {
+                let lj: i32 = vget(h, T_STK, j);
+                if (lj >= 0) && ((lk(h, lj) == K_INT) && ((lflags(h, lj) & 3) == fl)) {
+                    vset(h, T_STK, j, -1);
+                }
+            }
         }
     }
     return 0;

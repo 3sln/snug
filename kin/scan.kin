@@ -26,7 +26,8 @@
                                      O_HI O_LO O_CSTART O_PROFILE O_VCTL O_VNEEDW O_VNEEDB O_VLEN
                                      O_S_RTOP O_S_DLOW O_S_UNITS O_S_CBTOP O_S_NDEF O_S_SRC O_S_EXTRA O_S_FIRST O_S_DUPK O_S_DUPP O_S_DUPO
                                      MAX_BIGNUM_BYTES MAX_DIMENSIONS VC_NONDET VC_UNSORTED VC_ECS
-                                     PF_KEYS PF_TAGS PF_FLOATS PF_UNDEFINED PF_NONCHAR PF_HOST PF_VALID PF_VREL]]
+                                     PF_KEYS PF_TAGS PF_FLOATS PF_UNDEFINED PF_NONCHAR PF_HOST PF_VALID PF_VREL
+                                     PF_T24V PF_WF PF_WF_WALK]]
             [snug.cbor.head :refer [fail be16 be32 read-arg read-arg-v take-len count-item
                                     enter-container bytes-content]]
             [snug.cbor.text :refer [utf8-invalid-at utf8-invalid-at-nc]]
@@ -40,13 +41,36 @@
                                      kclass dup-pairs dup-input dup-forms dup-forms-within
                                      dup-finish gather gather-within]]))
 
-(declarefn item scan-one item-v std-indef scan-x unsorted dup-note)
+(declarefn item scan-one item-v std-indef scan-x unsorted dup-note payload-one)
 
 ;; ------------------------------------------------------------- valid CBOR (P8.4)
 
 (defn ^:pub ^Bool valid-on [^IntsR o]
   (comment "Does the profile admit valid, non-deterministic CBOR (PF_VALID, D260)?")
   (return (!= (bit-and (ia o O_PROFILE) PF_VALID) 0)))
+
+(defn ^:pub ^Bool wf-on [^IntsR o]
+  (comment "Is this walk well-formedness only (PF_WF, D358)?")
+  (return (!= (bit-and (ia o O_PROFILE) PF_WF) 0)))
+
+(defn ^:pub ^Bool wf-payload [^IntsR o]
+  (comment "Is a tag-24 payload walked as well-formed only (D358): a valid-CBOR run"
+           "(PF_VALID, or PF_VREL in the VM) without PF_T24V?")
+  (let [pf (ia o O_PROFILE)]
+    (return (and (!= (bit-and pf (bit-or PF_VALID PF_VREL)) 0) (== (bit-and pf PF_T24V) 0)))))
+
+(defn ^:pub ^I32 wf-scan-one [^Bytes b ^Ints o ^I32 cs ^I32 depth ^I32 ce]
+  (comment "D358: a tag-24 payload as one well-formed item (RFC 8949 §3.4.5.1): this"
+           "scanner's own walk (scan-one) under PF_WF_WALK -- valid CBOR, any key,"
+           "any tag, every simple value and float, plus PF_WF: no UTF-8 check, no key"
+           "order or duplicate check (nothing is recorded for after the walk), every"
+           "tag's content an ordinary item -- then the profile word back. The limits"
+           "are the walk's. Shared with the VM, whose first words are this o.")
+  (let [pf (ia o O_PROFILE)]
+    (iset o O_PROFILE PF_WF_WALK)
+    (let [^I32 r (scan-one b o cs depth ce)]
+      (iset o O_PROFILE pf)
+      (return r))))
 
 (defn ^:pub nondet [^Ints o]
   (comment "Note that the input is not its own canonical (DC) form: an encoding the"
@@ -196,7 +220,8 @@
   (let [stop (take-len o pos p hi lo end)]
     (if (< stop 0) (return stop))
     (let [bad (utf8-invalid-at b p stop)]
-      (if (>= bad 0) (return (text-bad b o bad stop)))
+      (comment "D358: a well-formedness walk does not ask for valid UTF-8")
+      (if (and (>= bad 0) (not (wf-on o))) (return (text-bad b o bad stop)))
       (return stop))))
 
 ;; ------------------------------------------------------------- containers
@@ -353,10 +378,11 @@
                         (if (== order 0) (return (dup-note o 1 (neg 1) start start CODE_DUPLICATE_KEY)))
                         (if (> order 0) (return (dup-note o 1 (neg 1) start start CODE_KEY_ORDER))))))
                 (set pc 1))
-            (do (let [ks (key-step b o prev-start prev-end pc start q km)]
-                  (if (< ks 0) (return ks))
-                  (set pc (bit-and ks 1))
-                  (if (!= (bit-and ks 2) 0) (set mark true)))))
+            (if (not (wf-on o))
+              (do (let [ks (key-step b o prev-start prev-end pc start q km)]
+                    (if (< ks 0) (return ks))
+                    (set pc (bit-and ks 1))
+                    (if (!= (bit-and ks 2) 0) (set mark true))))))
           (set prev-start start)
           (set prev-end q)
           (set q (item b o q inner end))
@@ -434,10 +460,11 @@
         (if (< q 0) (return q))
         (if (<= km 1)
           (if (not (key-label b o start km)) (return (fail o start CODE_KEY_TYPE))))
-        (let [ks (key-step b o prev-start prev-end pc start q km)]
-          (if (< ks 0) (return ks))
-          (set pc (bit-and ks 1))
-          (if (!= (bit-and ks 2) 0) (set mark true)))
+        (if (not (wf-on o))
+          (do (let [ks (key-step b o prev-start prev-end pc start q km)]
+                (if (< ks 0) (return ks))
+                (set pc (bit-and ks 1))
+                (if (!= (bit-and ks 2) 0) (set mark true)))))
         (set prev-start start)
         (set prev-end q)
         (set q (item b o q inner end))
@@ -674,14 +701,14 @@
   (comment "A standard-set tag (snug.cbor.stdtags, D121): its content is an item at"
            "depth + 1, walked first; then the content rule (tag); then a tag-24 byte"
            "string's content as one item at depth + 2, bounded by its end (trailing"
-           "after it).")
+           "after it): under PF_VALID without PF_T24V only well-formed (D358).")
   (let [^I32 q (item b o p (+ depth 1) end)]
     (if (< q 0) (return q))
     (if (and (== (bit-and (u8 b p) 31) 31) (<= (ushr (u8 b p) 5) 3))
       (return (std-indef b o pos p q tag depth)))
     (if (not (std-content-ok b tag p q)) (return (fail o pos CODE_TAG)))
     (if (== tag 24)
-      (do (let [^I32 r (scan-one b o (std-inner b p) (+ depth 2) q)]
+      (do (let [^I32 r (payload-one b o (std-inner b p) (+ depth 2) q)]
             (if (< r 0) (return r)))))
     (return q)))
 
@@ -713,6 +740,8 @@
            "number of more than 32 bits follows its rule tag (D180): allowed only"
            "under the any-tag level, 2^64 - 1 never.")
   (if (>= depth (ia o O_MAX_DEPTH)) (return (fail o pos CODE_DEPTH)))
+  (comment "D358: in a well-formedness walk every tag's content is an ordinary item")
+  (if (wf-on o) (return (item b o p (+ depth 1) end)))
   (if (!= hi 0)
     (do (let [rw (rule-tag hi lo)]
           (if (std-allowed (ia o O_PROFILE) rw depth) (return (scan-std b o pos p rw depth end))))
@@ -909,6 +938,12 @@
 
 (declarefn run-defer)
 
+(defn ^I32 payload-one [^Bytes b ^Ints o ^I32 cs ^I32 depth ^I32 ce]
+  (comment "A tag-24 payload as one item: well-formed only under PF_VALID without"
+           "PF_T24V (D358; records nothing), else scan-one.")
+  (if (wf-payload o) (return (wf-scan-one b o cs depth ce)))
+  (return (scan-one b o cs depth ce)))
+
 (defn ^I32 defer-payload [^Bytes b ^Ints o ^BytesW cb ^I32 src ^I32 e ^I32 cpos ^I32 depth ^I32 at]
   (comment "Kind 3: a tag-24 payload in an indefinite-length byte string, gathered into"
            "cb and walked there as one item (scan-one) with the item count it would"
@@ -929,7 +964,7 @@
       (iset o O_S_CBTOP ge)
       (iset o O_S_SRC 1)
       (iset o O_ITEMS it0)
-      (let [^:mut r (scan-one cb o top depth ge)]
+      (let [^:mut r (payload-one cb o top depth ge)]
         (if (and (>= r 0) (> (ia o O_S_NDEF) nd0))
           (set r (run-defer b o cb nd0 (ia o O_S_NDEF))))
         (let [count (- (ia o O_ITEMS) it0)]

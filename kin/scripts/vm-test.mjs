@@ -40,7 +40,7 @@ const fail = msg => { if (fails < 60) console.log('  FAIL ' + msg); if (failLog)
 process.on('exit', () => { if (failLog) writeFileSync(process.env.VMTEST_LOG, failLog.join('\n') + '\n'); });
 
 // ---------------------------------------------------------------- programs and the JS runner
-const { programs, cases, sc, corpus, diff, nAsm, asmStart, nExt, large } = buildVmCases({ MUTATIONS, SEED, SCHEMAS, fail, valid: true });
+const { programs, cases, sc, corpus, diff, nAsm, asmStart, nExt, large, nWide } = buildVmCases({ MUTATIONS, SEED, SCHEMAS, fail, valid: true });
 let scratch = new Int32Array(0), markCap = 0;
 const out = new Int32Array(8 + 2 * 257);
 let vvs = new Int32Array(64), vcb = new Uint8Array(64);
@@ -237,6 +237,7 @@ const line = (ok, s) => console.log(`  ${ok ? 'ok  ' : 'FAIL'} ${s}`);
 line(stats.identity[0] === stats.identity[1], `profile identity: ${stats.identity[0]}/${stats.identity[1]} runs give the scanner's code, offset and items, through the VM against \`any\` and against a schema that keeps everything live (${sc.nVectors} vectors, ${sc.nFixed} fixed, ${MUTATIONS} mutations seed ${SEED})`);
 line(stats.corpus[0] === stats.corpus[1], `conformance: ${stats.corpus[0]}/${stats.corpus[1]} cases with the expected verdict, from ${corpus.compiled} compiled suites of ${corpus.suites} (${corpus.later} phase-later skipped)`);
 console.log(`  info refusal suites: ${corpus.refusedOk} refused by the compiler as expected; ${corpus.refusedNot.length} compiled anyway (compiler's gate)`);
+console.log(`  info wide integer heads (D362): ${nWide} corpus and PEG-oracle inputs with every integer at 2^31 - 1 / 2^32 - 1 / 2^63 - 1 / 2^64 - 1, in every arm below (the Rust one with overflow checks)`);
 if (corpus.notCompiled.length) { console.log(`  info ${corpus.notCompiled.length} suites did not compile (not VM cases):`); for (const s of corpus.notCompiled.slice(0, 40)) console.log('       ' + s); }
 line(stats.oracle[0] === stats.oracle[1], `PEG oracle differential (D279, both cut modes): ${stats.oracle[0]}/${stats.oracle[1]} verdicts agree with corpus/tools/peg-oracle.mjs -- ${stats.oracle[1] - diff.corpus} on ${diff.compiled} compiled schemas of ${diff.schemas} generated (seed ${SEED}; deterministic and unsorted encodings), ${diff.corpus} on the conformance corpus; ${diff.unknown + diff.corpusUnknown} oracle-unknown skipped`);
 line(forcedSame + forcedResource === cases.length, `forced tiers (program-2 §8): ${forcedSame}/${cases.length - forcedResource} cases give the natural run's verdict, reason, subcode, offset, items and path with every array A2 and every map T (${forcedResource} that hit budget or group_limit in either mode are held to their own schedule: JS == Rust below)`);

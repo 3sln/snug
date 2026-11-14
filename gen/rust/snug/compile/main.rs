@@ -13,10 +13,11 @@ use crate::snug::compile::prelude::*;
 use crate::snug::compile::regexp::*;
 use crate::snug::compile::rules::*;
 
-pub const OPT_WORDS: i32 = 22;
+pub const OPT_WORDS: i32 = 23;
 pub const OPT_REGEXP: i32 = 19;
 pub const OPT_CUTS: i32 = 20;
 pub const OPT_GROUP_WORDS: i32 = 21;
+pub const OPT_DEFAULT: i32 = 22;
 pub const GROUP_WORDS_DEFAULT: i32 = 4194304;
 pub const GROUP_WORDS_MAX: i32 = 16777216;
 pub const OPT_PROFILE: i32 = 0;
@@ -41,6 +42,7 @@ pub fn setup_limits(h: &mut [i32], opt: &[i32]) {
     hs(h, H_PROFILE, profile);
     hs(h, H_REGEXP, opt_limit(opt, OPT_REGEXP, 0, 1));
     hs(h, H_CUTS, opt_limit(opt, OPT_CUTS, 0, 1));
+    hs(h, H_DEFAULT, opt_limit(opt, OPT_DEFAULT, 0, 1));
     let gw: i32 = opt_limit(opt, OPT_GROUP_WORDS, -1, GROUP_WORDS_MAX);
     hs(h, H_GROUP_GIVEN, gw);
     if gw < 0 {
@@ -311,7 +313,13 @@ pub fn build_key_preimage(h: &mut [i32]) {
     }
     let pr: i32 = hg(h, H_PROFILE);
     push_uint(h, T_KEYPRE, pr);
-    head_push(h, T_KEYPRE, 4, 0, 19);
+    // D359: a 20th element, 1, when `.default` is annotation only; the default
+    // reading adds nothing, so its preimage keeps 19 elements.
+    if hg(h, H_DEFAULT) == 0 {
+        head_push(h, T_KEYPRE, 4, 0, 19);
+    } else {
+        head_push(h, T_KEYPRE, 4, 0, 20);
+    }
     for k in 0..17 {
         let v: i32 = hg(h, if_limit(k));
         push_uint(h, T_KEYPRE, v);
@@ -323,6 +331,9 @@ pub fn build_key_preimage(h: &mut [i32]) {
         head_push(h, T_KEYPRE, 1, 0, 0);
     } else {
         push_uint(h, T_KEYPRE, gw);
+    }
+    if hg(h, H_DEFAULT) != 0 {
+        push_uint(h, T_KEYPRE, 1);
     }
     let n: i32 = hg(h, H_NSRC);
     head_push(h, T_KEYPRE, 2, 0, n);

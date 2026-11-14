@@ -38,15 +38,18 @@ and `SequenceOptions`: `Profile::VALID` (any valid CBOR)
 by default, `Profile::DETERMINISTIC` to require RFC 8949 §4.2.1 encoding,
 `Profile::BINDLE` for the Bindle restrictions (root `cose` integer labels an
 option there), or the fields `keys`, `tags`, `floats`, `undefined_value`,
-`noncharacters`, `valid`
-([profiles](profiles.md)). `CompileOptions::unicode`
+`noncharacters`, `valid`, `tag24` (`Tag24::WellFormed`, the valid preset's:
+a tag-24 payload need only be well-formed; `Tag24::Valid`; read only with
+`valid`) ([profiles](profiles.md)). `CompileOptions::unicode`
 accepts `Some(&tables)` from `snug::unicode_tables::tables()` for pinned
 Unicode 16.0 category regexps. Programs contain the compiled automata and do
 not need the category tables at validation time. `CompileOptions::cuts`
 selects the cut semantics (`Cuts::Rfc`, the literal RFC 8610 cut, by default;
 `Cuts::Branch`, rule A), and `CompileOptions::group_words` caps the PEG
 group arena in words (default 4,194,304; a run that needs more refuses with
-`group_limit`), as JS's `cuts` and `groupWords`.
+`group_limit`), as JS's `cuts` and `groupWords`. `CompileOptions::default_control`
+is JS's `defaultControl`: `DefaultControl::Ne` (the default, RFC 8610
+§3.8.6's implied `.ne`) or `DefaultControl::Annotation`.
 
 Schemas and Programs clone cheaply through immutable shared storage. Share a
 Schema between threads, and use one reusable `Scratch` per concurrent caller.

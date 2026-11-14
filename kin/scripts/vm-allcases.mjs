@@ -166,7 +166,8 @@ for (const file of ['study', 'adversarial', 'audit-2026-11-04', 'numbers', 'head
       if (rule < 0) { fail(`${file}: ${su.name}: no rule ${k.rule}`); continue; }
       corpus.cases++;
       const opt = su.options ?? {};
-      cases.push({ prog: pi, rule, lim: LIM(1, opt.cose ? 1 : 0, -1, -1, -1, opt.maxItems ?? -1, -1, -1, opt.wire === 'deterministic' ? 122 : opt.wire === 'valid' ? 378 : 0), bytes: unhex(k.hex),
+      const t24 = opt.tag24 === 'valid' ? 2048 : 0;  // D358: PF_T24V
+      cases.push({ prog: pi, rule, lim: LIM(1, opt.cose ? 1 : 0, -1, -1, -1, opt.maxItems ?? -1, -1, -1, opt.wire === 'deterministic' ? 122 : opt.wire === 'valid' ? 378 | t24 : 0), bytes: unhex(k.hex),
         label: `${file}: ${su.name} [${k.hex.slice(0, 40)}]`, corpus: true,
         check: o => { const ok = o.split(' ')[0] === '0'; return ok === k.expect ? null : `verdict ${ok}, expected ${k.expect} (out ${o})`; } });
       // the PEG oracle in both cut modes (P8.5, D279): the same suite's Program in each mode,
@@ -213,7 +214,7 @@ for (const { cddl, values } of pegSchemas(SCHEMAS, 8, SEED * 7919 + 1)) {
   }
 }
 for (const { file, su, k, text, opt } of corpusOracle) {
-  if (opt.cose || opt.wire === 'deterministic' || opt.maxItems !== undefined) continue;
+  if (opt.cose || opt.wire === 'deterministic' || opt.maxItems !== undefined || opt.tag24 !== undefined) continue;
   const os = pegCompile(text);
   if (os.error) continue;
   for (const cuts of ['rfc', 'branch']) {
@@ -232,6 +233,58 @@ for (const { file, su, k, text, opt } of corpusOracle) {
         // a profile refusal the oracle's decoder does not make (an application tag rule, a simple value) is not a group verdict
         if (!ok && Number(w[0]) < 32) return null;
         return ok === want ? null : `VM ${ok}, oracle ${want} (out ${o})`; } });
+  }
+}
+
+// ---------------------------------------------------------------- 3b'. wide integer heads (D362)
+// Every corpus and PEG-oracle input again with each integer item widened to a 4- or 8-byte
+// head near the top of its range (2^31 - 1, 2^32 - 1, 2^64 - 1; negative too). A head's
+// argument sits in the scanner's scratch words (O_HI, O_LO) that the VM also reuses: the
+// map cursor counted its probes in O_LO without resetting it on map-keyq's multi-block path,
+// and the overflow-checked Rust arm (JS == Rust, debug) panicked on a valid input. These
+// cases carry no verdict of their own; the identity arms compare them, and the Rust arm
+// runs with overflow checks.
+const intSpans = b => {
+  const spans = [];
+  const head = p => { const ib = b[p], ai = ib & 31; if (ai < 24) return [1, ai]; if (ai > 27) return [1, -1]; const w = 1 << (ai - 24); if (p + 1 + w > b.length) return null; let v = 0; for (let i = 0; i < w; i++) v = v * 256 + b[p + 1 + i]; return [1 + w, v]; };
+  const item = p => {
+    if (p >= b.length) return -1;
+    const h = head(p); if (!h) return -1;
+    const major = b[p] >> 5, [hl, v] = h;
+    if (major <= 1) { if (v < 0) return -1; spans.push([p, p + hl]); return p + hl; }
+    if (major === 7) return p + hl;
+    if (major === 6) return item(p + hl);
+    if (v < 0) {   // indefinite: items to the break
+      let q = p + 1;
+      while (q < b.length && b[q] !== 0xff) { q = item(q); if (q < 0) return -1; }
+      return q < b.length ? q + 1 : -1;
+    }
+    if (major <= 3) return p + hl + v <= b.length ? p + hl + v : -1;
+    let q = p + hl;
+    for (let i = 0; i < (major === 5 ? 2 * v : v); i++) { q = item(q); if (q < 0) return -1; }
+    return q;
+  };
+  let q = 0;
+  while (q < b.length && q >= 0) q = item(q);
+  return q === b.length ? spans : null;
+};
+const WIDE = [[0x1a, 0x7f, 0xff, 0xff, 0xff], [0x1a, 0xff, 0xff, 0xff, 0xff], [0x1b, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff], [0x1b, 0x7f, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff]];
+const wideSeen = new Set();
+let nWide = 0;
+for (const c of cases.slice()) {
+  if (!c.corpus && !c.oracle) continue;
+  const spans = intSpans(c.bytes);
+  if (!spans || spans.length === 0) continue;
+  for (const w of WIDE) {
+    const out = [];
+    let at = 0;
+    for (const [s, e] of spans) { out.push(...c.bytes.subarray(at, s), (c.bytes[s] & 0xe0) | w[0], ...w.slice(1)); at = e; }
+    out.push(...c.bytes.subarray(at));
+    const bytes = Uint8Array.from(out), key = `${c.prog}/${c.rule}/${hex(bytes)}`;
+    if (wideSeen.has(key)) continue;
+    wideSeen.add(key);
+    nWide++;
+    cases.push({ prog: c.prog, rule: c.rule, lim: c.lim, bytes, label: `wide heads (D362): ${c.label}`, wide: true, check: () => null });
   }
 }
 
@@ -369,5 +422,5 @@ for (const a of assembledCases()) {
   for (const k of a.cases) cases.push({ prog: pi, rule: k.rule ?? 0, lim: [...(k.lim ?? LIM(1, 0)).slice(0, 8), 0], bytes: k.bytes, span: k.span, label: `${a.label}: ${k.label ?? hex(k.bytes).slice(0, 40)}`, check: k.check });
 }
 const nAsm = cases.length - asmStart;
-return { programs, cases, sc, corpus, diff, nAsm, asmStart, nIdentity, nExt, large };
+return { programs, cases, sc, corpus, diff, nAsm, asmStart, nIdentity, nExt, large, nWide };
 }

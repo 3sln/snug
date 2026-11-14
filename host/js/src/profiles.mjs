@@ -13,8 +13,10 @@ const UNDEFINED = 32, NONCHAR = 64;
 export const profiles = Object.freeze({
   // P8.4 (D260): any valid CBOR (RFC 8949 §5.3) -- the deterministic preset's options plus
   // non-deterministic encodings (indefinite lengths, longer heads and floats, keys in any order).
+  // D358: under valid a tag-24 payload need only be well-formed (RFC 8949 §3.4.5.1); the
+  // deterministic and Bindle presets always walk it as a valid item, so they carry no tag24.
   valid: Object.freeze({ wire: 'valid', top: 'any', cose: false, keys: 'any', tags: 'any',
-    floats: 'deterministic', undefinedValue: true, noncharacters: true, strictArrays: false }),
+    floats: 'deterministic', undefinedValue: true, noncharacters: true, strictArrays: false, tag24: 'well-formed' }),
   deterministic: Object.freeze({ wire: 'deterministic', top: 'any', cose: false, keys: 'any', tags: 'any',
     floats: 'deterministic', undefinedValue: true, noncharacters: true, strictArrays: false }),
   bindle: Object.freeze({ wire: 'bindle', top: 'map', cose: false, keys: 'text', tags: 'bindle', floats: 'bindle',
@@ -47,14 +49,15 @@ function bool(value, name) {
 /** The core's profile flags (snug.cbor.codes PF_*) for these options. */
 export function profileFlags(options) {
   const preset = presetOf(options);
-  const { keys, tags, floats, undefinedValue, noncharacters } = options;
-  if (keys === undefined && tags === undefined && floats === undefined && undefinedValue === undefined && noncharacters === undefined)
+  const { keys, tags, floats, undefinedValue, noncharacters, tag24 } = options;
+  if (keys === undefined && tags === undefined && floats === undefined && undefinedValue === undefined && noncharacters === undefined && tag24 === undefined)
     return preset === profiles.bindle ? BINDLE_FLAGS : preset === profiles.valid ? PF_VALID_PRESET : PF_DETERMINISTIC;
   return pick(KEYS, keys ?? preset.keys, 'keys') | pick(TAGS, tags ?? preset.tags, 'tags')
     | pick(FLOATS, floats ?? preset.floats, 'floats')
     | (bool(undefinedValue ?? preset.undefinedValue, 'undefinedValue') ? UNDEFINED : 0)
     | (bool(noncharacters ?? preset.noncharacters, 'noncharacters') ? NONCHAR : 0)
-    | (preset === profiles.valid ? PF_VALID : 0);
+    // tag24 (checked with the other options): PF_T24V, read only under wire 'valid'
+    | (preset === profiles.valid ? PF_VALID | (tag24 === 'valid' ? 2048 : 0) : 0);
 }
 
 /** The root policy of the codec, views and profile sources: options.top, else the preset's. */

@@ -323,8 +323,10 @@
     (return (mag-add1 h m 1))))
 
 (defn ^:pub point-of [^Ints h ^I32 negative ^I32 mag]
-  (comment "The bound of the integer (sign, magnitude bid) into h[H_R0..H_R2].")
-  (if (== negative 0)
+  (comment "The bound of the integer (sign, magnitude bid) into h[H_R0..H_R2]. A"
+           "negative zero (`-0`, `-0x0`) is the integer 0 (P9.13).")
+  (if (or (== negative 0)
+          (and (<= (bid-len h mag) 8) (and (== (mag-hi h mag) 0) (== (mag-lo h mag) 0))))
     (do (if (<= (bid-len h mag) 8)
           (put3 h R_POS (mag-hi h mag) (mag-lo h mag))
           (put3 h R_POS_BIG mag (bid-len h mag)))
@@ -455,28 +457,35 @@
     (let [x (vget h T_IV (+ (* 6 first) i))]
       (vpush1 h t x))))
 
-(defn ^:pub ^I32 mk-int-from [^Ints h ^I32 t ^I32 _bigok]
-  (comment "An INT leaf from the normalised records in temp vector t (-2 if empty)."
-           "Canonical: BIGOK exactly when an interval reaches a bignum region (the"
-           "argument is ignored), since a value beyond 64 bits IS a bignum.")
+(defn ^:pub ^I32 mk-int-from [^Ints h ^I32 t ^I32 flags]
+  (comment "An INT leaf from the normalised records in temp vector t (-2 if empty),"
+           "with flags (D363): bit 0 BIGOK -- a bignum is admitted and compared by its"
+           "numeric value (a range, a numeric control's result), always set when an"
+           "interval reaches a bignum region, since a value beyond 64 bits IS a"
+           "bignum; bit 1 BIGONLY -- only bignums are admitted (#6.2/3(bstr), the"
+           "prelude's biguint and bignint), and it implies BIGOK.")
   (let [n (quot (vlen h t) 6)
-        ^:mut big 0]
+        ^:mut big (bit-and flags 3)]
     (if (== n 0) (return (neg 2)))
-    (if (or (<= (vget h t 0) R_NEG_BIG) (>= (vget h t (- (* 6 n) 3)) R_POS_BIG)) (set big 1))
+    (if (!= (bit-and big 2) 0) (set big 3))
+    (if (or (<= (vget h t 0) R_NEG_BIG) (>= (vget h t (- (* 6 n) 3)) R_POS_BIG)) (set big (bit-or big 1)))
     (let [first (iv-commit h t)]
       (stage h K_INT big)
       (stage-d h 0 first)
       (stage-d h 1 n)
       (return (stage-intern h)))))
 
-(defn ^:pub ^I32 mk-int-range [^Ints h ^I32 lr ^I32 la ^I32 lb ^I32 hr ^I32 ha ^I32 hb]
-  (comment "An INT leaf for one interval; BIGOK when it reaches a bignum region.")
+(defn ^:pub ^I32 mk-int-span [^Ints h ^I32 lr ^I32 la ^I32 lb ^I32 hr ^I32 ha ^I32 hb ^I32 flags]
+  (comment "An INT leaf for one interval with mk-int-from's flags.")
   (vtrunc h T_IVS 0)
   (iv-push h T_IVS lr la lb hr ha hb)
   (if (> (bound-cmp h lr la lb hr ha hb) 0) (return (neg 2)))
-  (let [^:mut big 0]
-    (if (or (<= lr R_NEG_BIG) (>= hr R_POS_BIG)) (set big 1))
-    (return (mk-int-from h T_IVS big))))
+  (return (mk-int-from h T_IVS flags)))
+
+(defn ^:pub ^I32 mk-int-range [^Ints h ^I32 lr ^I32 la ^I32 lb ^I32 hr ^I32 ha ^I32 hb]
+  (comment "An INT leaf for one interval of plain integers (major 0/1); BIGOK when it"
+           "reaches a bignum region.")
+  (return (mk-int-span h lr la lb hr ha hb 0)))
 
 (defn ^:pub ^Bool iv-contains [^IntsR h ^I32 first ^I32 n ^I32 r ^I32 a ^I32 b]
   (comment "Is the point (r, a, b) in the committed run (first, n)?")
@@ -658,14 +667,10 @@
                 ^:mut msk 0]
             (if (iv-meets h f n R_POS 0 0 R_POS (neg 1) (neg 1)) (set msk (bit-or msk 1)))
             (if (iv-meets h f n R_NEG (neg 1) (neg 1) R_NEG 0 0) (set msk (bit-or msk 2)))
-            (comment "A bignum region is met when an interval spans into it (by region:"
-                     "big bounds compare by magnitude, so no fixed bound stands for them).")
-            (if (!= (bit-and (lflags h l) 1) 0)
-              (for [^I32 i 0 n]
-                (let [lr (vget h T_IV (* 6 (+ f i)))
-                      hr (vget h T_IV (+ (* 6 (+ f i)) 3))]
-                  (if (or (and (<= lr R_NEG_BIG) (>= hr R_NEG_BIG)) (and (<= lr R_POS_BIG) (>= hr R_POS_BIG)))
-                    (set msk (bit-or msk 2048))))))
+            (comment "D363: BIGOK admits any bignum (compared by its value, which may be"
+                     "small under the valid preset); BIGONLY admits nothing else.")
+            (if (!= (bit-and (lflags h l) 1) 0) (set msk (bit-or msk 2048)))
+            (if (!= (bit-and (lflags h l) 2) 0) (set msk 2048))
             (return msk))))
     (if (== k K_FLOAT) (return (shl (lflags h l) 8)))
     (if (== k K_SIMPLE) (return 128))
@@ -859,28 +864,30 @@
     (return e)))
 
 (defn ^I32 merge-ints [^Ints h ^I32 from]
-  (comment "Replace every INT leaf in T_STK[from..] by one merged INT leaf at the"
-           "position of the first (BIGOK if any was). Answers -1 on error.")
-  (let [n (vlen h T_STK)
-        ^:mut first (neg 1)
-        ^:mut count 0
-        ^:mut big 0]
-    (vtrunc h T_IVA 0)
-    (for [^I32 i from n]
-      (let [l (vget h T_STK i)]
-        (if (== (lk h l) K_INT)
-          (do (if (< first 0) (set first i))
-              (set count (+ count 1))
-              (set big (bit-or big (bit-and (lflags h l) 1)))
-              (iv-load h T_IVA (ld h l 0) (ld h l 1))))))
-    (if (< count 2) (return 0))
-    (if (< (iv-normalize h T_IVA T_IVB) 0) (return (neg 1)))
-    (let [m (mk-int-from h T_IVB big)]
-      (if (< m 0) (return (neg 1)))
-      (vset h T_STK first m)
-      (for [^I32 j (+ first 1) n]
-        (if (== (lk h (vget h T_STK j)) K_INT) (vset h T_STK j (neg 1))))
-      (return 0))))
+  (comment "Replace the INT leaves in T_STK[from..] of each flags value (D363: plain,"
+           "BIGOK, BIGONLY admit different items, so only equal flags merge) by one"
+           "merged INT leaf at the position of the first. Answers -1 on error.")
+  (for [^I32 fl 0 4]
+    (let [n (vlen h T_STK)
+          ^:mut first (neg 1)
+          ^:mut count 0]
+      (vtrunc h T_IVA 0)
+      (for [^I32 i from n]
+        (let [l (vget h T_STK i)]
+          (if (and (>= l 0) (and (== (lk h l) K_INT) (== (bit-and (lflags h l) 3) fl)))
+            (do (if (< first 0) (set first i))
+                (set count (+ count 1))
+                (iv-load h T_IVA (ld h l 0) (ld h l 1))))))
+      (if (>= count 2)
+        (do (if (< (iv-normalize h T_IVA T_IVB) 0) (return (neg 1)))
+            (let [m (mk-int-from h T_IVB fl)]
+              (if (< m 0) (return (neg 1)))
+              (vset h T_STK first m)
+              (for [^I32 j (+ first 1) n]
+                (let [lj (vget h T_STK j)]
+                  (if (and (>= lj 0) (and (== (lk h lj) K_INT) (== (bit-and (lflags h lj) 3) fl)))
+                    (vset h T_STK j (neg 1))))))))))
+  (return 0))
 
 (defn ^I32 float-merge2 [^Ints h ^I32 a ^I32 b]
   (comment "One FLOAT leaf for a / b if they merge exactly (equal widths: union of"

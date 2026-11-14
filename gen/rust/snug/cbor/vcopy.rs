@@ -829,7 +829,11 @@ pub(crate) fn embed_check_in(b: &[u8], o: &mut [i32], cb: &mut [u8], cs: i32, ce
 }
 pub(crate) fn if_24(o: &[i32], hi: i32, lo: i32) -> i32 {
     // Is the tag hi:lo 24 with its payload walked as CBOR under the profile (as
-    // the scanner and the VM walk it: a standard-set tag)?
+    // the scanner and the VM walk it: a standard-set tag)? Not when it need only
+    // be well-formed (D358): its bytes are then walked as they are.
+    if wf_payload(o) {
+        return 0;
+    }
     if ((hi == 0) && (lo == 24)) && std_allowed(o[(O_PROFILE) as usize], 24, 0) {
         return 1;
     }

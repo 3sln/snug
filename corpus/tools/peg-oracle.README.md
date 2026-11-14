@@ -193,12 +193,13 @@ not change the documented table's expected verdicts.
    `1.5` matches `float32` and does not match `float16`, although that value
    fits binary16. This conflict is outside the 117 group probes. It is
    recorded rather than concealed by shortening decoded floats.
-6. **F6 — Inherited `.default` annotation.**
-   RFC 8610 §3.8.6 specifies “implied .ne”; architecture §4.6 lists no
-   effect. The oracle follows the inherited architecture policy, so
-   `uint .default 1` accepts `1`. `.default` was not among the task's required
-   controls, but the implemented convenience support exposes this existing
-   conflict explicitly.
+6. **F6 — `.default` and its implied `.ne` (resolved by D359).**
+   RFC 8610 §3.8.6 specifies “implied .ne”; architecture §4.6 listed no
+   effect, and the oracle first followed that, so `uint .default 1` accepted
+   `1`. Since D359 snug's default reading is the published one, and so is the
+   oracle's: `uint .default 1` refuses `1`. `check(..., { defaultControl:
+   'annotation' })` gives the annotation-only reading of erratum 9229
+   (status Reported), as snug's compile option does.
 
 The rules for RFC 9682 tag/simple head numbers are followed directly: majors 6/7 use tag
 numbers/simple values (25–27 select floats), while majors 0–5 use

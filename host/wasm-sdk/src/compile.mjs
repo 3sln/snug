@@ -59,10 +59,11 @@ export async function compile(text, options = {}) {
   if (!(bytes instanceof Uint8Array)) throw new TypeError('compile expects CDDL text.');
   // D340: the ABNF parse mode rides in the registry flags (the source key binds it)
   const registry = registryWords(entries, controlsInBus, abnf === 'lenient');
-  // format 2.0: options 20 (cuts) and 21 (groupWords) precede the registry
-  const opt = new Int32Array(22 + registry.length).fill(-1);
-  opt.set(registry, 22);
+  // format 2.0: options 20 (cuts), 21 (groupWords) and 22 (D359: the .default reading) precede the registry
+  const opt = new Int32Array(23 + registry.length).fill(-1);
+  opt.set(registry, 23);
   opt[20] = options.cuts === 'branch' ? 1 : 0; // D301: 0 rfc (default), 1 branch
+  opt[22] = options.defaultControl === 'annotation' ? 1 : 0; // D359: 0 the implied .ne (default), 1 annotation
   if (options.groupWords !== undefined) opt[21] = Math.min(options.groupWords, 0x7fffffff);
   opt[0] = PROFILES[profile];
   opt[19] = regexp === 'iregexp' ? 1 : 0;

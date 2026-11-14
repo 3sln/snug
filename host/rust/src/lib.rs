@@ -66,14 +66,14 @@ pub mod async_source;
 pub mod sessions;
 pub use value::{Value, Integer, TypedArray};
 pub use error::{Error, IoError};
-pub use decode::{decode, DecodeOptions, Floats, Keys, Profile, Tags, Top};
+pub use decode::{decode, DecodeOptions, Floats, Keys, Profile, Tag24, Tags, Top};
 pub use encode::{encode, EncodeOptions};
 pub use writer::Writer;
 pub use program::Program;
 pub use view::{View, Cursor, TypedView, TypedElement, Document};
 pub use api::{Schema, CompileOptions, CompileLimits, CompilerProfile, ValidationOptions, SourceOptions,
     Scratch, Failure, Segment, Blob, BytesBlob};
-pub use compile::{AbnfMode, Cuts, Regexp, SchemaError, Warning};
+pub use compile::{AbnfMode, Cuts, DefaultControl, Regexp, SchemaError, Warning};
 pub use schema::SourceError;
 pub use controls::{Control, Controls};
 pub use sequence::{read_sequence, Message, MessageFailure, OnInvalid, Sequence, SequenceOptions, SequenceReader};

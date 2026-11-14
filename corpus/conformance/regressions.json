@@ -31,6 +31,215 @@
         {"rule": "t", "hex": "a26161411f616240", "expect": false},
         {"rule": "t", "hex": "a26161411f61624101", "expect": true}
       ]
+    },
+    {
+      "category": "regression", "name": "map cursor after a 2^31 - 1 head (D362, P9.13 SEC-F1)", "options": {"wire": "valid"},
+      "cddl": "r = { b: uint // c: uint, * tstr => any }\ns = { c: uint // b: uint, * tstr => any }\n",
+      "cases": [
+        {"rule": "r", "hex": "a261621a7fffffff616300", "expect": false, "note": "the overflow-checked Rust VM panicked here (map-cursor counted in O_LO, still 2^31 - 1)"},
+        {"rule": "r", "hex": "a261621a7ffffffe616300", "expect": false},
+        {"rule": "s", "hex": "a261621a7fffffff616300", "expect": false, "note": "PEG: the first alternative takes c and locks in, so b is unexpected"},
+        {"rule": "s", "hex": "a261621bffffffffffffffff616300", "expect": false}
+      ]
+    },
+    {
+      "category": "regression", "name": "non-preferred bignums under valid (D363, P9.13 SPEC-F1)", "options": {"wire": "valid"},
+      "cddl": "bu = biguint\nbn = bignint\nbi = bigint\nt2 = #6.2(bstr)\nt3 = #6.3(bstr)\ntb = #6.2(b)\nb = bstr\nts = #6.2(bstr .size 1)\nun = unsigned\nig = integer\nr05 = 0..5\nrn = -5..-1\nule = uint .le 5\nile = int .le 5\nunle = unsigned .le 5\nigle = integer .le 5\nieq = integer .eq 1\nlit = 1\nmk = {1 => int}\nmr = {0..5 => int}\nub = int / biguint\nnb = ~biguint\n",
+      "cases": [
+        {"rule": "bu", "hex": "c240", "expect": true, "note": "RFC 8949 3.4.3: a bignum is any byte string, leading zeroes allowed"},
+        {"rule": "bu", "hex": "c2420001", "expect": true, "note": "was refused under valid before D363"},
+        {"rule": "bu", "hex": "c24101", "expect": true, "note": "was refused under valid before D363"},
+        {"rule": "bu", "hex": "c249010000000000000000", "expect": true},
+        {"rule": "bu", "hex": "c2490000000000000000ff", "expect": true},
+        {"rule": "bu", "hex": "c25f4101ff", "expect": true},
+        {"rule": "bu", "hex": "c34100", "expect": false},
+        {"rule": "bu", "hex": "01", "expect": false, "note": "a type name selects data items: biguint is tag 2 only"},
+        {"rule": "bn", "hex": "c34100", "expect": true},
+        {"rule": "bn", "hex": "c340", "expect": true},
+        {"rule": "bn", "hex": "c3420001", "expect": true},
+        {"rule": "bn", "hex": "c24101", "expect": false},
+        {"rule": "bn", "hex": "20", "expect": false},
+        {"rule": "bi", "hex": "c24101", "expect": true},
+        {"rule": "bi", "hex": "c34100", "expect": true},
+        {"rule": "bi", "hex": "01", "expect": false},
+        {"rule": "t2", "hex": "c240", "expect": true},
+        {"rule": "t2", "hex": "c2420001", "expect": true, "note": "#6.2(bstr) and #6.2(b), b = bstr, agree"},
+        {"rule": "t2", "hex": "c24101", "expect": true},
+        {"rule": "t2", "hex": "c2490000000000000000ff", "expect": true},
+        {"rule": "t3", "hex": "c34100", "expect": true},
+        {"rule": "t3", "hex": "c24101", "expect": false},
+        {"rule": "tb", "hex": "c2420001", "expect": true},
+        {"rule": "tb", "hex": "c24101", "expect": true},
+        {"rule": "ts", "hex": "c24101", "expect": true},
+        {"rule": "ts", "hex": "c2420001", "expect": false},
+        {"rule": "ts", "hex": "c25f4101ff", "expect": true},
+        {"rule": "un", "hex": "c24101", "expect": true},
+        {"rule": "un", "hex": "01", "expect": true},
+        {"rule": "un", "hex": "c34100", "expect": false},
+        {"rule": "ig", "hex": "c24101", "expect": true},
+        {"rule": "ig", "hex": "c34100", "expect": true},
+        {"rule": "ig", "hex": "20", "expect": true},
+        {"rule": "r05", "hex": "c24101", "expect": true, "note": "a range compares numeric values"},
+        {"rule": "r05", "hex": "c2420001", "expect": true},
+        {"rule": "r05", "hex": "c240", "expect": true},
+        {"rule": "r05", "hex": "c2490000000000000000ff", "expect": false},
+        {"rule": "r05", "hex": "c249010000000000000000", "expect": false},
+        {"rule": "r05", "hex": "06", "expect": false},
+        {"rule": "rn", "hex": "c34100", "expect": true},
+        {"rule": "rn", "hex": "c3420004", "expect": true},
+        {"rule": "rn", "hex": "c34105", "expect": false},
+        {"rule": "ule", "hex": "c24101", "expect": false, "note": "uint is major type 0 only; the control keeps the target's items"},
+        {"rule": "ule", "hex": "05", "expect": true},
+        {"rule": "ile", "hex": "c24101", "expect": false},
+        {"rule": "ile", "hex": "05", "expect": true},
+        {"rule": "ile", "hex": "20", "expect": true},
+        {"rule": "unle", "hex": "c24101", "expect": true, "note": "unsigned .le 5 and integer .le 5 agree"},
+        {"rule": "unle", "hex": "c2490000000000000000ff", "expect": false},
+        {"rule": "unle", "hex": "05", "expect": true},
+        {"rule": "igle", "hex": "c24101", "expect": true},
+        {"rule": "igle", "hex": "c34100", "expect": true},
+        {"rule": "igle", "hex": "c2490000000000000000ff", "expect": false},
+        {"rule": "ieq", "hex": "c24101", "expect": true},
+        {"rule": "ieq", "hex": "c2420001", "expect": true},
+        {"rule": "ieq", "hex": "01", "expect": true},
+        {"rule": "ieq", "hex": "c24102", "expect": false},
+        {"rule": "lit", "hex": "c24101", "expect": false, "note": "a literal selects its own data item"},
+        {"rule": "lit", "hex": "01", "expect": true},
+        {"rule": "mk", "hex": "a1c2410100", "expect": false, "note": "map literal keys match by identity (D342)"},
+        {"rule": "mk", "hex": "a10100", "expect": true},
+        {"rule": "mr", "hex": "a1c2410100", "expect": true},
+        {"rule": "ub", "hex": "c24101", "expect": true},
+        {"rule": "ub", "hex": "01", "expect": true},
+        {"rule": "nb", "hex": "4101", "expect": true},
+        {"rule": "nb", "hex": "01", "expect": false}
+      ]
+    },
+    {
+      "category": "regression", "name": "non-preferred bignums under deterministic (D363)", "options": {"wire": "deterministic"},
+      "cddl": "bu = biguint\nr05 = 0..5\nunle = unsigned .le 5\n",
+      "cases": [
+        {"rule": "bu", "hex": "c24101", "expect": false, "note": "the preset refuses non-preferred bignums before the schema"},
+        {"rule": "bu", "hex": "c2420001", "expect": false},
+        {"rule": "bu", "hex": "c249010000000000000000", "expect": true},
+        {"rule": "r05", "hex": "c24101", "expect": false},
+        {"rule": "unle", "hex": "c24101", "expect": false}
+      ]
+    },
+    {
+      "category": "regression", "name": "a controller of a literal and a range (D363: RFC 8610 figure 10)", "options": {"wire": "valid"},
+      "cddl": "fb = bstr .bits (0 / 4..7)\nub = uint .bits (0 / 4..7)\nus = uint .size (1 / 3..4)\n",
+      "cases": [
+        {"rule": "fb", "hex": "4101", "expect": true, "note": "the literal and the range are two INT leaves (the range admits bignums by value); as a controller only the numbers count"},
+        {"rule": "fb", "hex": "4110", "expect": true},
+        {"rule": "fb", "hex": "4102", "expect": false},
+        {"rule": "ub", "hex": "01", "expect": true},
+        {"rule": "ub", "hex": "02", "expect": false},
+        {"rule": "ub", "hex": "1880", "expect": true},
+        {"rule": "us", "hex": "18ff", "expect": true},
+        {"rule": "us", "hex": "1a00010000", "expect": true},
+        {"rule": "us", "hex": "1b0000000100000000", "expect": false}
+      ]
+    },
+    {
+      "category": "regression", "name": "P9.13 should-fixes: .det over CR LF lines, a negative .size, -0, #0.n to #3.n by value", "options": {"wire": "valid"},
+      "cddl": "det = '' .det '  a\r\n\r\n  b'\nneg = tstr .size -1\nnr = bstr .size (-2..1)\nz = -0\nzk = { -0 => int }\nm0 = #0.24\nm0s = #0.5\nm1 = #1.0\nm2 = #2.3\nm3 = #3.31\nm8 = #0.28\n",
+      "cases": [
+        {"rule": "det", "hex": "46610d0a0d0a62", "expect": true, "note": "RFC 9165 2.3: the CR LF line of no spaces is blank, so the common indent is 2; was 0"},
+        {"rule": "det", "hex": "4a2020610d0a0d0a202062", "expect": false},
+        {"rule": "neg", "hex": "60", "expect": false, "note": "a negative size matches nothing; was clamped to 0"},
+        {"rule": "nr", "hex": "40", "expect": true},
+        {"rule": "nr", "hex": "4101", "expect": true},
+        {"rule": "nr", "hex": "420101", "expect": false},
+        {"rule": "z", "hex": "00", "expect": true, "note": "the integer literal -0 is 0; it matched nothing"},
+        {"rule": "z", "hex": "20", "expect": false},
+        {"rule": "zk", "hex": "a10001", "expect": true},
+        {"rule": "m0", "hex": "18ff", "expect": true, "note": "RFC 8610 2.2.3: #0.24 by value, an argument of one byte"},
+        {"rule": "m0", "hex": "00", "expect": true},
+        {"rule": "m0", "hex": "190100", "expect": false},
+        {"rule": "m0s", "hex": "05", "expect": true},
+        {"rule": "m0s", "hex": "1805", "expect": true},
+        {"rule": "m0s", "hex": "06", "expect": false},
+        {"rule": "m1", "hex": "20", "expect": true},
+        {"rule": "m1", "hex": "21", "expect": false},
+        {"rule": "m2", "hex": "43010203", "expect": true},
+        {"rule": "m2", "hex": "420102", "expect": false},
+        {"rule": "m3", "hex": "7f6161ff", "expect": true},
+        {"rule": "m3", "hex": "6161", "expect": true},
+        {"rule": "m8", "hex": "00", "expect": false}
+      ]
+    },
+    {
+      "category": "regression", "name": "P9.13: .size on an integer that may be negative is refused", "cddl": "r = int .size 1\n", "snugSchemaError": "control_target", "cases": []
+    },
+    {
+      "category": "regression", "name": "P9.13: .bits on an integer that may be negative is refused", "cddl": "r = nint .bits 3\n", "snugSchemaError": "control_target", "cases": []
+    },
+    {
+      "category": "regression", "name": "P9.13: #4.n stays refused", "cddl": "r = #4.1\n", "snugSchemaError": "major", "cases": []
+    },
+    {
+      "category": "regression", "name": "D359: .default carries the implied .ne", "options": {"wire": "valid"},
+      "cddl": "r = { ? n: uint .default 5, ? b: bool .default false }\n",
+      "cases": [
+        {"rule": "r", "hex": "a0", "expect": true},
+        {"rule": "r", "hex": "a1616e05", "expect": false, "note": "RFC 8610 3.8.6: implied .ne"},
+        {"rule": "r", "hex": "a1616e06", "expect": true},
+        {"rule": "r", "hex": "a16162f4", "expect": false},
+        {"rule": "r", "hex": "a16162f5", "expect": true}
+      ]
+    },
+    {
+      "category": "regression", "name": "tag-24 payloads under valid: well-formed only (D358, P9.13 decision 1)", "options": {"wire": "valid"},
+      "cddl": "a = any\ne = #6.24(bstr .cbor any)\n",
+      "cases": [
+        {"rule": "a", "hex": "d81845a201000100", "expect": true, "note": "RFC 8949 3.4.5.1: a duplicate key inside the payload; was duplicate_key"},
+        {"rule": "a", "hex": "d8184261ff", "expect": true, "note": "invalid UTF-8 inside the payload; was text"},
+        {"rule": "a", "hex": "d81844d9ffff00", "expect": true, "note": "tag 65535 inside the payload; was tag"},
+        {"rule": "a", "hex": "d8185f42a2004200004100ff", "expect": true, "note": "a duplicate key in a payload gathered from chunks"},
+        {"rule": "a", "hex": "d81843a10000", "expect": true},
+        {"rule": "a", "hex": "d81842f800", "expect": false, "note": "f8 00 is not well-formed"},
+        {"rule": "a", "hex": "d8184201ff", "expect": false, "note": "trailing bytes after the payload's item"},
+        {"rule": "a", "hex": "d81841a1", "expect": false, "note": "truncated payload"},
+        {"rule": "a", "hex": "d81841ff", "expect": false, "note": "a lone break"},
+        {"rule": "a", "hex": "82d8184261ff61ff", "expect": false, "note": "the profile word comes back after the payload: invalid UTF-8 at the top level is still text"},
+        {"rule": "a", "hex": "82d81845a201000100a201000100", "expect": false, "note": "a duplicate key after an accepted payload is still refused"},
+        {"rule": "a", "hex": "82d8185f4261ffff61ff", "expect": false, "note": "the same after a payload gathered from chunks"},
+        {"rule": "a", "hex": "82d81841ff61ff", "expect": false, "note": "a refused payload, then invalid text"},
+        {"rule": "a", "hex": "82d81848d81845a20100010063f09f80", "expect": false, "note": "an accepted payload holding a nested tag 24, then invalid text"},
+        {"rule": "a", "hex": "d81848d81845a201000100", "expect": true, "note": "a tag 24 inside a payload is an ordinary tag there: its own payload is not walked"},
+        {"rule": "e", "hex": "d81845a201000100", "expect": false, "note": ".cbor T still requires a valid item matching T"},
+        {"rule": "e", "hex": "d8184261ff", "expect": false},
+        {"rule": "e", "hex": "d81843a10000", "expect": true}
+      ]
+    },
+    {
+      "category": "regression", "name": "tag-24 payloads under valid with tag24 'valid' (D358)", "options": {"wire": "valid", "tag24": "valid"},
+      "cddl": "a = any\n",
+      "cases": [
+        {"rule": "a", "hex": "d81845a201000100", "expect": false},
+        {"rule": "a", "hex": "d8184261ff", "expect": false},
+        {"rule": "a", "hex": "d81844d9ffff00", "expect": false},
+        {"rule": "a", "hex": "d8185f42a2004200004100ff", "expect": false},
+        {"rule": "a", "hex": "d81843a10000", "expect": true},
+        {"rule": "a", "hex": "d81842f800", "expect": false}
+      ]
+    },
+    {
+      "category": "regression", "name": "tag-24 payloads under deterministic: valid items (D358)", "options": {"wire": "deterministic"},
+      "cddl": "a = any\n",
+      "cases": [
+        {"rule": "a", "hex": "d81845a201000100", "expect": false},
+        {"rule": "a", "hex": "d8184261ff", "expect": false},
+        {"rule": "a", "hex": "d81843a10000", "expect": true}
+      ]
+    },
+    {
+      "category": "regression", "name": "a well-formed tag-24 payload still counts its items (D358)", "options": {"wire": "valid", "maxItems": 4},
+      "cddl": "a = any\n",
+      "cases": [
+        {"rule": "a", "hex": "d81843820102", "expect": false, "note": "tag, byte string, then the payload's three items: five"},
+        {"rule": "a", "hex": "d8184101", "expect": true}
+      ]
     }
   ]
 }

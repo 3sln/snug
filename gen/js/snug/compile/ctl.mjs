@@ -3,7 +3,7 @@
 
 import { ERR_CONTROL_TARGET, ERR_CONTROL_VALUE, ERR_LIM_POOL, ERR_UNSUPPORTED_CONTROL, H_LIM_POOL, H_R0, H_R1, H_R2, H_R3, INF, T_FIV, T_IV, T_IVA, T_IVB, T_IVC, T_LST, T_STK, T_TMP2, charge, erred, fail, hg, hs, vget, vlen, vpush1, vset, vtrunc } from './arena.mjs';
 import { bidByte, bidLen, encString, intern, magAdd, magAdd1, magCmp, magFrom64, magSub } from './bytes.mjs';
-import { FK_NEG_INF_HI, FK_POS_INF_HI, K_ANY, K_BYTES, K_FLOAT, K_INT, K_LIT, K_LITSET, K_MAJOR, K_SIMPLE, K_TEXT, K_UINTX, R_NEG, R_NEG_INF, R_POS, R_POS_INF, ZK_NEG_HI, boundCmp, boundPred, boundSucc, encHeadLen, fivIntersect, fivLoad, hasExt, ivIntersect, ivLoad, ivPush, ld, leafMask, lflags, litMember, lk, mkAnd, mkBytes, mkFloatFrom, mkIntFrom, mkIntRange, mkLit, mkNot, mkSimpleRange, mkText, pointOf, stage, stageD, stageIntern, tsLeaf, tsMake, tsN, tsOf1 } from './leaf.mjs';
+import { FK_NEG_INF_HI, FK_POS_INF_HI, K_ANY, K_BYTES, K_FLOAT, K_INT, K_LIT, K_LITSET, K_MAJOR, K_SIMPLE, K_TEXT, K_UINTX, R_NEG, R_NEG_INF, R_POS, R_POS_INF, ZK_NEG_HI, boundCmp, boundPred, boundSucc, encHeadLen, fivIntersect, fivLoad, hasExt, ivIntersect, ivLoad, ivNormalize, ivPush, ld, leafMask, lflags, litMember, lk, mkAnd, mkBytes, mkFloatFrom, mkIntFrom, mkIntRange, mkLit, mkNot, mkSimpleRange, mkText, pointOf, stage, stageD, stageIntern, tsLeaf, tsMake, tsN, tsOf1 } from './leaf.mjs';
 import { rxCompile } from './regexp.mjs';
 
 export function singleLeaf(h, ts) {
@@ -90,7 +90,8 @@ export function intWith(h, l, lr, la, lb, hr, ha, hb) {
     if (ivIntersect(h, T_IVA, T_IVB, T_IVC) < 0) {
         return -1;
     }
-    return mkIntFrom(h, T_IVC, 0);
+    // D363: the target's flags (which data items it admits) carry over.
+    return mkIntFrom(h, T_IVC, lflags(h, l));
 }
 
 export function pow256Word(k, minus1, high) {
@@ -195,11 +196,47 @@ export function targetError(h, pos) {
     return fail(h, ERR_CONTROL_TARGET, pos);
 }
 
+export function intController(h, ts) {
+    // A .size / .bits controller as one INT leaf: its single INT leaf, or the
+    // union of its INT leaves' intervals (D363: a range admits bignums by value
+    // and a literal does not, so `0 / 4..7` is two leaves; as a controller only the
+    // numbers count). -1 when ts holds anything else.
+    const l = singleLeaf(h, ts);
+    if (l >= 0) {
+        return l;
+    }
+    if (tsN(h, ts) <= 1) {
+        return -1;
+    }
+    vtrunc(h, T_IVA, 0);
+    for (let i = 0; i < tsN(h, ts); i++) {
+        const li = tsLeaf(h, ts, i);
+        if (lk(h, li) !== K_INT) {
+            return -1;
+        }
+        ivLoad(h, T_IVA, ld(h, li, 0), ld(h, li, 1));
+    }
+    if (ivNormalize(h, T_IVA, T_IVB) < 0) {
+        return -1;
+    }
+    const m = mkIntFrom(h, T_IVB, 0);
+    if (m < 0) {
+        return -1;
+    }
+    return m;
+}
+
+export function intHasNeg(h, t) {
+    // Does INT leaf t admit a negative value? Its intervals are sorted, so the
+    // first one's lower bound decides.
+    return vget(h, T_IV, 6 * ld(h, t, 0)) < R_POS;
+}
+
 export function ctlSize(h, target, ctl, ranged, pos) {
     // ranged: 1 when the controller is written as a range (`.size (lo..hi)`).
     // On uint it matters (§4.6): `uint .size n` is 0..256^n-1 (fits in n bytes),
     // `uint .size (lo..hi)` the values whose minimal byte length is in lo..hi.
-    const cl = singleLeaf(h, ctl);
+    const cl = intController(h, ctl);
     const from = vlen(h, T_STK);
     if ((cl < 0) || (lk(h, cl) !== K_INT)) {
         return fail(h, ERR_CONTROL_VALUE, pos);
@@ -211,49 +248,58 @@ export function ctlSize(h, target, ctl, ranged, pos) {
             const o = 6 * (ld(h, cl, 0) + j);
             const lo = smallOf(vget(h, T_IV, o), vget(h, T_IV, o + 1), vget(h, T_IV, o + 2));
             const hi = smallOf(vget(h, T_IV, o + 3), vget(h, T_IV, o + 4), vget(h, T_IV, o + 5));
-            if ((k === K_TEXT) || (k === K_BYTES)) {
-                let nlo = ld(h, t, 0);
-                let nhi = ld(h, t, 1);
-                if (lo > nlo) {
-                    nlo = lo;
-                }
-                if (hi < nhi) {
-                    nhi = hi;
-                }
-                if (nlo <= nhi) {
-                    if (k === K_TEXT) {
-                        const nlt = mkText(h, nlo, nhi, ld(h, t, 2));
-                        vpush1(h, T_STK, nlt);
-                    } else {
-                        const nlb = mkBytes(h, nlo, nhi, ld(h, t, 2));
-                        vpush1(h, T_STK, nlb);
+            // P9.13: .size of an integer that may be negative is undefined (RFC 8610
+            // §3.8.1 sizes uint): a control_target error, not a silent narrowing to uint
+            if ((k === K_INT) && intHasNeg(h, t)) {
+                return targetError(h, pos);
+            }
+            // P9.13: a controller interval wholly below zero is no size: it matches
+            // nothing (small-of would clamp it to 0)
+            if (vget(h, T_IV, o + 3) >= R_POS) {
+                if ((k === K_TEXT) || (k === K_BYTES)) {
+                    let nlo = ld(h, t, 0);
+                    let nhi = ld(h, t, 1);
+                    if (lo > nlo) {
+                        nlo = lo;
                     }
-                }
-            } else if (k === K_INT) {
-                if ((lo <= 8) || (ranged === 0)) {
-                    let hk = hi;
-                    let llo = 0;
-                    let lhi = 0;
-                    if (hk > 8) {
-                        hk = 8;
+                    if (hi < nhi) {
+                        nhi = hi;
                     }
-                    if ((lo > 0) && (ranged !== 0)) {
-                        lhi = pow256Word(lo - 1, 0, 1);
-                        llo = pow256Word(lo - 1, 0, 0);
+                    if (nlo <= nhi) {
+                        if (k === K_TEXT) {
+                            const nlt = mkText(h, nlo, nhi, ld(h, t, 2));
+                            vpush1(h, T_STK, nlt);
+                        } else {
+                            const nlb = mkBytes(h, nlo, nhi, ld(h, t, 2));
+                            vpush1(h, T_STK, nlb);
+                        }
                     }
-                    const nl2 = intWith(h, t, R_POS, lhi, llo, R_POS, pow256Word(hk, 1, 1), pow256Word(hk, 1, 0));
-                    if (nl2 === (-1)) {
-                        return -1;
+                } else if (k === K_INT) {
+                    if ((lo <= 8) || (ranged === 0)) {
+                        let hk = hi;
+                        let llo = 0;
+                        let lhi = 0;
+                        if (hk > 8) {
+                            hk = 8;
+                        }
+                        if ((lo > 0) && (ranged !== 0)) {
+                            lhi = pow256Word(lo - 1, 0, 1);
+                            llo = pow256Word(lo - 1, 0, 0);
+                        }
+                        const nl2 = intWith(h, t, R_POS, lhi, llo, R_POS, pow256Word(hk, 1, 1), pow256Word(hk, 1, 0));
+                        if (nl2 === (-1)) {
+                            return -1;
+                        }
+                        vpush1(h, T_STK, nl2);
                     }
-                    vpush1(h, T_STK, nl2);
-                }
-            } else if ((k === K_LIT) || (k === K_LITSET)) {
-                if ((leafMask(h, t) & 12) === 0) {
+                } else if ((k === K_LIT) || (k === K_LITSET)) {
+                    if ((leafMask(h, t) & 12) === 0) {
+                        return targetError(h, pos);
+                    }
+                    filterLits(h, t, 0, lo, hi);
+                } else {
                     return targetError(h, pos);
                 }
-                filterLits(h, t, 0, lo, hi);
-            } else {
-                return targetError(h, pos);
             }
         }
     }
@@ -264,7 +310,7 @@ export function ctlSize(h, target, ctl, ranged, pos) {
 }
 
 export function ctlBits(h, target, ctl, pos) {
-    const cl = singleLeaf(h, ctl);
+    const cl = intController(h, ctl);
     const from = vlen(h, T_STK);
     let bhi = 0;
     let blo = 0;
@@ -342,7 +388,12 @@ export function ctlBits(h, target, ctl, pos) {
         const t2 = tsLeaf(h, target, i2);
         const k2 = lk(h, t2);
         if (k2 === K_INT) {
-            // uint .bits: UINTX over the target's non-negative values
+            // uint .bits: UINTX over the target's non-negative values; a target
+            // that may be negative is a control_target error (P9.13: RFC 8610
+            // §3.8.2 defines .bits on uint), not a silent narrowing
+            if (intHasNeg(h, t2)) {
+                return targetError(h, pos);
+            }
             const nl = intWith(h, t2, R_POS, 0, 0, R_POS, -1, -1);
             if (nl === (-1)) {
                 return -1;
@@ -779,6 +830,39 @@ export function ctlCompare(h, target, ctl, op, pos) {
     return tsMake(h, from);
 }
 
+export function simpleEq(h, t, v, ne) {
+    // D359: one simple value v (`false`, `null`, ...) as the controller of .eq
+    // (ne 0) / .ne (ne 1) on target leaf t, a SIMPLE range or a leaf that admits
+    // no simple value: the matching SIMPLE ranges, or t itself, pushed on T_STK.
+    if (lk(h, t) !== K_SIMPLE) {
+        if (ne === 1) {
+            vpush1(h, T_STK, t);
+        }
+        return;
+    }
+    const lo = ld(h, t, 0);
+    const hi = ld(h, t, 1);
+    if (ne === 0) {
+        if ((lo <= v) && (v <= hi)) {
+            const s0 = mkSimpleRange(h, v, v);
+            vpush1(h, T_STK, s0);
+        }
+        return;
+    }
+    if ((v < lo) || (v > hi)) {
+        vpush1(h, T_STK, t);
+        return;
+    }
+    if (lo < v) {
+        const s1 = mkSimpleRange(h, lo, v - 1);
+        vpush1(h, T_STK, s1);
+    }
+    if (v < hi) {
+        const s2 = mkSimpleRange(h, v + 1, hi);
+        vpush1(h, T_STK, s2);
+    }
+}
+
 export function ctlEq(h, target, ctl, ne, pos) {
     // ne 0: .eq; ne 1: .ne.
     const from = vlen(h, T_STK);
@@ -851,7 +935,7 @@ export function ctlEq(h, target, ctl, ne, pos) {
                 const sb = hg(h, H_R2);
                 ivPush(h, T_IVB, sr, sa, sb, R_POS_INF, 0, 0);
                 ivIntersect(h, T_IVA, T_IVB, T_IVC);
-                const nl2 = mkIntFrom(h, T_IVC, 0);
+                const nl2 = mkIntFrom(h, T_IVC, lflags(h, t));
                 vpush1(h, T_STK, nl2);
             }
         } else if ((isflt || fexact) && (k === K_FLOAT)) {
@@ -925,6 +1009,8 @@ export function ctlEq(h, target, ctl, ne, pos) {
             if (ne === 1) {
                 vpush1(h, T_STK, t);
             }
+        } else if (((lk(h, cl) === K_SIMPLE) && (ld(h, cl, 0) === ld(h, cl, 1))) && ((lk(h, t) === K_SIMPLE) || ((leafMask(h, t) & 128) === 0))) {
+            simpleEq(h, t, ld(h, cl, 0), ne);
         } else {
             // A composite controller: .eq is an AND; .ne has no lowering.
             if (ne === 1) {
@@ -986,7 +1072,15 @@ export function meet(h, a, b) {
         vtrunc(h, T_IVB, 0);
         ivLoad(h, T_IVB, ld(h, b, 0), ld(h, b, 1));
         ivIntersect(h, T_IVA, T_IVB, T_IVC);
-        const ni = mkIntFrom(h, T_IVC, 0);
+        // D363: bignums pass both only if both admit them; bignums-only if either is.
+        const fa = lflags(h, a);
+        const fb = lflags(h, b);
+        const bok = (fa & fb) & 1;
+        const bonly = (fa | fb) & 2;
+        if ((bonly !== 0) && (bok === 0)) {
+            return 0;
+        }
+        const ni = mkIntFrom(h, T_IVC, bok | bonly);
         vpush1(h, T_STK, ni);
         return 0;
     }
@@ -1336,7 +1430,8 @@ export function ifNegRegion(r) {
 export function dedentInto(h, bid, dst) {
     // RFC 9165 .det: the literal's content with the longest run of leading
     // spaces common to its non-blank lines removed from every line (lines end
-    // at LF), appended to vector dst.
+    // at LF; a CR just before the LF ends the line too, so a CRLF line of
+    // spaces is blank), appended to vector dst.
     const hl = encHeadLen(h, bid);
     const n = bidLen(h, bid);
     let prefix = INF;
@@ -1348,7 +1443,7 @@ export function dedentInto(h, bid, dst) {
             sp += 1;
             j += 1;
         }
-        if ((j < n) && (bidByte(h, bid, j) !== 10)) {
+        if ((j < n) && ((bidByte(h, bid, j) !== 10) && (!((bidByte(h, bid, j) === 13) && (((j + 1) === n) || (bidByte(h, bid, j + 1) === 10)))))) {
             if (sp < prefix) {
                 prefix = sp;
             }

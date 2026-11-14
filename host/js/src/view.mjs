@@ -53,7 +53,7 @@ class Message {
     this.schema = opts.schema;
     this.keys = keysOf(profileFlags(opts));
     this.profile = { wire: opts.wire, keys: opts.keys, tags: opts.tags, floats: opts.floats,
-      undefinedValue: opts.undefinedValue, noncharacters: opts.noncharacters };
+      undefinedValue: opts.undefinedValue, noncharacters: opts.noncharacters, tag24: opts.tag24 };
     this.limits = { ...this.profile, maxBytes: opts.maxBytes, maxDepth: opts.maxDepth, maxEntries: opts.maxEntries,
       maxItems: opts.maxItems, maxBignumBytes: opts.maxBignumBytes, budget: opts.budget, cose: this.cose };
     this.dirs = opts.directories === true ? new Map() : null;

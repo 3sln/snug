@@ -11,6 +11,7 @@ const preset = {
   wire: enumeration('valid', 'deterministic', 'bindle'), keys: enumeration('text', 'integer', 'any'),
   tags: enumeration('bindle', 'standard', 'any'), floats: enumeration('bindle', 'deterministic'),
   undefinedValue: boolean, noncharacters: boolean, top: enumeration('map', 'any'), cose: boolean,
+  tag24: enumeration('valid', 'well-formed'), // D358
   // Presets can be spread across all runtime operations; strictArrays only affects writing.
   strictArrays: boolean,
 };
@@ -81,6 +82,8 @@ export function validateCompileOptions(options) {
   const shape = { profile: enumeration('full', 'bindle', 'bus'), regexp: enumeration('xsd', 'iregexp'),
     // format 2.0: the cut mode (D301: 'rfc' default, 'branch' = rule A) and the group arena cap in words (D276, D281; at most 2^24)
     cuts: enumeration('rfc', 'branch'), groupWords: value => integer(value) && value <= 16777216,
+    // D359: .default as RFC 8610 §3.8.6's implied .ne ('ne', the default) or an annotation only
+    defaultControl: enumeration('ne', 'annotation'),
     limits: value => checked(value, compileLimits, 'limits'),
     unicode: value => value instanceof Int32Array && !(typeof SharedArrayBuffer === 'function' && value.buffer instanceof SharedArrayBuffer),
     // D141: registered extension controls (checked in full by ext.mjs) and their admission under `bus`

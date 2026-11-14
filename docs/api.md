@@ -34,7 +34,7 @@ The following named sets are the complete option-key lists used below:
 
 | Set | Allowed keys |
 | --- | --- |
-| Preset fields | `wire`, `keys`, `tags`, `floats`, `undefinedValue`, `noncharacters`, `top`, `cose`, `strictArrays` |
+| Preset fields | `wire`, `keys`, `tags`, `floats`, `undefinedValue`, `noncharacters`, `tag24`, `top`, `cose`, `strictArrays` |
 | Limits | `maxBytes`, `maxDepth`, `maxEntries`, `maxItems` |
 | DecodeOptions | Preset fields + Limits + `objects` |
 | EncodeOptions | Preset fields + Limits + `objects`, `omitUndefined` |
@@ -46,7 +46,7 @@ The following named sets are the complete option-key lists used below:
 | `decode` | DecodeOptions | none |
 | `encode` | EncodeOptions | none |
 | `new Writer` | EncodeOptions + `keysSorted`, `limits` | nested `limits`: Limits only |
-| `compile` | `profile`, `regexp`, `cuts`, `groupWords`, `limits`, `unicode`, `controls`, `controlsInBus`, `abnf` | nested `limits`: [CompileLimits](#compilation) only |
+| `compile` | `profile`, `regexp`, `cuts`, `defaultControl`, `groupWords`, `limits`, `unicode`, `controls`, `controlsInBus`, `abnf` | nested `limits`: [CompileLimits](#compilation) only |
 | `Schema.validate`, schema-first `validate` | ValidationOptions | none |
 | `Schema.decode`, schema-first `decode` | ValidationOptions | none |
 | `Schema.validateAt`, schema-first `validateAt` | SpanOptions | none |
@@ -97,12 +97,13 @@ as `a100f6`.
 
 | Option | Default | Meaning |
 | --- | --- | --- |
-| `wire: 'valid' \| 'deterministic' \| 'bindle'` | `'valid'` | The wire preset ([profiles](profiles.md#options)): any valid CBOR (RFC 8949 §5.3), RFC 8949 §4.2.1 deterministic CBOR, or the Bindle profile; the five options below override it |
+| `wire: 'valid' \| 'deterministic' \| 'bindle'` | `'valid'` | The wire preset ([profiles](profiles.md#options)): any valid CBOR (RFC 8949 §5.3), RFC 8949 §4.2.1 deterministic CBOR, or the Bindle profile; the six options below override it |
 | `keys: 'text' \| 'integer' \| 'any'` | preset (`'any'`; bindle `'text'`) | Map key kinds |
 | `tags: 'bindle' \| 'standard' \| 'any'` | preset (`'any'`) | Tag level: the Bindle set, the standard set, or any tag number with the known tags' content rules |
 | `floats: 'bindle' \| 'deterministic'` | preset (`'deterministic'`) | Scalar float rules |
 | `undefinedValue: boolean` | preset (true) | `f7` and the unassigned simple values (`Simple`) |
 | `noncharacters: boolean` | preset (true) | Unicode noncharacters in text |
+| `tag24: 'well-formed' \| 'valid'` | preset (`'well-formed'` under `valid`; `'valid'` otherwise) | Under `wire: 'valid'`, whether a tag-24 payload need only be one well-formed item (RFC 8949 §3.4.5.1) or must be one valid item; the deterministic and Bindle presets ignore it and always require a valid item |
 | `top: 'map' \| 'any'` | codec/view/source: the preset's (`'any'`; bindle `'map'`); schema: `'any'` | Decode/check root policy |
 | `cose: boolean` | false | Under `keys: 'text'`: safe integer labels as well as text, top-level map only |
 | `objects: 'null' \| 'plain'` | `'null'` | Decode ordinary maps into null/ordinary-prototype objects |
@@ -151,7 +152,7 @@ subclassed, foreign-realm and null-prototype arrays remain refused.
 | `NDArray` | `new NDArray(shape: number[], data: Value[] \| TypedArray \| Float16Bytes)`; readonly `shape`, `data`. Positive dimensions (1..8); product equals element count. Data is retained, not deeply frozen. |
 | `SnugFault` | Error class; `code: string`; constructor `(code?: string, message?: string)`. Schema decode/view may also carry `reason`, `path`, `offset`, `subcode`. |
 | `LIMITS` | Frozen defaults: maxBytes 1,500,000; maxDepth 32; maxEntries 65,536; maxItems 131,072; maxBignumBytes 128; minDecimalExponent −1024; maxDimensions 8. |
-| `profiles` | Frozen `{ valid, deterministic, bindle }`: each a frozen option object spelling out its preset (`wire`, `keys`, `tags`, `floats`, `undefinedValue`, `noncharacters`, `top`, `cose`, `strictArrays`). Spread one into runtime options to select it and override fields. |
+| `profiles` | Frozen `{ valid, deterministic, bindle }`: each a frozen option object spelling out its preset (`wire`, `keys`, `tags`, `floats`, `undefinedValue`, `noncharacters`, `top`, `cose`, `strictArrays`, and `tag24` in `valid`). Spread one into runtime options to select it and override fields. |
 | `Tagged` | `new Tagged(tag: number \| bigint, value: Value)`; frozen, `tag` (0..2⁶⁴−1: a number up to 2⁵³−1, a bigint beyond) and `value`. Every tag but 2, 3, 4, 40 and the little-endian typed arrays decodes to it (tag 24's `value` is the payload bytes), and so does a bignum outside preferred serialization (`valid` only: `value` its content `Uint8Array`, a data item distinct from the integer); encode checks the tag number and content with the decoder's rules under the profile's tag level and refuses with `tag` (the invalid 65535, 2³²−1, 2⁶⁴−1 always; 4/40/typed arrays have their own value types; a tag 2/3 `Tagged` of a `Uint8Array` is written as its integer in preferred serialization). |
 
 Native typed arrays: Int8, Uint16/32, BigUint64, Int16/32, BigInt64,
@@ -180,6 +181,7 @@ interface CompileOptions {
   profile?: 'full' | 'bindle' | 'bus';   // compiler restriction set; default 'full'
   regexp?: 'xsd' | 'iregexp';            // .regexp dialect; default 'xsd'
   cuts?: 'rfc' | 'branch';               // map cut semantics; default 'rfc'
+  defaultControl?: 'ne' | 'annotation';  // .default: implied .ne (default) or annotation only
   groupWords?: number;                   // PEG group arena cap in words; default 4,194,304, at most 2^24
   limits?: CompileLimits;
   unicode?: Int32Array;                  // tables from @3sln/snug/unicode
@@ -196,6 +198,11 @@ Schema refusals reject with `SchemaError`; invalid API options with TypeError.
 (see [Discriminated unions under the RFC cut](guide.md#discriminated-unions-under-the-rfc-cut)).
 Any other value is a TypeError.
 The effective cut mode is part of the source key.
+`defaultControl` defaults to `'ne'`: `.default` carries RFC 8610 §3.8.6's
+implied `.ne`, so a present value equal to the default does not match.
+`'annotation'` makes `.default` change no verdict, as RFC 8610 Erratum 9229
+proposes (its status is Reported, not verified). The annotation reading is
+part of the source key.
 `abnf?: 'strict' | 'lenient'` is how `.abnf`/`.abnfb` controllers
 parse: `'strict'` (the default) is RFC 5234 + RFC 7405 + RFC 9165 §3;
 `'lenient'` also admits snug's non-RFC forms ([ABNF](#abnf-3slnsnugabnf)). Any

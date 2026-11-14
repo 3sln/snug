@@ -32,7 +32,7 @@
                                         ERR_UNKNOWN_CONTROL ERR_MAP_KEY ERR_SYNTAX ERR_TAG ERR_MAJOR
                                         ERR_PROFILE ERR_LIM_INST ERR_LIM_NESTING
                                         H_R0 H_R1 H_R2 H_R3 H_DEPTH H_DEPTH_MAX H_CUR_RULE H_LIM_INST
-                                        H_N_INST H_PROFILE H_WORK_AT H_PMODE
+                                        H_N_INST H_PROFILE H_WORK_AT H_PMODE H_DEFAULT
                                         T_ENV T_HENV T_MEMO T_HMEMO T_CON T_HCON T_WORK T_ASTK T_STK
                                         T_LITB T_SRC T_PSTK T_GSTACK T_LSTK T_MAP T_ARR T_TMP2 T_IV
                                         T_EXTARG H_EXT_FLAGS]]
@@ -47,7 +47,7 @@
             [snug.compile.bytes :refer [intern enc-string enc-int-key mag-of bid-byte bid-len head-push]]
             [snug.compile.leaf :refer [lk lflags ld lw lset lsetd leaf-new ts-make ts-of1 ts-push-leaves
                                        ts-n ts-leaf leaf-mask mk-any mk-major mk-simple-range mk-lit mk-text
-                                       mk-bytes mk-int-range point-of fkey-hi fkey-lo mk-float-from bound-pred mag-pow u64-cmp
+                                       mk-bytes mk-int-range mk-int-span point-of fkey-hi fkey-lo mk-float-from bound-pred u64-cmp
                                        stage stage-d stage-intern mk-and
                                        K_INT K_FLOAT K_LIT K_TAG K_TAGSET K_EMBED K_ARRAY K_MAP
                                        K_SIMPLE K_EXT
@@ -306,7 +306,9 @@
               (if (== incl 0)
                 (do (bound-pred h hr ha hb)
                     (set hr (hg h H_R0)) (set ha (hg h H_R1)) (set hb (hg h H_R2))))
-              (let [l (mk-int-range h lr la lb hr ha hb)]
+              (comment "D363: a range compares numeric values, so it admits a bignum"
+                       "whose value lies in it (BIGOK), small ones included")
+              (let [l (mk-int-span h lr la lb hr ha hb 1)]
                 (return (ts-of1 h l)))))))
     (if (float-point h lo)
       (do (let [lkh (hg h H_R0) lkl (hg h H_R1)]
@@ -472,7 +474,14 @@
     (if (>= code 19) (return (fail h ERR_UNSUPPORTED_CONTROL pos)))
     (let [^I32 target (lower-type h (na h node) env)]
       (if (< target 0) (return (neg 1)))
-      (if (or (== code 14) (== code 15)) (return target))
+      (comment "D359: .default carries RFC 8610 §3.8.6's implied .ne (a value equal to the"
+               "default is not written out, so it does not match) unless the compile option"
+               "makes it an annotation; .feature is an annotation.")
+      (if (or (== code 15) (and (== code 14) (!= (hg h H_DEFAULT) 0))) (return target))
+      (if (== code 14)
+        (do (let [^I32 dctl (lower-type h (nb h node) env)]
+              (if (< dctl 0) (return (neg 1)))
+              (return (ctl-eq h target dctl 1 pos)))))
       (if (or (== code 12) (== code 13))
         (do (if (and (== code 13) (> (hg h H_PROFILE) 0)) (return (fail h ERR_PROFILE pos)))
             (comment "RFC 8610 §3.8.4: a .cborseq controller is an array type describing"
@@ -542,9 +551,12 @@
       (if (>= memo 0) (return memo))
       (if (== mode 0)
         (do (if (and (== hi 0) (and (or (== lo 2) (== lo 3)) (bstr-content h content env)))
-              (do (let [two64 (mag-pow h)
-                        lp (mk-int-range h R_POS_BIG two64 9 R_POS_INF 0 0)
-                        ln (mk-int-range h R_NEG_INF 0 0 R_NEG_BIG two64 9)
+              (do (comment "D363: every tag 2/3 bignum, whatever its value or leading"
+                           "zeroes (the valid preset admits non-preferred ones, RFC 8949"
+                           "§3.4.3): BIGONLY INT leaves over all non-negative / negative values,"
+                           "so ranges and numeric controls compare the bignum's value")
+                  (let [lp (mk-int-span h R_POS 0 0 R_POS_INF 0 0 2)
+                        ln (mk-int-span h R_NEG_INF 0 0 R_NEG 0 0 2)
                         ^:mut l lp]
                     (if (== lo 3) (set l ln))
                     (let [ts (ts-of1 h l)]
@@ -649,6 +661,36 @@
             (set f (bit-or f (head7 h a b (* pass (+ 1 (bit-and f 1))))))))))
     (return (head7-end h f from))))
 
+(defn ^I32 lower-major-ai [^Ints h ^I32 m ^I32 ai]
+  (comment "#0.n .. #3.n (RFC 8610 §2.2.3; RFC 9682 §3.2 note 2: n is the additional"
+           "information) by value, as D328 reads #7.25: the items a head with that"
+           "additional information can represent. ai < 24: the argument ai itself;"
+           "24..27: an argument of 1, 2, 4 or 8 bytes (0..256^w - 1); 31: an"
+           "indefinite length (any byte or text string; no integer); 28..30: nothing."
+           "#4.n and #5.n stay refused (major).")
+  (let [from (vlen h T_STK)
+        ahi 0 ^:mut alo ai ^:mut bhi 0 ^:mut blo ai
+        ^:mut none false]
+    (if (== ai 24) (do (set alo 0) (set blo 255)))
+    (if (== ai 25) (do (set alo 0) (set blo 65535)))
+    (if (== ai 26) (do (set alo 0) (set blo (neg 1))))
+    (if (== ai 27) (do (set alo 0) (set bhi (neg 1)) (set blo (neg 1))))
+    (if (and (>= ai 28) (<= ai 30)) (set none true))
+    (if (and (== ai 31) (<= m 1)) (set none true))
+    (if (and (== ai 31) (>= m 2)) (do (set alo 0) (set bhi (neg 1)) (set blo (neg 1))))
+    (if none (return (ts-make h from)))
+    (if (== m 0)
+      (do (let [l0 (mk-int-range h R_POS ahi alo R_POS bhi blo)] (return (ts-of1 h l0)))))
+    (if (== m 1)
+      (do (comment "-1 - n for n in [a, b]: NEG bounds hold n, the larger n lower")
+          (let [l1 (mk-int-range h R_NEG bhi blo R_NEG ahi alo)] (return (ts-of1 h l1)))))
+    (let [slo alo
+          ^:mut shi blo]
+      (comment "string lengths: a 4- or 8-byte argument reaches past INF, the cap")
+      (if (or (!= bhi 0) (< blo 0)) (set shi INF))
+      (if (== m 2) (do (let [l2 (mk-bytes h slo shi (neg 1))] (return (ts-of1 h l2)))))
+      (let [l3 (mk-text h slo shi (neg 1))] (return (ts-of1 h l3))))))
+
 (defn ^I32 lower-major [^Ints h ^I32 node ^I32 env]
   (let [m (na h node)
         mode (nb h node)
@@ -667,6 +709,8 @@
       (do (let [^I32 nts (lower-type h (ne h node) env)]
             (if (< nts 0) (return (neg 1)))
             (return (lower-head7 h nts pos)))))
+    (if (and (<= m 3) (and (== hi 0) (and (>= lo 0) (<= lo 31))))
+      (return (lower-major-ai h m lo)))
     (if (or (or (!= m 7) (!= hi 0)) (or (< lo 0) (> lo 255))) (return (fail h ERR_MAJOR pos)))
     (let [from (vlen h T_STK)
           f (head7 h lo lo 0)]
@@ -717,8 +761,8 @@
           (do (let [cts (content-ts h (lw h l 12) (lw h l 13))]
                 (if (< cts 0) (return (neg 1)))
                 (ts-push-leaves h cts)))
-          (if (and (== k K_INT) (!= (lflags h l) 0))
-            (do (comment "an unconstrained bignum tag: its content is a byte string")
+          (if (and (== k K_INT) (!= (bit-and (lflags h l) 2) 0))
+            (do (comment "a bignum-only leaf (D363): its content is a byte string")
                 (let [bl (mk-bytes h 0 INF (neg 1))] (vpush1 h T_STK bl)))
             (return (fail h ERR_UNWRAP pos))))))
     (return (ts-make h from))))
@@ -953,9 +997,9 @@
                 (let [cts (content-ts h (lw h l 12) (lw h l 13))]
                   (if (< cts 0) (return (neg 1)))
                   (set child (pb-node h P_ENTRY cts 0 0 pos)))))
-          (if (and (== k K_INT) (!= (lflags h l) 0))
+          (if (and (== k K_INT) (!= (bit-and (lflags h l) 2) 0))
             (do (if (== mode 1) (return (fail h ERR_MAP_KEY pos)))
-                (comment "an unconstrained bignum tag: its content is a byte string")
+                (comment "a bignum-only leaf (D363): its content is a byte string")
                 (let [bl (mk-bytes h 0 INF (neg 1))
                       bts (ts-of1 h bl)]
                   (set child (pb-node h P_ENTRY bts 0 0 pos)))))

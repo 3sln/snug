@@ -24,7 +24,8 @@
             [snug.cbor.keys :refer [compare-spans]]
             [snug.cbor.tags :refer [typed-size exponent-ok mantissa-ok data-count shape-ok decimal-v ndarray-v vcount]]
             [snug.cbor.canon :refer [kclass]]
-            [snug.cbor.scan :refer [scan-float scan-simple key-peek key-label text-bad typed-nan-at]]
+            [snug.cbor.scan :refer [scan-float scan-simple key-peek key-label text-bad typed-nan-at
+                                    wf-payload wf-scan-one]]
             [snug.cbor.stdtags :refer [std-allowed std-content-ok std-inner rule-tag]]
             [snug.vm.layout :refer [R_BUDGET VM_Q1 VM_BIGNUM_MAX VM_BUDGET VM_FASTM VM_GENERIC VM_VTAB]]
             [snug.vm.base :refer [charge c8 c64 c64min]]))
@@ -377,6 +378,16 @@
   (if (and (or (== tag 0) (== tag 32)) (== (ushr (u8 b q) 5) 3))
     (if (not (charge s (c8 (- stop q)) pos)) (return (neg R_BUDGET))))
   (if (not (std-content-ok b tag q stop)) (return (fail s pos CODE_TAG)))
+  (if (and (== tag 24) (wf-payload s))
+    (do (comment "D358: a valid-CBOR run without PF_T24V: the payload's bytes (a byte"
+                 "string's content is the same in a canonical copy) walked as one"
+                 "well-formed item by the scanner's own walk (wf-scan-one; s begins"
+                 "with the scanner's o); 1 unit per item it counted")
+        (let [i0 (ia s O_ITEMS)
+              rw (wf-scan-one b s (std-inner b q) (+ depth 2) stop)]
+          (if (not (charge s (- (ia s O_ITEMS) i0) pos)) (return (neg R_BUDGET)))
+          (if (< rw 0) (return rw))
+          (return stop))))
   (if (== tag 24)
     (do (let [cs (std-inner b q)
               e (vtab-find s cs)

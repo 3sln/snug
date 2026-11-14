@@ -38,6 +38,10 @@ export interface ProfileOptions {
   undefinedValue?: boolean;
   /** Unicode noncharacters in text. valid/deterministic: true; bindle: false. */
   noncharacters?: boolean;
+  /** What a tag-24 payload (encoded CBOR data item) must be under wire 'valid': one well-formed item filling
+   * the byte string (RFC 8949 §3.4.5.1; the valid preset's value), or one valid item under these options.
+   * Ignored by the deterministic and Bindle presets, which always require a valid item. */
+  tag24?: 'well-formed' | 'valid';
 }
 export interface DecodeOptions extends Limits, ProfileOptions {
   /** Accepted for preset spreading; ignored while reading/checking. */
@@ -85,7 +89,7 @@ export declare const LIMITS: Readonly<{
 /** The three presets spelled out as frozen option objects. */
 export declare const profiles: Readonly<{
   valid: Readonly<{ wire: 'valid'; top: 'any'; cose: false; keys: 'any'; tags: 'any';
-    floats: 'deterministic'; undefinedValue: true; noncharacters: true; strictArrays: false }>;
+    floats: 'deterministic'; undefinedValue: true; noncharacters: true; strictArrays: false; tag24: 'well-formed' }>;
   deterministic: Readonly<{ wire: 'deterministic'; top: 'any'; cose: false; keys: 'any'; tags: 'any';
     floats: 'deterministic'; undefinedValue: true; noncharacters: true; strictArrays: false }>;
   bindle: Readonly<{ wire: 'bindle'; top: 'map'; cose: false; keys: 'text'; tags: 'bindle'; floats: 'bindle';
