@@ -25,7 +25,6 @@ export const profiles = Object.freeze({
 
 const BINDLE_FLAGS = 0;
 if (PF_DETERMINISTIC !== 122 || PF_VALID !== 256 || PF_VALID_PRESET !== 378) throw new Error('snug: profile flags out of step with kin');
-const TAG24 = { 'well-formed': 0, valid: 2048 }; // PF_T24V
 
 // The preset when `wire` is not given (D267).
 export const DEFAULT_WIRE = 'valid';
@@ -53,13 +52,12 @@ export function profileFlags(options) {
   const { keys, tags, floats, undefinedValue, noncharacters, tag24 } = options;
   if (keys === undefined && tags === undefined && floats === undefined && undefinedValue === undefined && noncharacters === undefined && tag24 === undefined)
     return preset === profiles.bindle ? BINDLE_FLAGS : preset === profiles.valid ? PF_VALID_PRESET : PF_DETERMINISTIC;
-  // without wire 'valid' the payload is always a valid item under the profile: tag24 is ignored
-  const t24 = pick(TAG24, tag24 ?? 'well-formed', 'tag24');
   return pick(KEYS, keys ?? preset.keys, 'keys') | pick(TAGS, tags ?? preset.tags, 'tags')
     | pick(FLOATS, floats ?? preset.floats, 'floats')
     | (bool(undefinedValue ?? preset.undefinedValue, 'undefinedValue') ? UNDEFINED : 0)
     | (bool(noncharacters ?? preset.noncharacters, 'noncharacters') ? NONCHAR : 0)
-    | (preset === profiles.valid ? PF_VALID | t24 : 0);
+    // tag24 (checked with the other options): PF_T24V, read only under wire 'valid'
+    | (preset === profiles.valid ? PF_VALID | (tag24 === 'valid' ? 2048 : 0) : 0);
 }
 
 /** The root policy of the codec, views and profile sources: options.top, else the preset's. */

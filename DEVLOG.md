@@ -8809,6 +8809,40 @@ engineer).
     and raw items, so it grows by the scanner's bytes; there is no import
     leak.
   - D303: approved by coordinator; the budget.json edit applied by the coordinator with the owner's explicit approval after a permission refusal, 2026-11-13
+  - **After the rebase over WP2 (main 9a448d4).** `snug` gzip measured
+    21840 against the 21825 cap, and `snug/compile` static gzip 1376
+    against 1374. A further cut fixed both without changing a cap:
+    - `profileFlags` no longer has the tag24 pick table. Its value is
+      checked with the other options, so the flag is
+      `tag24 === 'valid' ? 2048 : 0`;
+    - options.mjs lists `tag24`'s values as `('valid', 'well-formed')`,
+      which compresses against `wire`'s.
+
+    Now `snug` is 63477/21811/19119 (main 63077/21672/18986) and
+    `snug/compile` static is 2658/1374/1220 (main 2591/1339/1192).
+* **valid-test's recorded cbor2 differential (P9.13 WP3 S7).**
+  - The counts move from 1396/1502 to 1404/1511, and `limits` from 27 to
+    28. All of it comes from det-cases' nine new fixed vectors for the
+    well-formed payload walk, which the differential's inputs include.
+  - The nine are `nest(29, t24('8100'))`, `nest(30, t24('8100'))`,
+    `t24('818181818100')` twice, `t24(t24(t24('a200000000')))`,
+    `t24('820102')`, `t24('9f010203ff')`, and two restore-after-payload
+    vectors.
+  - Eight agree with cbor2: six are accepted by both, and the two restore
+    vectors are refused by both (`text`, `duplicate_key`).
+  - `nest(30, t24('8100'))` reaches the default depth 32: snug refuses
+    `depth` and accepts with the limits lifted, which is the `limits`
+    class.
+  - The counts were recorded after a byte fix in det-cases: three vectors
+    had `a2000000`, a truncated map, where the comment meant the duplicate
+    `a200000000`.
+  - The restore proof did not depend on those bytes. On a build that
+    leaks `PF_WF` past the payload, vm-test's profile identity fails 40
+    runs (10324/10364), the D353 payload vectors among them. `decode` then
+    accepts `82d8184261ff61ff` and `82d81848d81845a20100010063f09f80`,
+    which the fixed tree refuses with `text`. The corpus verdicts, run
+    through the VM, do not see the leak, so a JS host test now holds
+    `decode` to `text` and `duplicate_key` after a payload.
 
 ### D359 — `.default` carries RFC 8610 §3.8.6's implied `.ne` by default; `defaultControl: 'annotation'` keeps the annotation-only reading of erratum 9229 (status Reported) and is bound into the source key (P9.13 WP1 decision 2)
 **Decision** (coordinator-decided, P9.13 decision 2; implemented by the P8.5 VM engineer):

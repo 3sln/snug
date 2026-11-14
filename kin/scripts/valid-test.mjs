@@ -487,13 +487,15 @@ function shifted(outStr, at, k) {
     }
     line(unexplained === 0, `valid preset vs cbor2 2.4.1 default decode (+ rejectDuplicateKeys): ${agreeN}/${compared} same verdict; the rest by class, each cause re-checked: ${Object.entries(classes).map(([k, v]) => `${k} ${v}`).join('; ')}; ${unexplained} unexplained`);
     // P9.13 WP3 (S7): the gate's own run (default mutations and seed) has these exact class counts; a change
-    // in any of them (a new difference, or one that went away) is a finding to look at, then record here
-    const EXPECTED = { 'cbor2 tag decoders (content snug does not check)': 3, "tag rules (snug checks known tags' contents, D121/D180/D265)": 65, 'cbor2 tag decoders': 11, limits: 27 };
+    // in any of them (a new difference, or one that went away) is a finding to look at, then record here.
+    // D358 (P9.13 WP1): det-cases' nine fixed tag-24 well-formed-walk vectors add 9 inputs: 8 agree, and
+    // nest(30, t24('8100')) passes the default depth 32 -- a `limits` difference cbor2 does not have.
+    const EXPECTED = { 'cbor2 tag decoders (content snug does not check)': 3, "tag rules (snug checks known tags' contents, D121/D180/D265)": 65, 'cbor2 tag decoders': 11, limits: 28 };
     if (MUTATIONS === 300 && SEED === 1) {
       const got = JSON.stringify(Object.fromEntries(Object.entries(classes).sort())), want = JSON.stringify(Object.fromEntries(Object.entries(EXPECTED).sort()));
       if (got !== want) fail(`cbor2 differential class counts ${got}, recorded ${want}`);
-      if (agreeN !== 1396 || compared !== 1502) fail(`cbor2 differential: ${agreeN}/${compared} same verdict, recorded 1396/1502`);
-      line(got === want && agreeN === 1396 && compared === 1502, 'cbor2 differential: the class counts and agreement are the recorded ones (default mutations and seed)');
+      if (agreeN !== 1404 || compared !== 1511) fail(`cbor2 differential: ${agreeN}/${compared} same verdict, recorded 1404/1511`);
+      line(got === want && agreeN === 1404 && compared === 1511, 'cbor2 differential: the class counts and agreement are the recorded ones (default mutations and seed)');
     } else console.log(`  info cbor2 differential: class counts not compared (mutations ${MUTATIONS}, seed ${SEED}; recorded for 300 and 1)`);
   }
 }

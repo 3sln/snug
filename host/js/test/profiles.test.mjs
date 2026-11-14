@@ -101,6 +101,9 @@ test('option resolution: presets, overrides, refusals of unknown values', () => 
   assert.equal(decode(fromHex('d81845a201000100')).tag, 24);
   assert.throws(() => decode(fromHex('d81845a201000100'), { tag24: 'valid' }), { code: 'duplicate_key' });
   assert.throws(() => decode(fromHex('d81842f800')), { code: 'malformed' });
+  // ...and the scanner's profile word is back after the payload: invalid text or a duplicate after it is refused
+  assert.throws(() => decode(fromHex('82d8184261ff61ff')), { code: 'text' });
+  assert.throws(() => decode(fromHex('82d81845a201000100a201000100')), { code: 'duplicate_key' });
   assert.equal(decode(fromHex('f7'), { wire: 'bindle', top: 'any', undefinedValue: true }), undefined);
   // cose stays the Bindle option: integer labels in the top-level map only, under keys 'text'
   assert.deepStrictEqual(decode(fromHex('a10100'), { ...B, cose: true }), new Map([[1, 0]]));

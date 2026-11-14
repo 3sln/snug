@@ -11,7 +11,7 @@ const preset = {
   wire: enumeration('valid', 'deterministic', 'bindle'), keys: enumeration('text', 'integer', 'any'),
   tags: enumeration('bindle', 'standard', 'any'), floats: enumeration('bindle', 'deterministic'),
   undefinedValue: boolean, noncharacters: boolean, top: enumeration('map', 'any'), cose: boolean,
-  tag24: enumeration('well-formed', 'valid'), // D358
+  tag24: enumeration('valid', 'well-formed'), // D358
   // Presets can be spread across all runtime operations; strictArrays only affects writing.
   strictArrays: boolean,
 };
