@@ -1453,10 +1453,13 @@
               (if (< vend 0) (break))
               (if (>= (ia s mw) (ia s (+ mw 5))) (break))
               (comment "a recorded event (D280 replay, over a canonical copy) inside the pair:"
-                       "the pair-by-pair walk replays it; the streak stops before the pair")
+                       "the pair-by-pair walk replays it; the streak stops before the pair."
+                       "An `any` value is not skipped to find its end: over the copy of a"
+                       "refused item it may hold the region's stop, past which the copy is"
+                       "not CBOR (P9.9 addendum P5/hang: tskip ran into stale bytes for 97 s"
+                       "uncharged); with an event still ahead the streak stops instead")
               (if (< nev 2147483647)
-                (do (if (< nev kend) (break))
-                    (if vany (set vend (tskip b s kend)))
+                (do (if (or (< nev kend) vany) (break))
                     (if (< nev vend) (break))))
               (comment "commit: the charges in the walk's order")
               (if (not (charge s (+ sk 1) pos)) (return (neg R_BUDGET)))

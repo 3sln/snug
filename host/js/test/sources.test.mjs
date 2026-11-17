@@ -262,3 +262,23 @@ test('P6.2: the yield helper prefers scheduler.yield, setImmediate, MessageChann
   assert.equal(pickYield({ setImmediate, MessageChannel, setTimeout: noTimer }).kind, 'setImmediate');
   assert.equal(pickYield({ setTimeout }).kind, 'setTimeout');
 });
+
+test('P9.9 addendum P5/hang (seed 7001290, index 130): a session over the copy of a refused map ends at once', async () => {
+  // r = { * tstr => any } on a 718-byte map refused for depth at offset 63 (maxDepth 1): the session's valid run
+  // walks the canonical copy, which stops at the refusal; the map streak skipped an `any` value with tskip into
+  // the bytes past that stop -- 97 s of uncharged work on a66224a. Now the streak stops before such a pair.
+  const s = await compileSchema('r = { * tstr => any }');
+  const b = Uint8Array.from(Buffer.from(
+    'a5655ce6b0b430581a8c4235a2fba9f3136c68222f41cceb95dc73418ffb00fe2313bb66224162dfbf7a3b718e0eec6eaa8bca6b00e0a080e4b8ad7fc3bc5cba79a899716e005cc280c3bce6b0b4f090859161d828828105d84654fc237378a392074134f6cca0891d06ded557b1137902387fdfbfc280efbfaf2041c280f0908591efbfaf7fc3a9c3a94120e4b8ade0a0807ae4b8ad5cdfbf6230c3a9c28062efbfafe4b8ad617a30e6b0b462dfbf5c30e6b0b4f09f988061dfbff090859122f09f988061e6b0b430e0a080dfbfe6b0b4c280e4b8ade6b0b4c3a96161c3bc20e6b0b4efbfaff0908591c3bc7a7a7ac280f09f98806161dfbf00dfbfc3bcefbfafe6b0b420c3a962f09f988062e0a0807ff09f9880205cf0908591c280c3a930c3bcc3a9c3a9c3bc200030e0a080c3a92262f09f9880dfbfefbfaf7ae4b8ad202222dfbfdfbf627ac3bcc3bc6161c3bc007f7f2220f09f988022c280c2800062c3bcf09f988041e4b8ad41c3a900dfbff09f988022e4b8adefbfaf7a41f09085917fc3bce0a08062c2805ce6b0b4413062c3a920dfbff090859161227f62207ac3a9efbfaf6162627aefbfaf2262c3bc227a7adfbff09f98807f7fc3bcf0908591c3a9c28020c280c280412262627ae4b8adc3bcefbfaf622230c3bcf0908591f09f9880f09f9880007fc280306222c28020c3a962dfbf62dfbfc3bcdfbfe6b0b4e0a080626100e0a080dfbf7a5cc3a9c280c3bc41dfbf00e4b8ad627f7f5cc3a9efbfafefbfafc3bc0022e6b0b462e0a0805cc3a920efbfaf7fdfbf22f09f988030efbfaf20417fdfbfc280617ae6b0b441f09f988062e6b0b4e4b8adc3a922c3bcefbfafe4b8addfbf5ce0a080f09085914100c3a930c280e6b0b47ac3a9007ff0908591005ce0a08061c3bc41c28000e4b8ad307af0908591e4b8adf09f9880e4b8ad7f7fc280417fd85658203433339d8f3e943f0000202a6003464000000000000000809a9999999999f13f',
+    'hex'));
+  const o = { top: 'any', maxDepth: 1 };
+  const want = { ok: false, reason: 'cbor/depth', path: [], offset: 63 };
+  assert.deepEqual(s.validate(b, 'r', o), want);
+  const t0 = process.hrtime.bigint();
+  assert.deepEqual(validateHandleSync(s, bufferHandle(b), 'r', o, { chunk: 65536 }), want);
+  const p = pushValidator(s, b.length, 'r', o);
+  p.feed(b);
+  assert.deepEqual(p.finalize(), want);
+  const ms = Number(process.hrtime.bigint() - t0) / 1e6;
+  assert.ok(ms < 5000, `the sessions took ${ms.toFixed(0)} ms`);   // 4 ms here; ~97 s each before
+});
