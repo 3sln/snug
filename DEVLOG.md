@@ -12677,7 +12677,43 @@ can run alongside them; its build work is post-RC unless it is cheap.
       sites keep the placeholder.
   - Per the RC note's recommendation, the P9.9 full runs are not repeated:
     the diff is manifests, package tests, CHANGELOG, READMEs and DEVLOG.
-  - The gate record, artefacts and checksums are added below as they land.
+  - **Release commit `0eb45c6`.** Gates, run at load 15–19:
+    - `bb gates release` on a detached worktree of it: all 31 ok, exit 0
+      (node-oldest, msrv and runtime included), 12,332 s wall.
+    - `bb identity` on the stamped 0.1.0 tree (`.cache/release`,
+      `bb stamp`): all 11 ok, exit 0.
+  - **Artefacts.** All are built from the stamped tree and kept in
+    `.cache/release-out/artefacts/` (not tracked):
+
+    | Artefact | Files | SHA-256 |
+    | --- | ---: | --- |
+    | `3sln-snug-0.1.0.tgz` | 119 | `b30d2c5266038ae76b723d1d367e46d6beae66412f823b6aeb66f03e0aa64d8e` |
+    | `3sln-snug-wasm-0.1.0.tgz` | 93 | `610879832b387c505536168776b14783f8dbc5330c702f41ed04483a8fb17a73` |
+    | `snug-cbor-0.1.0.crate` | 84 | `1904d015a0749cdec14290f6b8e435d484bf67f72e0bfa52cd29f4bb8cb943ab` |
+
+    - The npm tarballs come from package-build and `npm pack`.
+    - The crate comes from `kin/scripts/rust-crate`, then `cargo package`
+      with verify, offline. A second `cargo package` gave the same bytes.
+    - The wasm modules (nightly-2026-09-16, wasm-opt 132):
+      - snug.wasm `df36d58e3dff6df2a185a71fff239caaef467c677879c466bc888e09e5972200`;
+      - snug-compiler.wasm `86b3128abc114c07c348432773900915b21ff6397eef320b26ff7aea7da9e91d`.
+  - **Licence and notice check (§4 step 6): pass.**
+    - Every artefact has LICENSE, THIRD_PARTY_NOTICES.md (with the Unicode
+      License v3 section), SECURITY.md, README.md and CHANGELOG.md.
+    - No artefact has a pre-release marker, `dependencies` or `private`.
+    - `cargo tree` shows only snug-cbor.
+    - No artefact contains corpus/, bench/, tools/, DEVLOG or SPEC.
+  - **dist.** Commit `ffbfceba81bbe6ab02c41064965ac0ba0a399d93` (an orphan
+    root), with the tag `v0.1.0`, built into the scratch repository
+    `.cache/dist-repo` so that no tag is written to this one. Its DIST.json
+    lists the three SHA-256s.
+  - **Next:**
+    - the coordinator pushes, tags (`src/v0.1.0` on `0eb45c6`, `v0.1.0`
+      from the dist repository) and publishes;
+    - the owner logs in to the registries.
+  - **Post-release nit:** the repository README's "Design" link line
+    (removed along with its pre-release block) needs a repo-only marker
+    to return.
 
 **Assignment (2026-11-11):** P9.1–P9.4 go to the P8.5 VM engineer, in that
 order. P9.5 onward are scheduled as the earlier items land.
