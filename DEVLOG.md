@@ -8875,6 +8875,31 @@ engineer).
     the rebase over WP2, the cut pass brought snug gzip and snug/compile
     static gzip back under their caps with no further raise.
   - valid-test's cbor2 count deltas are traced above.
+- **Amendment (P9.9 addendum, 2026-11-17): encode and the Writer apply decode's tag-24 rule.**
+  - **The finding.** The addendum proptest on a66224a (seeds 7000001..8000000, 60 min) reported
+    P2/valid-roundtrip/reencode 15 times. Repro: seed 7002107, index 27, `d81847668efb1c976081`, a tag-24
+    payload holding invalid UTF-8.
+  - **Cause.** Under `valid` it decodes, as D358 intends, but re-encoding the decoded value threw `text`.
+    The JS Writer (writer.mjs `#tagged`) and the wasm SDK's encoder (sdk.rs tape, tag case) scanned the
+    payload on its own, as a top-level item under the full profile. Rust's Writer was already right,
+    because it checks the whole message with `decode::check` at `finish`.
+  - **The fix.** Both scan the whole tag item, from its head to the end of its content. The payload then
+    gets decode's rule: well-formed only under `valid`; a valid item with `tag24: 'valid'` and under
+    `deterministic`/Bindle.
+  - **Regressions** (each fails without the fix; on main they refused with `text` / `duplicate_key`):
+    - the repro and a duplicate-key twin (`d81845a201000100`) round-trip byte for byte under `valid`
+      through `encode` and the Writer, and are refused with `text` / `duplicate_key` under
+      `tag24: 'valid'` and `deterministic`;
+    - JS: profiles.test; Rust: public_api `tag24_payload_well_formed_under_valid_d358`; SDK: parity.test,
+      against native across the tag24 modes.
+  - **Triage.** tools/proptest: the re-encode signature now carries the refusal's code
+    (`P2/valid-roundtrip/reencode/<code>`), so a new cause is not filed under D348's old "fixed" label.
+    triage.json has `P2/valid-roundtrip/reencode/text` as fixed by this amendment, with the D348 history.
+  - **Size** (main eee5824 → this branch; min/gzip/brotli):
+    - snug/writer 59576/20408/17883 → 59592/20415/17934;
+    - snug 63477/21811/19119 → 63493/21814/19120;
+    - snug/schema 151491/54258/47182 → 151474/54253/47111;
+    - every cap holds and budget.json is untouched.
 
 ### D359 — `.default` carries RFC 8610 §3.8.6's implied `.ne` by default; `defaultControl: 'annotation'` keeps the annotation-only reading of erratum 9229 (status Reported) and is bound into the source key (P9.13 WP1 decision 2)
 **Decision** (coordinator-decided, P9.13 decision 2; implemented by the P8.5 VM engineer):
@@ -8947,6 +8972,61 @@ engineer).
   three refusal suites (`int .size 1`, `nint .bits 3`, `#4.1`). On the old
   compiler the main suite does not compile (`major` at `#0.24`), and
   `int .size 1` and `nint .bits 3` compile.
+
+### D367 — The map streak no longer skips an `any` value to find its end when a replay event is still ahead: over the copy of a refused item that skip ran past the region's stop into stale bytes, uncharged (P9.9 addendum P5/hang)
+**Decision** (P8.5 VM engineer, provisional). D364 is skipped in case it was reserved elsewhere.
+* **The finding.** The addendum proptest (a66224a, seeds 7000001..8000000, 60 min) reported P5/hang four
+  times: no result in 30 s. Three are on file: 7000436:157, 7000773:183, 7001290:130.
+* **Cause.**
+  - A resumable session over valid, non-deterministic input walks a canonical copy of the item, with its
+    replay events (D264/D280).
+  - When the item is refused (here `cbor/depth` at offset 63 under `maxDepth: 1`), the copy stops at the
+    refusal. Past that stop it is not CBOR.
+  - `map-streak` (kin/vm-eval.kin) had an event still ahead. For an `any` value it called `tskip` to find
+    the value's end, and that walk ran from inside the stopped value into the bytes past the stop, which
+    can be stale bytes left in the reused canonical buffer by earlier inputs.
+  - Those bytes can claim huge counts. The walk is uncharged, so the budget never stopped it.
+  - The verdict was always right; only the time was wrong.
+* **The fix.** With an event still ahead, an `any` value now stops the streak before its pair, and the
+  pair-by-pair walk replays it as before. A streak is an optimisation: vm-test's "fast paths == generic
+  path" arm holds both to the same out array. The other `tskip` callers in the VM (the T sort in
+  vm-map.kin) only read keys that were already walked whole.
+* **Evidence.**
+  - **Load at the start:** 13.2 (10 cores; another session's gates ran too).
+  - **The three known seeds replayed on their own** (`--replay`, wall / user CPU):
+
+    | Seed | eee5824 (pre-fix) | a2cf486 (fixed) |
+    | --- | --- | --- |
+    | 7001290:130 | 93.8 s / 158 s CPU | 0.23 s |
+    | 7000436:157 | 0.27 s | 0.23 s |
+    | 7000773:183 | 0.47 s | 0.56 s |
+
+    7001290 alone reproduces the stall. With the uncapped replay CPU-profiled, 78 of its 94 s are
+    `tskip`/`targ` under `mapStreak`, from `vcanon` in a push session. The case is
+    `r = { * tstr => any }` on a 718-byte map, `{ top: 'any', maxDepth: 1 }`, one 64 KiB chunk.
+    The other two are fast alone because the bytes past the stop depend on what earlier cases left in
+    the buffers.
+  - **In sequence.** I replayed property 5 in one process from the start of a worker's range, so the
+    state is the worker's (scratchpad seq.mjs).
+    - On eee5824 and on 2e807e9 (the D358 amendment alone), the run stalled at 7002434:219. One run had
+      used 68 CPU minutes without finishing; another sat on that case for over 10 CPU minutes before I
+      stopped it.
+    - On a2cf486 the same sequence reached 7002434:219 in 533 s with no case over 1 s of CPU.
+    - Since 2e807e9 and a2cf486 differ only in this fix, the stall is this root cause.
+  - **The span replay** (`--props=5 --workers=5:2 --timeout=30000`):
+    - The seed bound comes from campaign.mjs. P5 has 2 workers over 7000001..8000000, so
+      span = 500,000: worker 0 runs from 7000001 and worker 1 from 7500001 (seed offset 0), each seed
+      for 250 cases.
+    - The original run's 1,059,604 P5 cases are at most 4,239 seeds in either worker, so I replayed
+      7000001..7004239 and 7500001..7504239 for 75 min each.
+    - On eee5824 the first span had 6 hangs, among them the original's 7000436:157, plus 7002434:219
+      and 7002758:168; the second span had 1 (7503045:219). That is 1,097,575 and 1,122,637 cases.
+    - On a2cf486 the first span ran 903,605 cases with no hang. Its two workers covered 7000001..about
+      7001800 and 7002120..about 7003930, past every recorded hang point in that span.
+    - The load was 13–19 throughout, so timeouts alone are not evidence. The in-sequence stall above is.
+  - **Regression.** host/js/test/sources.test.mjs runs the 7001290 case through `validate`,
+    `validateHandleSync` and `pushValidator`, with the same verdict, in under 5 s. It takes 4 ms here
+    and about 97 s each on eee5824. The kin fix is shared by every host.
 
 ## Findings
 

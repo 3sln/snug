@@ -252,7 +252,7 @@ function walk(v, depth) {
 function refusal(r) {
   if (r === -1000) fail('depth', 'Nesting exceeds the SDK tape depth.');
   if (r === -1001) fail('tag', 'The tag content does not satisfy its tag.');
-  if (r <= -2000) fail(rt.codeName(-2000 - r), 'A tag-24 payload must be one valid data item.');
+  if (r <= -2000) fail(rt.codeName(-2000 - r), 'A tag-24 payload must be one data item the profile accepts.');
   const code = CODES[-r] ?? 'malformed';
   fail(code, MESSAGES[code] ?? 'Map keys must be valid text strings.');
 }

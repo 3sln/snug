@@ -487,7 +487,8 @@ function mutationCheck(m, dopts, kind, repro, st) {
     // duplicate_key, subcode normalized (deterministic CBOR cannot write it); any other refusal is a finding
     const normalizedRefusal = !re2.ok && nb.changed && re2.error?.code === 'duplicate_key' && re2.error?.subcode === 'normalized';
     if (normalizedRefusal) st.normalizedRefused = (st.normalizedRefused ?? 0) + 1;
-    const [sub, why] = normalizedRefusal ? [] : !re2.ok ? ['reencode', 'does not re-encode'] : !back.ok ? ['redecode', 'its encoding does not decode']
+    // the refusal's code is part of the signature (P9.9 addendum): a new cause is not filed under an old triage
+    const [sub, why] = normalizedRefusal ? [] : !re2.ok ? [`reencode/${re2.error instanceof SnugFault ? re2.error.code : 'throw'}`, `does not re-encode (${codeOf(re2)})`] : !back.ok ? ['redecode', 'its encoding does not decode']
       : !re3.ok || hex(re3.value) !== hex(re2.value) ? ['fixed-point', 'its encoding is not a fixed point of decode and encode']
       : nb.changed ? (!asInt.ok || hex(asInt.value) !== hex(re2.value) ? ['bignum-integer', 'a non-preferred bignum is not written as its integer (D342)'] : [])
       : !isDeepStrictEqual(back.value, dv.value) ? ['identity', 'does not decode back to itself'] : [];

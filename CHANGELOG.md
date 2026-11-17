@@ -237,6 +237,14 @@ repository.
 
 ### Fixed
 
+- `[js]` `[wasm-sdk]` A value that decodes under `valid` with a tag-24
+  payload that is only well-formed (invalid UTF-8 or a duplicate key inside
+  it) encodes again: `encode` and the `Writer` check the payload with
+  decode's rule, as the Rust host already did (D358).
+- A resumable session (a source, a handle or a push validator) over a
+  valid, non-deterministic map that is refused partway could spend minutes
+  of uncharged CPU on the bytes past the refusal before answering; it now
+  answers at once with the same result (D367).
 - `.det` dedents lines that end in CR LF: a line of spaces before CR LF is
   blank, as RFC 9165 §2.3 says.
 - `tstr .size -1` matches nothing; a negative size was read as 0.

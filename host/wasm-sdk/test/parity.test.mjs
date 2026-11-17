@@ -873,6 +873,23 @@ test('P9.13: an oversized input is refused before it is copied into linear memor
   assert.throws(() => W.decode(deep, { maxDepth: 256 }), e => e.code === 'depth');
 });
 
+test('D358 amendment (P9.9 addendum, seed 7002107): encode and the Writer apply decode\'s tag-24 rule, as native', () => {
+  const hexOf = b => Buffer.from(b).toString('hex');
+  for (const h of ['d81847668efb1c976081', 'd81845a201000100']) {   // invalid UTF-8 / a duplicate key inside the payload
+    const bytes = Uint8Array.from(Buffer.from(h, 'hex'));
+    const code = h === 'd81845a201000100' ? 'duplicate_key' : 'text';
+    for (const o of [{}, { tag24: 'valid' }, { wire: 'deterministic' }, { tag24: 'well-formed' }]) {
+      const trip = api => { try { const v = api.decode(bytes, o); return 'enc ' + hexOf(api.encode(v, o)); } catch (e) { return 'refused ' + e.code; } };
+      const w = trip(W), n = trip(N);
+      assert.equal(w, n, `${h} ${JSON.stringify(o)}`);
+      assert.equal(n, o.tag24 === 'valid' || o.wire === 'deterministic' ? `refused ${code}` : `enc ${h}`);
+    }
+    const v = N.decode(bytes);   // a Tagged(24) of the payload bytes, written by both Writers
+    assert.equal(hexOf(new WWriter().value(v).finish()), h);
+    assert.throws(() => new WWriter({ tag24: 'valid' }).value(v).finish(), e => e.code === code);
+  }
+});
+
 test('P9.13: every View/Cursor call into the instance goes through rt.lost (CODE-S5)', () => {
   // a trap inside navigation must reset the instance (InstanceLost), as every other entry point's does
   const src = readFileSync(new URL('../src/view-core.mjs', import.meta.url), 'utf8');
