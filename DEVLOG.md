@@ -8033,6 +8033,14 @@ Babashka 1.3.190, nvm Node, `env -i`):
     - Planned: one more release dispatch run after the P9.13 work
       packages land. It doubles as the hosted proof for the P9.9
       addendum.
+  - Runs on a66224a, after all P9.13 work packages landed (coordinator,
+    2026-11-16), both green:
+    - push run 44015542301: land, plus every compat and Linux cell;
+    - release dispatch 44015562306: all five shards, every compat and
+      Linux cell, and `ci` success.
+    - `runtime` ran under WP3's verdict (D365) in release-wasm, so the
+      GATES-B1 caveat above no longer applies.
+    - These are the hosted proof for the P9.9 addendum.
   - Open question for the coordinator: release runs might skip the macOS
     compat cells, since the shards already cover those gates on the
     primary toolchain.
