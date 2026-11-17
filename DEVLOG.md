@@ -11709,6 +11709,54 @@ review.
       slow-validate now fail on CPU time.
     - Chunk sizes need headroom under the caps at the loads seen here
       (15–40): a 2× vmsession chunk used 97% of its 7,200 s wall cap.
+  *Addendum after P9.13 (manager, 2026-11-16/17), the coordinator's "one
+  P9.9 addendum" once every P9.13 work package landed.*
+  - **Setup.** The runs used detached worktrees: a66224a (`.cache/p99add`),
+    then 0f4f480 and pre-fix commits for the replays. Load was 9–19 on 10
+    cores, since other sessions were running. Logs, `results.tsv`, a
+    findings snapshot and the replay snapshots are in
+    `.cache/p99add-logs/` (not tracked).
+
+  | Run | Commit | Command | Wall s | Result |
+  | --- | --- | --- | ---: | --- |
+  | release set | `a66224a` | `bb gates release` | 3,857 | ok 31/31 (proptest, runtime under D365's verdict, rust-api-test-full included) |
+  | vmsession 1× | `a66224a` | `kin/scripts/vmsession-test 20000 1010 400 60` | 1,354 | ok |
+  | sequence | `a66224a` | `kin/scripts/sequence-test 30000 1001` | 1,114 | ok |
+  | sequence | `a66224a` | `kin/scripts/sequence-test 30000 1002` | 839 | ok |
+  | proptest P1–P5 | `a66224a` | `bb proptest --minutes=60 --props=1,2,3,4,5 --seeds=7000001..8000000 --timeout=30000` | 3,633 | **exit 1**: P2/valid-roundtrip/reencode ×15 and P5/hang ×4 (P1 2.90M, P2 4.10M, P3 1.57M, P4 1.50M, P5 1.06M cases) |
+  | proptest P1–P5 | `a2cf486` | the same for 30 min, `--seeds=8000001..9000000` | 1,800 | ok: no signature (2 non-failing slow-compile-wall warnings) |
+  | P5 span 1 | `eee5824` → `a2cf486` | `--props=5 --seeds=7000001..7004239`, 75 min, timeout 30000 | 4,500 each | before the fix: hangs incl. 7000436:157, 7002434:219 and 7002758:168. After: 903,605 cases, 0 hangs |
+  | P5 span 2 | `eee5824` → `0f4f480` | `--props=5 --seeds=7500001..7504239 --workers=5:2`, 75 min | 4,500 each | before the fix: 1 hang (7503045:219). After: 662,109 cases, 0 hangs, 0 signatures, slow-compile and slow-validate CPU counters 0 |
+
+  - **Findings, both fixed and merged at 0f4f480.**
+    - **P2 re-encode:** a D358 amendment (2e807e9). Under `valid` a tag-24
+      payload with invalid UTF-8 or a duplicate key decoded but did not
+      re-encode, because the JS Writer and the SDK encoder scanned the
+      payload alone under the full profile. They now scan the whole tag
+      item, as decode does; Rust already did. The harness label "fixed,
+      D348" had masked this, so the signature now carries the refusal code.
+    - **P5 hang:** a real bug, D367 (a2cf486). See D367.
+  - **Hang seed bound.** P5 ran 2 workers over 7000001..8000000, which
+    puts worker starts at 7000001 and 7500001. 1,059,604 P5 cases at 250
+    cases per seed is at most 4,239 seeds per worker, hence the two spans.
+  - **Root cause shown by in-sequence runs.** Each run replays one
+    worker's case sequence in a single process, because a hang depends on
+    the stale bytes left by earlier cases.
+    - Through 7002434:219, and through 7503045:219, the pre-D367 commits
+      stall on exactly that case: 2e807e9, the amendment alone, used more
+      than 57 CPU minutes before it was stopped.
+    - With D367 (a2cf486 / 0f4f480), the same sequences finish (533 s
+      and 2,478 s) with no case over 1 s of CPU.
+    - Replayed alone, 7001290:130 took 93.8 s wall / 158 s CPU before the
+      fix and 0.23 s after.
+  - **Hosted runs.**
+    - On a66224a: push run 44015542301 and release dispatch 44015562306,
+      both green.
+    - On 0f4f480: push run 44059725238 and release dispatch 44059746656,
+      all five shards and every compat and Linux cell, all green.
+  - **Learnt.** A campaign's whole logDir is evidence. Snapshot it before
+    removing its worktree. Removing the a66224a worktree deleted the 4th
+    hang seed's record, which the span replays above recovered.
 - [x] **P9.6a — Split `rust-api-test` into two modes** (coordinator,
   2026-11-11). The default mode takes a few minutes and is for routine
   gating. A `full` mode runs the async differential at the scale it ran at
@@ -12493,9 +12541,30 @@ can run alongside them; its build work is post-RC unless it is cheap.
     all ok. That covers check, drift, size, npm-test, rust-api-test,
     wasm-sdk-test (no SKIP; parity on the new modules), vm-test,
     compile-test and wasm-size.
-- [ ] **P9.13 — Final independent whole-library review** of the code,
+- [x] **P9.13 — Final independent whole-library review** of the code,
   spec, docs and gates by a reviewer who did not build it. Blocking
   findings are fixed before the RC is declared.
+  *Closed 2026-11-17 (manager).*
+  - Five read-only reviews (security, spec, API/docs, gates, code) at
+    cefd61e, triaged into four work packages, all merged and signed off:
+    - WP1: D358, D359, D362, D363, plus the spec should-fixes;
+    - WP2: D360, D361, plus the host blockers;
+    - WP3: D365;
+    - WP4: D366, plus the README pre-release block.
+  - Follow-ups:
+    - the SEC-F2 docs (9a448d4);
+    - the schema-less Rust Sequence depth fix (cef3b29);
+    - the P9.9 addendum findings: the D358 amendment and D367 (0f4f480).
+  - Coordinator decisions 1–6 are recorded as D358–D361, the D122
+    sign-off, and decision 5's docs and test.
+  - Post-RC nits (none blocking):
+    - Gates: N2, N3, N5, N7, N8, the rest of N9 (Chrome and workerd
+      outside the watchdog's process group), and a proptest gate run
+      rewriting `tools/proptest/findings/` in the checkout.
+    - Code: N4, N5, N6, N8, and S4 (duck-typed schemas in `view()`).
+    - Security: SEC-F6 (budget exhaustion near 2× under `valid`, to
+      document) and SEC-F7 (uncharged compiler arena restarts).
+    - Spec: F9, F10, F11 and F14 (documented behaviour).
   *WP2 — host resource and lifetime fixes (2026-11-13, the D347 engineer;
   branch `p913-wp2`):* each blocking item has a regression that fails
   without its fix (`host/js/test/host-lifetimes.test.mjs`, the wasm SDK
@@ -12576,8 +12645,19 @@ can run alongside them; its build work is post-RC unless it is cheap.
     answers `{ ok: false, reason: 'type', path: ['name'], offset: 10 }`, and
     `decode` and views answer `schema/type` at `name`. A test checks this;
     the docs are D366's.
-- [ ] **RC declared** (manager, recorded with the main commit). The release
+- [x] **RC declared** (manager, recorded with the main commit). The release
   itself is the owner's decision.
+  *Declared 2026-11-17 on `0f4f480` (origin main).*
+  - Every Phase 9 item is ticked.
+  - Local gates on 0f4f480: `bb gates land runtime write-test valid-test`,
+    14/14.
+  - P9.9 addendum: green after its two findings were fixed (see P9.9).
+  - Hosted runs on 0f4f480: push 44059725238 and release dispatch
+    44059746656, all green.
+  - Nothing is stamped, tagged or published. The release steps of
+    docs/release-policy.md §4 (release commit with the README pre-release
+    block removed, stamp, build, owner go, publish, tags) are the owner's
+    call.
 
 **Assignment (2026-11-11):** P9.1–P9.4 go to the P8.5 VM engineer, in that
 order. P9.5 onward are scheduled as the earlier items land.
