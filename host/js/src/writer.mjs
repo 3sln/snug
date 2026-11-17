@@ -14,7 +14,7 @@ import { copyTypedBytes } from './typed-bytes.mjs';
 import { scan } from './scan.mjs';
 import { WR_NEED, putHead, headLen, keyAfter } from '../../../gen/js/snug/write/out.mjs';
 import { putFloat, putFloatRfc } from '../../../gen/js/snug/write/float.mjs';
-import { stdAllowed, stdContentOk, stdInner } from '../../../gen/js/snug/cbor/stdtags.mjs';
+import { stdAllowed, stdContentOk } from '../../../gen/js/snug/cbor/stdtags.mjs';
 import { typedSize } from '../../../gen/js/snug/cbor/tags.mjs';
 import { putInt } from '../../../gen/js/snug/write/int.mjs';
 import { closeMap, sortKeys, S_BUDGET } from '../../../gen/js/snug/write/map.mjs';
@@ -384,14 +384,17 @@ export class Writer {
       this.#fail('tag', !this.#std ? 'Tagged values need the standard tag set or any tags (profile option tags).'
         : t === 55799 ? 'Tag 55799 is allowed only at the top level.' : this.#anyTags ? 'This tag is not allowed here.' : 'This tag is not in the standard set (profile option tags: \'any\').');
     }
+    const h = this.#pos;
     if (typeof t === 'bigint') this.#head(6, Number(t >> 32n) | 0, Number(t & 0xffffffffn) | 0);
     else this.#headN(6, t);
     const q = this.#pos;
     this.#walk(v.value, depth + 1);
     if (!stdContentOk(this.#buf, rule, q, this.#pos)) this.#fail('tag', 'The tag content does not satisfy its tag.');
     if (rule === 24) {
-      try { scan(this.#buf.subarray(stdInner(this.#buf, q), this.#pos), { ...selectOptions(this.#options, 'decode'), top: 'any' }); }
-      catch (e) { if (e instanceof SnugFault) this.#fail(e.code, 'A tag-24 payload must be one valid data item.'); throw e; }
+      // the whole tag item, so its payload gets the decoder's rule (D358: well-formed only under valid, unless
+      // tag24 'valid'; a valid item under the other presets)
+      try { scan(this.#buf.subarray(h, this.#pos), { ...selectOptions(this.#options, 'decode'), top: 'any' }); }
+      catch (e) { if (e instanceof SnugFault) this.#fail(e.code, 'A tag-24 payload must be one data item the profile accepts.'); throw e; }
     }
   }
   #xWords(words) {

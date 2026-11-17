@@ -104,6 +104,15 @@ test('option resolution: presets, overrides, refusals of unknown values', () => 
   // ...and the scanner's profile word is back after the payload: invalid text or a duplicate after it is refused
   assert.throws(() => decode(fromHex('82d8184261ff61ff')), { code: 'text' });
   assert.throws(() => decode(fromHex('82d81845a201000100a201000100')), { code: 'duplicate_key' });
+  // D358 amendment (P9.9 addendum, seed 7002107): encode and the Writer apply the same tag-24 rule as decode
+  for (const [h, code] of [['d81847668efb1c976081', 'text'], ['d81845a201000100', 'duplicate_key']]) {
+    const v = decode(fromHex(h));
+    assert.equal(Buffer.from(encode(v)).toString('hex'), h);
+    assert.equal(Buffer.from(new Writer().value(v).finish()).toString('hex'), h);
+    assert.throws(() => encode(v, { tag24: 'valid' }), { code });
+    assert.throws(() => encode(v, { wire: 'deterministic' }), { code });
+    assert.throws(() => new Writer({ tag24: 'valid' }).value(v).finish(), { code });
+  }
   assert.equal(decode(fromHex('f7'), { wire: 'bindle', top: 'any', undefinedValue: true }), undefined);
   // cose stays the Bindle option: integer labels in the top-level map only, under keys 'text'
   assert.deepStrictEqual(decode(fromHex('a10100'), { ...B, cose: true }), new Map([[1, 0]]));

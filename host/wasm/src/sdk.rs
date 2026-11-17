@@ -18,7 +18,7 @@ use crate::snug::cbor::rscan::{rscan_init, rscan_need_length, rscan_need_offset,
 use crate::snug::cbor::scan::{code_name, error_offset, scan_cb, scan_options, scan_profile};
 use crate::snug::cbor::canon::dc_copy;
 use crate::snug::cbor::codes::{O_S_CBASE, VC_NONDET};
-use crate::snug::cbor::stdtags::{std_content_ok, std_inner};
+use crate::snug::cbor::stdtags::std_content_ok;
 use crate::snug::nav::walk::{nav_child, nav_dir, nav_dir_find, nav_find, nav_find_any, nav_head, nav_init, nav_skip, N_LO, N_MAJOR, N_STEPS};
 use crate::snug::program::verify::{vm_verify, vm_verify_words};
 use crate::snug::vm::api::{vm_rule_index, vm_scratch_init, vm_scratch_words, vm_validate_span_v, vm_validate_v};
@@ -959,20 +959,21 @@ impl Enc<'_> {
             }
             7 => {
                 let (hi, lo, tag) = (t[i + 1], t[i + 2], t[i + 3]);
+                let h = self.pos;
                 self.head(6, hi, lo)?;
                 let q = self.pos;
                 let j = self.item(i + 4, depth + 1)?;
                 let end = self.pos;
                 if !std_content_ok(&self.out[..end], tag, q as i32, end as i32) { return Err(ENC_TAG); }
                 if tag == 24 {
-                    let inner = std_inner(&self.out[..end], q as i32) as usize;
-                    // the payload as the decoder checks it (P8.4: with the canonical buffer, D264)
+                    // the whole tag item, as the decoder checks it (P8.4: with the canonical buffer, D264), so the
+                    // payload gets the decoder's rule (D358: well-formed only under valid unless tag24 'valid')
                     let (mut o, mut cb) = (vec![0i32; 512], vec![0u8; 1024]);
                     let c = self.scan;
                     let code = loop {
                         scan_options(&mut o, 1, c[0], c[1], c[2], c[3], c[4]);
                         scan_profile(&mut o, self.flags);
-                        let code = scan_cb(&self.out[inner..end], &mut o, &mut cb);
+                        let code = scan_cb(&self.out[h..end], &mut o, &mut cb);
                         if code != 22 { break code; }
                         grow_scan(&mut o, &mut cb);
                     };

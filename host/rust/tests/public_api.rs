@@ -630,6 +630,18 @@ fn tag24_payload_well_formed_under_valid_d358() {
     let opts = DecodeOptions { wire: strict, ..DecodeOptions::default() };
     assert_eq!(decode(&dup, &opts).unwrap_err().code(), "duplicate_key");
     assert_eq!(decode(&unhex("d81842f800"), &DecodeOptions::default()).unwrap_err().code(), "malformed");
+    // D358 amendment (P9.9 addendum, seed 7002107): encode and the Writer apply decode's tag-24 rule
+    for (h, code) in [("d81847668efb1c976081", "text"), ("d81845a201000100", "duplicate_key")] {
+        let v = decode(&unhex(h), &DecodeOptions::default()).unwrap();
+        assert_eq!(hex(&encode(&v, &EncodeOptions::default()).unwrap()), h);
+        let mut w = snug::Writer::new(&EncodeOptions::default()).unwrap();
+        w.value(&v).unwrap();
+        assert_eq!(hex(&w.finish().unwrap()), h);
+        let strict_enc = EncodeOptions { wire: strict, ..EncodeOptions::default() };
+        assert_eq!(encode(&v, &strict_enc).unwrap_err().code(), code);
+        let det = EncodeOptions { wire: Profile::DETERMINISTIC, ..EncodeOptions::default() };
+        assert_eq!(encode(&v, &det).unwrap_err().code(), code);
+    }
 }
 
 #[test]

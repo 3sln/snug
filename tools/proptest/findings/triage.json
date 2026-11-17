@@ -34,8 +34,8 @@
   "class": "environment",
   "analysis": "vmsession-test 200000 1001 4000 600 was ended after 873 s by another agent’s pkill -f vmsession-test.mjs (manager confirmed); not counted. Standalone at 3551d7a: vmsession-test 60000 1001 1200 180 ok in 1,488 s (1,841,136 session runs == vm-validate, 1,205,083 JS == Rust runs, 0 panics)."
  },
- "P2/valid-roundtrip/reencode": {
-  "class": "snug bug (fixed, D348)",
-  "analysis": "A map whose keys collide once a non-preferred bignum is its integer (a200f6c240f6) decoded under valid but encode threw a bare duplicate_key. D348 (main 3e0b613) keeps the refusal and names it: duplicate_key, subcode normalized; the property accepts exactly that refusal for a value holding a non-preferred bignum. Any other re-encode refusal is still this signature."
+ "P2/valid-roundtrip/reencode/text": {
+  "class": "snug bug (fixed, D358 amendment)",
+  "analysis": "P9.9 addendum (seed 7002107, index 27; 15 occurrences on a66224a): d81847668efb1c976081, a tag-24 payload holding invalid UTF-8, decodes under valid (D358: the payload need only be well-formed) but the JS Writer and the wasm SDK's encoder scanned the payload alone under the full profile and refused it with text. Fixed: they scan the whole tag item, so the payload gets decode's rule (well-formed under valid, a valid item with tag24 'valid' and under deterministic/Bindle); Rust's Writer already checked the whole message. Since the addendum the re-encode signature carries the refusal's code (P2/valid-roundtrip/reencode/<code>): a cause other than this one is a new signature, not this triage. History: before the addendum the signature was P2/valid-roundtrip/reencode, triaged 'fixed, D348' for the normalised-bignum key collision (a200f6c240f6), whose duplicate_key/normalized refusal the property accepts and never reports."
  }
 }
