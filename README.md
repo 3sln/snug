@@ -10,16 +10,6 @@ source into JavaScript and Rust, and a WebAssembly build comes from the Rust
 side. All three give the same verdicts, error codes and step counts for the
 same input, and the test suite checks that they do.
 
-<!-- prerelease -->
-> **Not yet on npm or crates.io.** The install commands below work from the
-> first release on. Until then,
-> [build from a checkout](https://github.com/3sln/snug/blob/main/docs/guide.md#building-from-a-checkout).
->
-> Design: [specification](https://github.com/3sln/snug/blob/main/SPEC.md),
-> [architecture](https://github.com/3sln/snug/blob/main/docs/architecture.md),
-> [Program format](https://github.com/3sln/snug/blob/main/docs/program.md).
-<!-- /prerelease -->
-
 ## Install
 
 ```sh

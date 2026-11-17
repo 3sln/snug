@@ -5,7 +5,7 @@
 //   files      nothing outside PACKAGE_FILES; every listed doc; no dangling
 //              Markdown link; no path back into the checkout; the native
 //              compiler is not in the code (the SDK compiles in wasm)
-//   metadata   name, private, MIT, no dependencies, the version site's version
+//   metadata   name, not private, MIT, no dependencies, the version site's version
 //              (the same as the native package's and SNUG_VERSION), engines
 //   wasm       the modules are the release artefacts byte for byte; the inline
 //              entry's base64 decodes to the same bytes
@@ -67,9 +67,9 @@ test('files: the allowlist, every listed document, no dangling link, nothing fro
   assert.deepEqual(shipped.filter(p => /^generated\/snug\/(compile|program)\/|^native\/(public-)?compile|^native\/compile-runtime/.test(p)), []);
 });
 
-test('metadata: name, private, licence, no dependencies, the version site, engines', async () => {
+test('metadata: name, not private, licence, no dependencies, the version site, engines', async () => {
   assert.equal(pkg.name, '@3sln/snug-wasm');
-  assert.equal(pkg.private, true); assert.equal(pkg.license, 'MIT'); assert.equal(pkg.type, 'module');
+  assert.equal(pkg.private, undefined); assert.equal(pkg.license, 'MIT'); assert.equal(pkg.type, 'module');
   assert.equal(pkg.scripts, undefined); assert.equal(pkg.dependencies, undefined); assert.equal(pkg.devDependencies, undefined);
   const native = JSON.parse(readFileSync(join(ROOT, 'host/js/package.json'), 'utf8'));
   const sdk = JSON.parse(readFileSync(join(ROOT, 'host/wasm-sdk/package.json'), 'utf8'));

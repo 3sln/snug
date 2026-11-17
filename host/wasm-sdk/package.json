@@ -5,7 +5,6 @@
   "keywords": ["cddl", "cbor", "validation", "wasm"],
   "license": "MIT",
   "repository": { "type": "git", "url": "git+https://github.com/3sln/snug.git", "directory": "host/wasm-sdk" },
-  "private": true,
   "type": "module",
   "sideEffects": false,
   "exports": {

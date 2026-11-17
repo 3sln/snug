@@ -12658,6 +12658,26 @@ can run alongside them; its build work is post-RC unless it is cheap.
     docs/release-policy.md §4 (release commit with the README pre-release
     block removed, stamp, build, owner go, publish, tags) are the owner's
     call.
+- [ ] **Release 0.1.0** (owner go, 2026-11-17, on top of the RC `0f4f480`).
+  - The owner's go, relayed by the coordinator, in the owner's words: "go
+    ahead and prep the release and drive the publish commands, I'll login
+    and approve where needed".
+  - **Roles:**
+    - the manager prepares everything up to the publish;
+    - the coordinator pushes, tags and publishes;
+    - the owner logs in to npm and crates.io.
+  - **The release commit (release-policy §4 step 3):**
+    - `private` is removed from both package.json files, and
+      `publish = false` from the crate manifest;
+    - the package tests now require them absent;
+    - CHANGELOG `[Unreleased]` becomes `[0.1.0] — 2026-11-17`;
+    - the three README pre-release blocks are removed (docs-test accepts
+      zero blocks; `bb dist` now builds);
+    - `version.edn` already holds `:version "0.1.0"`, and the version
+      sites keep the placeholder.
+  - Per the RC note's recommendation, the P9.9 full runs are not repeated:
+    the diff is manifests, package tests, CHANGELOG, READMEs and DEVLOG.
+  - The gate record, artefacts and checksums are added below as they land.
 
 **Assignment (2026-11-11):** P9.1–P9.4 go to the P8.5 VM engineer, in that
 order. P9.5 onward are scheduled as the earlier items land.

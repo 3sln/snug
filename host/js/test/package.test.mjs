@@ -21,7 +21,7 @@ const { stripTypeScriptTypes } = nodeModule;
 const pkg = JSON.parse(readFileSync(new URL('../package.json', import.meta.url)));
 
 test('public package metadata, entry points, profile status and blocked deep imports', async () => {
-  assert.equal(pkg.name, '@3sln/snug'); assert.equal(pkg.private, true); assert.equal(pkg.license, 'MIT');
+  assert.equal(pkg.name, '@3sln/snug'); assert.equal(pkg.private, undefined); assert.equal(pkg.license, 'MIT');
   assert.equal(pkg.version, compilerVersion); assert.equal(SNUG_VERSION, compilerVersion);
   assert.deepEqual(Object.keys(profiles), ['valid', 'deterministic', 'bindle']);
   assert.ok(Object.isFrozen(profiles) && Object.isFrozen(profiles.bindle) && Object.isFrozen(profiles.deterministic) && Object.isFrozen(profiles.valid));
@@ -159,7 +159,7 @@ test('self-contained staged package works away from the repository through all e
       assert.equal(run.status, 0, `${example}: ${run.stderr || run.error?.message}`);
     }
     const staged = JSON.parse(readFileSync(join(target, 'package.json')));
-    assert.equal(staged.private, true); assert.equal(staged.scripts, undefined);
+    assert.equal(staged.private, undefined); assert.equal(staged.scripts, undefined);
     await assert.rejects(buildPackage(target), { code: 'EEXIST' });
     assert.ok(readdirSync(join(target, 'generated', 'snug')).includes('vm'));
   } finally { await rm(temp, { recursive: true, force: true }); }

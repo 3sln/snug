@@ -9,7 +9,6 @@ description = "CDDL (RFC 8610) validation and CBOR (RFC 8949) encoding, decoding
 license = "MIT"
 repository = "https://github.com/3sln/snug"
 edition = "2021"
-publish = false
 readme = "README.md"
 keywords = ["cddl", "cbor", "validation", "rfc8610", "rfc8949"]
 categories = ["encoding", "parser-implementations"]
