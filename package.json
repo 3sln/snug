@@ -1,0 +1,66 @@
+{
+  "name": "@3sln/snug",
+  "version": "0.1.0",
+  "description": "CDDL (RFC 8610) validation and CBOR (RFC 8949) encoding, decoding and checked views",
+  "keywords": [
+    "cddl",
+    "cbor",
+    "validation",
+    "rfc8610",
+    "rfc8949"
+  ],
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/3sln/snug.git",
+    "directory": "host/js"
+  },
+  "type": "module",
+  "sideEffects": false,
+  "exports": {
+    ".": {
+      "types": "./types/index.d.ts",
+      "default": "./src/index.mjs"
+    },
+    "./schema": {
+      "types": "./types/schema.d.ts",
+      "default": "./src/public-schema.mjs"
+    },
+    "./compile": {
+      "types": "./types/compile.d.ts",
+      "default": "./src/public-compile.mjs"
+    },
+    "./view": {
+      "types": "./types/view.d.ts",
+      "default": "./src/public-view.mjs"
+    },
+    "./writer": {
+      "types": "./types/writer.d.ts",
+      "default": "./src/public-writer.mjs"
+    },
+    "./unicode": {
+      "types": "./types/unicode.d.ts",
+      "default": "./src/unicode-tables.mjs"
+    },
+    "./sources": {
+      "types": "./types/sources.d.ts",
+      "default": "./src/public-sources.mjs"
+    },
+    "./sequence": {
+      "types": "./types/sequence.d.ts",
+      "default": "./src/public-sequence.mjs"
+    },
+    "./controls": {
+      "types": "./types/controls.d.ts",
+      "default": "./src/controls.mjs"
+    },
+    "./abnf": {
+      "types": "./types/abnf.d.ts",
+      "default": "./src/abnf.mjs"
+    }
+  },
+  "types": "./types/index.d.ts",
+  "engines": {
+    "node": ">=20"
+  }
+}

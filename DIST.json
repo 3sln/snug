@@ -1,0 +1,15 @@
+{
+  "note": "Generated release output (docs/release-policy.md §9), not source history.",
+  "version": "0.1.0",
+  "source": "bcfd46d010740c8c11ae1fb72a0a1f644bd7e5b2",
+  "artefacts": {
+    "3sln-snug-0.1.0.tgz": "624605fc80348119b4e1b6fef85d531cfc553df1fd38de355795937ed3a4987e",
+    "snug-cbor-0.1.0.crate": "bed3798eac1a9fc4881656b40b77da5e117752d86a1e1eb40c7099d062f13a95",
+    "3sln-snug-wasm-0.1.0.tgz": "62cb7e2c9486f1348d64df9cca95e3731e9b9fefdf65fd4ccbfc7e9a657fa3c2"
+  },
+  "trees": {
+    "/": "@3sln/snug",
+    "rust": "snug-cbor",
+    "wasm-sdk": "@3sln/snug-wasm"
+  }
+}

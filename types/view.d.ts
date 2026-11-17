@@ -1,0 +1,71 @@
+import type { Value, TypedArray, Float16Bytes, Decimal, NDArray } from './index.js';
+import type { Schema, ValidationOptions, ValidationResult } from './schema.js';
+export type Kind = 'int' | 'float' | 'bytes' | 'text' | 'bool' | 'null' | 'undefined' | 'simple' |
+  'array' | 'map' | 'decimal' | 'ndarray' | 'typed' | 'tagged';
+/** Unknown keys/malformed values throw TypeError before bytes are checked or copied. */
+export interface ViewOptions extends ValidationOptions {
+  schema?: Schema; rule?: string; borrow?: boolean;
+  /** Experimental, opt-in per-container offset directories. */
+  directories?: boolean;
+}
+export declare function view(bytes: Uint8Array, options?: ViewOptions): View;
+export declare class View {
+  private constructor();
+  readonly kind: Kind;
+  readonly length: number | undefined;
+  readonly offset: number;
+  readonly depth: number;
+  readonly borrowed: boolean;
+  /** Any key the view's profile admits; non-text, non-integer keys compare by their encoding (keys 'any'). */
+  get(key: unknown): View | undefined;
+  at(index: number): View | undefined;
+  entries(): IterableIterator<[Value, View]>;
+  keys(): IterableIterator<Value>;
+  values(): IterableIterator<View>;
+  number(): number;
+  bigint(): bigint;
+  int(): number | bigint;
+  text(): string;
+  bool(): boolean;
+  isNull(): boolean;
+  isUndefined(): boolean;
+  /** A simple value's number (kind 'simple': 0..19 or 32..255). */
+  simple(): number;
+  /** A tagged item's tag number (a bigint beyond 2^53 - 1), else undefined. */
+  readonly tag: number | bigint | undefined;
+  /** A View of a tagged item's content. */
+  content(): View;
+  /** Read-only aliases by contract; JS cannot enforce that contract. */
+  bytes(): Uint8Array;
+  raw(): Uint8Array;
+  copyBytes(): Uint8Array<ArrayBuffer>;
+  typedView(): Readonly<{ tag: number; length: number; get(index: number): number | bigint }>;
+  typed(): TypedArray | Float16Bytes;
+  decimal(): Decimal;
+  ndarray(): NDArray;
+  value(): Value;
+  cursor(): Cursor;
+  validateAt(rule: string, options?: { schema?: Schema }): ValidationResult;
+}
+export declare class Cursor {
+  constructor(view: View);
+  readonly depth: number;
+  readonly offset: number;
+  readonly kind: Kind;
+  readonly length: number | undefined;
+  readonly key: Value;
+  keyIs(key: string): boolean;
+  enter(): boolean;
+  next(): boolean;
+  up(): boolean;
+  find(key: unknown): boolean;
+  number(): number;
+  bigint(): bigint;
+  int(): number | bigint;
+  text(): string;
+  bool(): boolean;
+  isNull(): boolean;
+  simple(): number;
+  view(): View;
+  value(): Value;
+}

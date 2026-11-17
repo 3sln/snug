@@ -1,0 +1,502 @@
+# CDDL support
+
+snug implements a bounded, explicit subset of RFC 8610 with RFC 9165 controls
+and RFC 9682 grammar updates. Unsupported or unprovable constructs fail at
+compile time; an accepted construct keeps its documented meaning. This is
+not a claim of complete RFC coverage. The wire profile decides which CBOR
+reaches the schema: the default valid preset (any tag) gives
+every prelude name values, while `wire: 'bindle'` makes 14 of them
+uninhabited (`undefined`, for example, is parsed from the prelude but its
+simple value is refused by the scanner; [conformance §f](https://github.com/3sln/snug/blob/main/docs/conformance.md)).
+The default byte check accepts any valid CBOR (indefinite lengths,
+non-shortest heads/floats, keys in any order; duplicates compared by value),
+validating non-deterministic input through its canonical copy;
+`wire: 'deterministic'` refuses it ([profiles](profiles.md#valid-cbor)).
+
+> **Tagged (discriminated) unions.** Map cuts follow RFC 8610 §3.5.4
+> literally by default, so `{ kind: "a", x: int // kind: "b", y: tstr }`
+> rejects `{"kind": "b", "y": "z"}`. Write a type choice of maps,
+> `{ kind: "a", x: int } / { kind: "b", y: tstr }`, or put a cut-free `=>`
+> discriminator first: `{ "kind" => "a", x: int // "kind" => "b", y: tstr }`.
+> Compile warning W8 flags the first spelling. See [cuts](#map-determinism-and-cuts) and the
+> [guide](guide.md#discriminated-unions-under-the-rfc-cut).
+
+The compiler and matcher are generated from one source for JS and Rust, so
+both hosts compile and match identically. This document describes the
+current implementation.
+
+## Grammar and types
+
+| Construct | Supported behaviour |
+| --- | --- |
+| Type/group rules, references, `/=`, `//=` | Supported; duplicate `=` definitions refused. User rules may shadow prelude names. |
+| Type choices `/`, group choices `//`, nested groups | Supported. A type choice over one item is a set test; a group choice `//` is prioritised and locks in its first successful alternative (RFC 8610 Appendix A; see [arrays](#arrays-and-repetition)). |
+| Maps `{}`, arrays `[]`, labelled members | Supported; array member names are labels, not matching constraints. |
+| Occurrence `?`, `*`, `+`, `n*m`, fixed counts | Supported within the exactness/size conditions below. |
+| Generic type/group rules and instantiation | Supported, memoised with limits; unresolved/wrong-arity uses refused. |
+| Sockets `$name`, `$$name` and extensions | Supported in `full`; an unplugged `$x` is the empty type choice and an unplugged `$$x` the empty group choice (RFC 8610 §3.9): nothing matches through them, so `{ a: int, $$x }` matches nothing until plugged, while `? $$x` matches by absence. |
+| Unwrap `~`, group enumeration `&` | Supported for applicable targets; map/enumeration recursive groups refused. |
+| Productive recursive types | Supported when recursion passes through a container/tag; depth bounded. |
+| Recursive array groups | Regular tail recursion only, e.g. `g = (int, ? g)`. |
+| Numeric, text and byte literals, ranges `..`/`...` | Exact integer comparison; numeric float comparison, prelude float widths as sets of values; hexadecimal/decimal floats and h'/b64'/byte literals supported. The integer literal `-0` (or `-0x0`) is 0; the float `-0.0` stays negative zero. |
+| Major-type syntax, tags | `#0`…`#7`, simple values `#7.n`, tag content `#6.n(T)`, and RFC 9682 §3.2 head numbers `#6.<T>(C)` and `#7.<T>`. For `#7`, a head number 0..23 or 32..255 is that simple value; 24 is every simple value 32..255 (additional information 24); 25, 26 and 27 are `float16`, `float32` and `float64` (by value); 28..31 match nothing. `T` must be an integer type; its values above 255 match nothing. `#0.n` to `#3.n` read `n` as the head's additional information (RFC 8610 §2.2.3), by value: below 24 the argument `n` itself (`#0.5` is 5, `#1.0` is −1, `#2.3` a 3-byte byte string); 24, 25, 26 and 27 an argument of 1, 2, 4 or 8 bytes (`#0.24` is 0..255, `#3.25` a text of at most 65,535 bytes); 31 an indefinite length (any byte or text string, no integer); 28..30 nothing. `#4.n` and `#5.n` are refused. Runtime profile still restricts actual tags/simple values. |
+| Appendix D prelude | Compiled from CDDL text. `biguint`, `bignint` and `bigint` match every tag 2/3 bignum, non-preferred ones included under `valid` (leading zeroes, small values; RFC 8949 §3.4.3); ranges and numeric controls compare bignums by value. Some names have no value under the current wire profile. |
+| UTF-8 schema text and escapes | Whole schema must be valid UTF-8; code-point columns, HT whitespace, Unicode escapes/surrogate pairs, RFC 9682 braced escapes, byte-literal whitespace/comments supported. |
+
+Only user non-generic **type** rules become validation roots. Productive
+recursive schema instantiation must fit the compile budget and limits;
+ever-growing generic expansion is refused rather than exhausting resources.
+
+## Controls
+
+| Controls | Meaning and limits |
+| --- | --- |
+| `.size` | Text/bytes count UTF-8/content bytes. `uint .size n` admits 0..256ⁿ−1; a range controller uses the minimal byte-length interval (lower length 0 includes zero). A negative controller value is no size: `tstr .size -1` matches nothing, and `(-2..1)` means `0..1`. On an integer type that admits negative values it is a `control_target` error. |
+| `.bits` | Permitted bit positions on uint or bstr; bstr bit n is byte n>>3, bit n&7, least significant first. Zero/all-zero masks still constrain. |
+| `.lt`, `.le`, `.gt`, `.ge` | Intersect numeric intervals; exact any-size integers; floats compare numerically (−0.0 = +0.0, so `float .lt 0.0` excludes both zeros) and NaN satisfies no ordered comparison. |
+| `.eq` | Target intersected with controller, not replacement of target; `(tstr .size 1) .eq "aa"` is empty. Composite controllers lower to AND. |
+| `.ne` | Numeric exclusion splits intervals: `float .ne 0.0` excludes both zeros and `float .ne 1.5` keeps NaN (NaN equals no number); other targets exclude a literal while retaining target constraints. Composite nonliteral controllers refused. |
+| `.and`, `.within` | Intersections, with operands evaluated as same-item dependencies; they do not create extra accepting alternatives. |
+| `.regexp` | Whole-string XSD Appendix F by default; `regexp: 'iregexp'` selects strict RFC 9485. Both compile to the same bounded code-point automata; details below. |
+| `.cbor T` | Byte content must be exactly one current-profile CBOR item matching T. |
+| `.cborseq [G]` | Byte content is a sequence matching the controller's array group, including positions/occurrences. Controller must be array types only. |
+| `.default`, `.feature` | `.feature` is an annotation, no effect on matching. `.default` carries RFC 8610 §3.8.6's implied `.ne`: a value equal to the default is left out, so present it does not match (`uint .default 1` refuses `1`). A default `.ne` cannot compare (an array, a map, a range, or a target such as `any`) is refused as that `.ne` would be. The compile option `defaultControl: 'annotation'` (Rust `DefaultControl::Annotation`) makes `.default` an annotation with no effect, as RFC 8610 Erratum 9229 proposes; that erratum's status is Reported, not verified. |
+| `.cat`, `.det` | Compile-time concatenation of two text or byte string literals, of either kind; the result has the target's type and, as text, must be valid UTF-8 (RFC 9165 §2.2); `.det` dedents each literal first (RFC 9165 §2.3: lines end at LF or CR LF, so a line of spaces before CR LF is blank). |
+| `.plus` | Compile-time addition of two integer literals, any size; float operands refused. |
+| `.abnf`, `.abnfb` | RFC 9165 §3 ABNF (RFC 5234 with RFC 7405's `%s`/`%i` strings), with the **optional module** `@3sln/snug/abnf` / `Controls::with_abnf()`; without it `unsupported_control`, naming the module. Language membership over the string's Unicode scalars (`.abnf`) or bytes (`.abnfb`), targets of either string type; metered against the budget. See [ABNF](#abnf-abnf-abnfb) below. |
+| registered `.name` | An **extension control**: `target .name argument` with `.name` registered at compile time; the target AND a host predicate over the item's encoding. The argument must be a literal: integer, text, bytes, a named simple value (`true`), a range `lo..hi` (passed as `[lo, hi]`) or an array of those. Generic ones ship in `@3sln/snug/controls` / `snug::controls`: `.chars`, `.unique`, `.samelen`. Refused under the `bus` profile unless `controlsInBus`. See the guide's "Custom controls". |
+
+The numeric controls compare values exactly across integers and floats:
+an integer target with a float controller takes the nearest integer
+inside the half-line (|x| ≥ 2⁶⁴ admits every integer or none); a float target
+with an integer controller takes the controller's binary64 value, or, when no
+binary64 holds it, the nearest binary64 inside the half-line. So `number .ge
+0`, `float .lt 1` and `int .eq 1.0` compile; `.eq` across the kinds matches
+only an exactly equal value.
+Decimal schema float literals have
+at most 17 significant digits, must be finite, and a nonzero value may not
+round to zero. Hex floats are rounded exactly, identically on every host. Unsupported
+control targets/controllers are errors rather than ignored controls.
+
+An unregistered `.name` is the schema error `unknown_control`, and the message
+names the control. Literal membership in an extension control is unknown at
+compile time, so `.eq`/`.ne`/`.and` never fold through one (they keep the AND /
+NOT), and map determinism treats it as possibly matching any key (stricter,
+never looser).
+
+Embedded checks are local predicates: `bstr .cbor uint / bstr .size (0..16)`
+can accept bytes that fail the embedded branch. An embedded failure is
+reported as `embedded` with its subcode only when it makes the outer rule
+fail. Embedded item accounting restarts; budget is shared. Physical scratch
+depth still bounds embedding. A schema querying both `.cbor` and `.cborseq`
+on the same bytes can cause separate inner walks; the work budget bounds it.
+The one-pass claim does not promise one visit across independent
+embedded interpretations.
+
+## ABNF: `.abnf`, `.abnfb`
+
+RFC 9165 §3's controls need the optional ABNF module, loaded like the Unicode
+tables: `compile(text, { controls: { ...abnf } })` with `abnf` from
+`@3sln/snug/abnf` (Rust `Controls::new().with_abnf()`, the wasm SDK's `@3sln/snug-wasm/abnf`),
+and the same registry when a stored Program is loaded. No core bundle carries
+the engine. Without the module a schema using either control is refused
+(`unsupported_control`, the message naming `@3sln/snug/abnf`), and loading a
+Program that uses them is `missing_control`. They are extension controls
+under the hood, so the `bus` profile refuses them unless
+`controlsInBus`, and an item longer than the control's `maxBytes` (65,536 by
+default; `{ ...abnf, abnf: { ...abnf.abnf, maxBytes } }`) fails with
+`control_size`.
+
+**The controller** is a text string, or a byte string that is UTF-8. Both
+can be built with `.cat` / `.det` (RFC 9165 Figures 3–5). It holds the start,
+then optionally a newline and a list of rules (RFC 9165 §3): `"date-time"
+.cat rfc3339` starts at `date-time`. The grammar is RFC 5234 §4 with RFC 7405:
+
+* rules, `=` and `=/` (incremental alternatives); continuation lines (a line
+  starting with a space or a tab); comments;
+* alternation `/`, concatenation, repetition `n`, `n*m`, `*`, `n*`, `*m`
+  (defaults 0 and infinity, RFC 5234 §3.6); groups `( )` and options `[ ]`.
+  `n*m` with m < n is valid ABNF and matches nothing;
+* char-vals `"…"` are case-insensitive, the same as `%i"…"` (RFC 7405 §2.1:
+  "having no prefix means that the string is case insensitive"); `%s"…"` is
+  case-sensitive; and num-vals are `%b` `%d` `%x`, each a value, a range
+  `%x30-39` or a concatenation `%x0D.0A`. A range whose first value is above
+  its last is valid and matches nothing;
+* rule names are case-insensitive; newlines are LF or CR LF (RFC 9165 §3).
+
+Exactly as RFC 9165 §3 says, **core rules are not imported**: `DIGIT`,
+`ALPHA` and the rest must be defined in the controller (`.cat` a shared
+block).
+
+**Strict by default.** The controller is parsed as RFC 9165 §3 frames
+RFC 5234 + RFC 7405, and nothing more: one element, then (optionally) a
+newline and RFC 5234's rule list, every line ending with a newline. A wider
+start is written as a group: `"(1*DIGIT)\nDIGIT = %x30-39\n"`. Four
+allowances are in the RFC texts themselves, so both modes accept them:
+
+1. **A newline is LF or CR LF.** RFC 9165 §3: "the syntax of ABNF itself
+   (_not_ the syntax expressed in ABNF!) is relaxed to allow a single line
+   feed as a newline: CRLF = %x0A / %x0D.0A".
+2. **No rules, or an element alone.** RFC 9165 §3: "one valid "element",
+   followed by zero or more valid "rules" separated from the element by a
+   newline".
+3. **Blank and comment-only lines** among the rules. RFC 5234 §4:
+   `rulelist = 1*( rule / (*c-wsp c-nl) )`.
+4. **A start that runs over continuation lines** inside its group or option.
+   RFC 5234 §4: `group = "(" *c-wsp alternation *c-wsp ")"` and
+   `c-wsp = WSP / (c-nl WSP)`.
+
+**The compile option `abnf: 'lenient'`** (Rust `CompileOptions { abnf:
+AbnfMode::Lenient, .. }`; the wasm SDK's `compile` takes the same option)
+also admits snug's non-RFC forms. Each only widens what is accepted, and a
+controller that strict mode accepts means the same in lenient mode:
+
+1. The start may be any alternation (`1*DIGIT`), not only one element.
+2. **A snug extension beyond RFC 9165:** a controller that begins with a rule
+   (`s = 1*DIGIT`, no start before it) starts at that first rule. No other
+   implementation is a reference here: the Rust cddl crate 0.10.7 does not
+   check `.abnf` controllers at all. It applies only where the RFC's
+   element-first reading fails to parse. An element-first controller can
+   never begin with `name =`, so no RFC-valid controller changes meaning; snug's
+   test oracle tries element-first first and agrees with snug on every
+   generated and mutated grammar.
+3. The end of the text ends the last line. RFC 5234 §4 ends every rule and
+   comment with a newline (`c-nl`).
+4. A comment may hold any character but CR and LF. RFC 5234 §4 allows only
+   `*(WSP / VCHAR)` in a comment.
+5. Whitespace may precede the start, and spaces or a comment may follow it
+   on its line. RFC 9165 §3 puts a newline directly after the element.
+6. An `=/` may come before its rule's `=`. RFC 5234 §3.3 describes "later
+   rule definitions adding to the set of alternatives". The set is the same
+   either way.
+
+Under the strict default each is refused with `control_value`, naming the
+form and the option, e.g. `(.abnf argument: the start is wider than one
+element (RFC 9165 section 3) at ABNF line 1, column 1; it needs the compile
+option abnf: 'lenient')`. The option changes which schemas compile, so it
+is in the Program's source key, as `cuts` and `controlsInBus` are (it rides
+in the registry's flags word beside `controlsInBus`), so a strict and a
+lenient compile of the same text have different keys. A loaded Program is never
+re-checked: its controllers were checked when it was compiled.
+
+Refused at compile time with `control_value`, and the message gives the place
+as ABNF line and column (`(.abnf argument: prose-val (<...>) is not supported
+at ABNF line 2, column 11)`):
+
+* **prose-val `<…>`**;
+* a syntax error;
+* an undefined rule;
+* a rule defined twice with `=` (RFC 5234 gives a second `=` no meaning;
+  §3.3's `=/` is how a rule gains alternatives), or `=/` with no `=` (§3.3:
+  `oldrule =/ additional-alternatives`);
+* groups nested deeper than 256 (a resource limit);
+* a controller that is not a string, or is not UTF-8.
+
+**The match** is ABNF's meaning: the whole string must be in the language of
+the start, with alternation as union (not first-match), repetition as a union
+over counts, left recursion and empty matches allowed. `.abnf` reads Unicode
+scalars, so a byte-string target that is not UTF-8 does not match; `.abnfb`
+reads bytes, so a num-val above `%xFF` never matches there. Case folding of
+char-vals is ASCII-only. Any non-string item fails the control.
+
+**Cost.** snug runs an Earley recognizer. The grammar is prepared once,
+when the Program is bound. Every step is charged to the validation budget
+before it is done: a symbol, an item, a duplicate check, a terminal test and
+a completion. Each kind of step is calibrated to cost no more CPU per unit
+than the VM's reference walk ([calibration](https://github.com/3sln/snug/blob/main/bench/abnf-calib.mjs)). Typical grammars cost
+a few tens of units per character. Ambiguous or right-recursive grammars cost
+more, up to O(n³). Every grammar is bounded: past the budget, or past the
+matcher's scratch cap, validation stops with `budget`. The cap is a host
+option: `abnfWith({ maxWords })`, Rust `Abnf::with_max_words`. It defaults to
+4,194,304 words (16 MiB), the PEG group arena's default, and ranges
+from 65,536 words up to the arena's hard cap of 16,777,216. A host whose first
+scratch is too small reruns the match with the size the matcher suggests. That size
+is at least double and within the cap, so a match reruns at most
+log₂(cap / first) + 1 times; the reruns cost at most twice the work and are
+not charged. One
+27-character RFC 3339 `date-time` costs about 760 units, about 28 per
+character. At that rate the default budget covers a whole item of the default
+65,536-byte bound.
+
+## Unicode regexp categories
+
+`.regexp` matches the whole text in either dialect. Opt in to Unicode
+General_Category escapes with `compile(text, { unicode: tables })`, importing
+`tables` from `@3sln/snug/unicode`. `\p{X}` selects category X and `\P{X}` its
+complement; both work inside classes, including `[\p{L}\p{Nd}_-]` and
+negated classes. Escapes are case-sensitive. Supported names are:
+
+```
+L Lu Ll Lt Lm Lo   M Mn Mc Me   N Nd Nl No
+P Pc Pd Ps Pe Pi Pf Po   Z Zs Zl Zp   S Sm Sc Sk So
+C Cc Cf Co Cn Cs
+```
+
+`Cs` is empty: surrogate code points never occur in Unicode text. `C` also
+excludes surrogates; `\P{Cs}` matches any single scalar allowed by the wire
+profile. The Bindle profile (`wire: 'bindle'`) rejects noncharacters with
+`cbor/text`, even when a category would otherwise match; the valid (default)
+and deterministic presets admit them, and they match their categories (Cn). Category aliases,
+scripts, `gc=…` spellings in CDDL and host-engine extensions are refused.
+XSD block escapes `\p{IsBasicLatin}` / `\P{Is…}` are also refused with a
+message explaining unavailable pinned Unicode block data: the pinned Node
+ICU API exposes no Block property, and the repository has no authoritative
+block-name/range input. Category tables do not supply blocks.
+
+Tables are pinned to **Unicode 16.0**, generated offline from **Node
+v24.6.0 / ICU 77.1**, and checked in for JS and Rust. The separate JS module
+is **19,377 bytes minified / 9,287 bytes gzip-9** (complete exported module;
+[method](https://github.com/3sln/snug/blob/main/bench/README.md#unicode-table-module-p73)). It is never imported
+implicitly by the compiler or runtime. Without tables, category escapes
+remain a `regexp` schema error whose message names `@3sln/snug/unicode`.
+
+Kin checks the sorted scalar-range data and charges table ingestion, lookup,
+class normalisation and atom construction against the compile budget.
+A category consumes one regexp position regardless of its range count;
+quantifiers still obey the position limit. Compiled Programs contain only
+the resulting automata and use the existing format. Unicode tables and
+version metadata are unnecessary for validation or loading stored Programs.
+The source key includes supplied table contents, so regenerating with
+another Unicode version cannot reuse a key for different category semantics.
+See the [loading example](guide.md#optional-unicode-regexp-tables).
+
+## Regexp cookbook
+
+`compile(text, { regexp: 'xsd' | 'iregexp' })` selects the dialect; **`xsd`
+is the default**, following RFC 8610 §3.8.3's reference to XSD 1.0 Part 2
+Appendix F. The corrected XSD 1.0 class grammar is used, with XML 1.0 fifth
+edition name classes and Unicode 16.0 categories; this does not implement
+XSD 1.1's relaxed escape/block-name rules. `iregexp` keeps the previous
+strict RFC 9485 admissions and refusals. Patterns valid in both have the
+same meaning: dot excludes CR/LF, `^` and `$` are ordinary characters,
+category escapes are case sensitive, and matching covers the whole text.
+There are no JS flags or slash delimiters. Use `.*` explicitly for surrounding
+text. Neither dialect supports backreferences, lookaround or `\x..` escapes.
+
+| Construct | XSD | I-Regexp | Tables needed |
+| --- | --- | --- | --- |
+| Literals, ranges/classes, negation, grouping, alternation, dot | Yes | Yes | No |
+| `?`, `*`, `+`, `{n}`, `{n,m}`, `{n,}` | Bounded expansion | Same | No |
+| `[a-z-[aeiou]]`, nested subtraction | Range-set difference; negate base before subtraction | Refused | Only if operands use categories |
+| `\s` / `\S` | TAB, LF, CR, SPACE / complement | Refused | No |
+| `\i` / `\I` | XML NameStartChar / complement | Refused | No |
+| `\c` / `\C` | XML NameChar / complement | Refused | No |
+| `\d` / `\D` | Nd / complement | Refused | `@3sln/snug/unicode` |
+| `\w` / `\W` | Complement of P/Z/C / P/Z/C | Refused | `@3sln/snug/unicode` |
+| `\p{L}` / `\P{L}` and other categories | Yes | Yes | `@3sln/snug/unicode` |
+| `\p{IsBlock}` / `\P{IsBlock}` | Explicit data-unavailable error | Refused | Pinned block data unavailable |
+
+XSD `\w` includes letters, marks, numbers and symbols (including emoji),
+but excludes underscore (`Pc`), punctuation, separators and other/control
+characters. It is different from JavaScript's `\w`. For ASCII protocols use
+explicit `[0-9]` or `[A-Za-z0-9_]` classes. XML names include colon; for a
+colon-free name, subtract it, e.g. `[\i-[:]][\c-[:]]*`. A hyphen in a
+class is literal at the beginning/end or when escaped; subtraction must be
+last in the class. It can produce an empty class, which matches no code point.
+
+These paired JavaScript strings produce identical CDDL text:
+
+```js
+const digits = 'digits = tstr .regexp "[0-9]+"';
+const digitsRaw = String.raw`digits = tstr .regexp "[0-9]+"`;
+const identifier = 'identifier = tstr .regexp "[A-Za-z][A-Za-z0-9_-]{0,15}"';
+const identifierRaw = String.raw`identifier = tstr .regexp "[A-Za-z][A-Za-z0-9_-]{0,15}"`;
+const word = 'word = tstr .regexp "[\\\\p{L}\\\\p{Nd}_-]+"';
+const wordRaw = String.raw`word = tstr .regexp "[\\p{L}\\p{Nd}_-]+"`;
+// Compile word/wordRaw with { unicode: tables } from @3sln/snug/unicode.
+```
+
+Actual CDDL text (the CDDL string parser consumes each doubled backslash):
+
+```cddl
+digits = tstr .regexp "[0-9]+"
+identifier = tstr .regexp "[A-Za-z][A-Za-z0-9_-]{0,15}"
+word = tstr .regexp "[\\p{L}\\p{Nd}_-]+"
+```
+
+`digits` accepts `123`, refuses `x123` and the empty string. `identifier`
+admits 1..16 ASCII code points with a leading letter. `word` admits Unicode
+letters/digits plus `_`/`-` and needs the explicit category tables. Regexps
+operate on code points, while text `.size` measures UTF-8 bytes.
+The position limit counts consuming automaton positions after bounded
+repetition expansion, not JS/CDDL source characters: `[0-9]` or `\p{L}`
+is one position; copies from `{n,m}` consume more. Unbounded loops reuse
+positions. Complex alternatives/classes also consume compile work/pool
+space. Exceeding the limit is `limit_regexp_positions`, never truncation.
+XSD compares decimal quantifier bounds before saturating expansion counts,
+including bounds on empty expressions. I-Regexp retains its historical
+saturation behaviour for extreme bounds on zero-position expressions;
+ordinary bounded patterns are unchanged.
+
+## Map determinism and cuts
+
+Groups follow RFC 8610 Appendix A's PEG
+semantics in maps as in arrays. There is no compile-time proof of map
+exactness: overlapping keys, cuts and group occurrences in maps compile, and
+matching decides them.
+
+- Maps are **closed**: after the group runs, every pair must have been
+  consumed (§2.1). Nothing is retried to make that happen.
+- Entries run in **source order**. A member picks pairs from the whole map
+  (§3.5.3) in a value-defined order: ascending deterministic encoding of the
+  key, so the result never depends on the wire order.
+- A member takes **every** remaining pair whose key and value match, up to
+  its maximum (greedy). A pair whose key matches but whose value does not is
+  skipped and left for later entries, unless the member is a cut.
+- There is no literal-key priority: `{ * tstr => any, a: uint }` rejects
+  `{"a": 1}`, because the wildcard runs first and takes `a`. Put wildcards
+  last: `{ a: uint, * tstr => any }`.
+- A group choice `//` is prioritised: the first alternative that succeeds is
+  locked in, even if closedness later fails. `{ (? a: int) // (b: int) }`
+  rejects `{"b": 1}` (the empty first alternative succeeds).
+- A failed repetition iteration is undone: `{ * (a: int, b: int) }` rejects
+  `{"a": 1}`.
+
+**Cuts.** `name:` and literal colon keys imply cuts; `^ =>` makes the cut explicit.
+The cut follows RFC 8610 §3.5.4 literally by default (`cuts: 'rfc'`).
+Once a cut member finds its key, that pick is locked in: if the value fails,
+"the entire map fails to match", whatever `//` alternatives or later
+entries remain; a cut that succeeds inside an alternative or an optional
+group that later fails also fails the map (commitment epochs). Its scope is
+the map: "the entire map" of §3.5.4, so a type choice of maps
+(`{…} / {…}`) is outside it.
+Consequently the discriminated-union idiom
+`{ kind: "a", x: uint // kind: "b", y: tstr }` rejects `{kind: "b", y: "z"}`;
+write `{ kind: "a", x: uint } / { kind: "b", y: tstr }` or
+`{ "kind" => "a", x: uint // "kind" => "b", y: tstr }` (see the
+[guide](guide.md#discriminated-unions-under-the-rfc-cut); compile warning W8
+flags the idiom). The alternative reading, where a failed cut kills only its
+own alternative (rule A, the reference tools' reading), is the
+non-default option `cuts: 'branch'`. Cuts on key typesets (`tstr ^=> uint`)
+and byte-string, float and beyond-64-bit colon keys (`h'00': T`) are
+supported. A cut never reaches back to entries that already ran:
+`{ * tstr => any, ? a: int }` accepts `{"a": "x"}`.
+
+## Arrays and repetition
+
+Arrays follow Appendix A directly. Entries match elements left to right; a
+group choice `//` locks in its first successful alternative, and an
+occurrence takes as many iterations as succeed and never gives any back.
+The array matches when the group consumes every element. Consequences
+that surprise readers of the set-based tools (the Ruby and Rust `cddl`
+tools accept some of these):
+
+| Schema | Data | Result | Why |
+| --- | --- | --- | --- |
+| `[* uint, uint]` | `[1, 2]` | invalid | `*` takes both; Appendix A: "`*a a` … never can match anything" |
+| `[? uint, uint]` | `[1]` | invalid | `?` takes `1`, nothing is left for the second entry |
+| `[uint // uint, uint]` | `[1, 2]` | invalid | the first alternative succeeds and is locked in; `2` is left over |
+| `[2*3 uint, uint]` | `[1, 2, 3]` | invalid | greedy: the repetition takes all three |
+
+Write the specific alternative first (`[uint, uint // uint]`) and keep a
+repetition from swallowing what a later entry needs (`[* uint, tstr]`, or
+`[uint, * uint]` for "one or more"). An iteration that succeeds without
+consuming anything ends its repetition. The `arrayPositions` and
+`pegNodes` compile limits bound the compiled groups. Left recursion is
+refused with `group_recursion`; recursion that consumes nothing is
+`nonproductive`.
+
+## Semantic notes
+
+- `uint` is CBOR major type 0 only. `int` is major 0/1. `unsigned` includes
+  tag-2 bignums and `integer` includes tag-2/3 bignums. `number` is `int / float`,
+  so it does not include decimal fractions or arbitrary bignums.
+- **Bignums: one rule.** Type names and literals select data items:
+  `uint`, `nint`, `int`, `#0`, `#1` and integer literals never match a tag 2/3
+  bignum, and `biguint`, `bignint`, `bigint` and `#6.2/3(bstr)` (however the
+  `bstr` is spelled) match every bignum, whatever its value or leading zeroes
+  (RFC 8949 §3.4.3: decoders MUST accept leading zeroes). Ranges and numeric
+  controls (`.lt` … `.ne`) compare numeric values, as §3.4.3's extended
+  generic data model does: under `valid`, `0..5`, `unsigned .le 5`,
+  `integer .le 5` and `integer .eq 1` match `2(h'01')` and `2(h'0001')`;
+  `uint .le 5` and `int .le 5` do not, because a control keeps its target's
+  data items. Map literal keys match by identity. The
+  `deterministic` and Bindle presets refuse non-preferred bignums before the
+  schema runs, so there the rule changes nothing.
+- **`float16`, `float32`, `float64` are sets of values.** As RFC 8610 §3.3 says, “"#7.25" specifies the set of values that
+  can be represented as half-precision floats; it does not mandate that these
+  values also do have to be serialized as half-precision floats”. So a float
+  matches `float16` when binary16 represents its value exactly, and `float32`
+  when binary32 does, whatever width encodes it. `float64` admits every
+  float. NaN, ±∞ and ±0 are in every width. 1.5 encoded as float16 (the
+  shortest form) now matches `float32`, and 1.5 encoded as float64 matches
+  `float16`; 1 + 2⁻²³ matches `float32` but not `float16`. They do not
+  constrain the encoded width. (The Ruby cddl gem reads them as "needs at least this width"; the cddl
+  crate ignores the width.) Under the deterministic
+  preset NaN (only `f97e00`), ±∞, −0 and integral floats are valid floats.
+  Float literals, ranges and controls compare numerically, as RFC 8610
+  §3.8.6 asks: −0.0 and +0.0 are one number (`0.0` and `-0.0` each
+  match both zeros; −0.0 is in `0.0..1.0`; `-1.0...0.0` excludes both), NaN
+  is in no range and fails `.lt .le .gt .ge .eq` but passes `.ne` of any
+  number, and +∞ is in `float .ge 1.5`. An integer literal and a float
+  literal stay distinct CBOR kinds (`1` does not match `1.0`), but the
+  numeric controls compare values across the kinds exactly: `number
+  .ge 0` admits `0`, `0.0` and `-0.0`; `int .gt 0.5` admits `1`; `float .ge
+  9007199254740993` (2⁵³ + 1, which no binary64 holds) admits 2⁵³ + 2 and
+  refuses 2⁵³; `int .eq 1.0` admits `1`. `.cat` and `.det` join a text and a
+  byte string, the result taking the target's type (RFC 9165 §2.2). The Bindle
+  profile refuses NaN, ±∞, −0 and integral floats within the safe range
+  before the schema sees them.
+- Text `.size` is UTF-8 byte length, not code-point or grapheme length.
+  Regexps operate on code points; for a code-point length use the `.chars`
+  extension control from `@3sln/snug/controls`.
+- CDDL numeric bounds are exact (integers compare as integers of any size,
+  floats by their binary64 value), never rounded JS values. Non-float
+  literal comparisons rely on the unique admitted wire encoding.
+- The wire profile, not the schema, decides which data reach the schema:
+  under the valid (default) and deterministic presets (`tags: 'any'`)
+  integer and other non-text map keys, every prelude name and every tag
+  number except 65535, 2³²−1 and 2⁶⁴−1 match valid data (those three are
+  refused; RFC 8949 §3.4 permits flagging them as errors). `tags: 'standard'` restores the former set, under which `bigfloat`,
+  `b64url`, `b64legacy`, `regexp` and `mime-message` have no values. Under
+  `wire: 'bindle'` the Bindle restrictions apply. Compiler `profile: 'full'`
+  never disables strict CBOR, and a compiled Program validates under either
+  preset ([profiles](profiles.md#cddl-and-schemas)).
+- **Validated versus opaque tags.** The profile checks the content of the
+  tags it knows, whatever the schema says: tag 0 must be an RFC 3339
+  `date-time` refined by RFC 4287 §3.3 (upper-case `T`/`Z`; second 60 only
+  when the time, converted to UTC by its offset, is 23:59:60 on the last day
+  of a month); tag 1 an integer or any float
+  (non-finite floats are discouraged by RFC 8949 §3.4.2, not invalid); tag
+  24 one well-formed item under `valid` (RFC 8949 §3.4.5.1; one valid item
+  with `tag24: 'valid'` and under `deterministic` and Bindle; `#6.24(bstr .cbor T)`
+  always asks for a valid item matching `T`); tag 32 an RFC 3986 `URI-reference` (scheme, authority
+  with IPv6/IPvFuture literals, path, query, fragment; no RFC 6874 zone
+  identifiers); tags 2/3 (byte-string content; minimal, with no leading
+  zero byte and not below 2⁶⁴, under the deterministic and Bindle presets),
+  4 (normalised decimals, a local rule, under Bindle only), 40 and the RFC
+  8746 typed arrays (whole elements); 55799 anywhere, except only at the top
+  under Bindle. Every other tag, including 5 (bigfloat), 21–23, 33–36, 1040
+  (column-major arrays) and unassigned numbers, is **opaque**: its content
+  is any valid item and a match proves nothing about its registered
+  meaning. A schema (`bigfloat`, `#6.1040([...])`) can still constrain it.
+- Profile errors outrank schema errors, except that budget exhaustion stops
+  the walk immediately. Errors never echo a data value or unnamed
+  map key. See [errors](api.md#errors).
+- A schema-choice refusal is one deterministic witness, not a preferred
+  application branch explanation. In `{ ok: true, id: uint } /
+  { ok: false, error: tstr .size (1..120) }`, `{ ok: false, id: 7 }` can report
+  `value` at `['ok']` (offset 8); the complete message fits neither branch.
+  See [validation diagnostics](guide.md#validate-hostile-bytes-without-decoding).
+
+## Refused and planned features
+
+| Construct | Current refusal / reason |
+| --- | --- |
+| `.pcre` | `unsupported_control`; a proposed alternate dialect, not a portable bounded engine. |
+| `.abnf`, `.abnfb` without `@3sln/snug/abnf` | `unsupported_control`, naming the module; with it they are supported ([ABNF](#abnf-abnf-abnfb)). |
+| ABNF prose-val `<…>`, undefined (core) rules | `control_value` with the ABNF line and column; prose has no matchable meaning, core rules are not imported (RFC 9165 §3). |
+| Unregistered controls | `unknown_control`, naming the control; register it as an extension control at compile time, e.g. `.chars`, `.unique`, `.samelen` from `@3sln/snug/controls`. |
+| Regexp `\\p{…}`/`\\P{…}` without tables | `regexp`; load `@3sln/snug/unicode` and pass `unicode: tables`. |
+| Regexp XSD shorthands/subtraction in `iregexp` mode; `\x..`, lookarounds, backreferences in either mode | `regexp`; no host regex engine/ReDoS path. |
+| Regexp XSD `\p{IsBlock}` / `\P{IsBlock}` | `regexp`; pinned block data is unavailable, even with category tables. |
+| Regexp repetition/positions beyond limits | `limit_regexp_positions`; bounded automata, no silent truncation. |
+| Left-recursive groups / recursion without progress | `group_recursion` / `nonproductive`; PEG matching needs progress to terminate. |
+| Composite `.ne`, nonliteral `.plus`/`.cat`/`.det`, float `.plus` | `control_value` or `unsupported_control`; currently exact supported folds only. A `.default` whose implied `.ne` is composite (an array, a map or a range as the default, or a target such as `any`) is refused the same way unless `defaultControl: 'annotation'`. |
+| `#4.n`, `#5.n` (an array or map head's additional information) | `major`; counting entries by head is not lowered. `#0.n` to `#3.n` are supported (see [Grammar and types](#grammar-and-types)). |
+| `.size` or `.bits` on an integer type that admits negative values (`int .size 1`, `nint .bits 3`) | `control_target`; RFC 8610 defines them on `uint` only, and snug does not narrow the target silently. |
+| JSON validation, generated host types from CDDL | Outside current scope; handwritten API declarations describe the library, not schema output types. |
+
+The compiler restriction sets `bindle` and `bus` refuse additional otherwise
+supported CDDL with `profile`; see [profiles](profiles.md). Limits and their
+codes are part of support, not optional implementation hints.

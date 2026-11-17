@@ -1,0 +1,4 @@
+# dist branch (docs/release-policy.md §9): the npm package is the root; these are other artefacts.
+/rust
+/wasm-sdk
+/DIST.json

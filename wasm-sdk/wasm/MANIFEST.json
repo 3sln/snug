@@ -1,0 +1,51 @@
+{
+  "artefact": "snug wasm modules (the @3sln/snug-wasm SDK loads them)",
+  "version": "0.1.0",
+  "commit": "bcfd46d010740c8c11ae1fb72a0a1f644bd7e5b2",
+  "dirtyInputs": [
+    "M gen/rust/snug/compile/main.rs",
+    " M host/wasm/Cargo.toml"
+  ],
+  "toolchain": {
+    "pinned": "nightly-2026-09-16",
+    "used": "nightly-2026-09-16",
+    "rustc": [
+      "rustc 1.100.0-nightly (215a8af4b 2026-09-15)",
+      "binary: rustc",
+      "commit-hash: 215a8af4bb4c106cccf6d6535f84eaae91818265",
+      "commit-date: 2026-09-15",
+      "host: aarch64-apple-darwin",
+      "release: 1.100.0-nightly",
+      "LLVM version: 23.1.1"
+    ],
+    "target": "wasm32-unknown-unknown",
+    "flags": "-Zbuild-std=std,panic_abort -Zunstable-options -Cpanic=immediate-abort"
+  },
+  "wasmOpt": "wasm-opt version 132 (version_132) (binaryen 132.0.0, bench/compare)",
+  "modules": {
+    "snug.wasm": {
+      "role": "runtime",
+      "build": "host/wasm (feature sdk), opt-level 3, LTO, one codegen unit; wasm-opt -O3 --strip-debug --strip-producers",
+      "from": ".cache/snug-wasm-sdk/snug.wasm",
+      "bytes": 326155,
+      "gzip": 132235,
+      "sha256": "df36d58e3dff6df2a185a71fff239caaef467c677879c466bc888e09e5972200",
+      "features": [
+        "bulk-memory",
+        "sign-ext"
+      ]
+    },
+    "snug-compiler.wasm": {
+      "role": "compiler",
+      "build": "host/wasm (feature compiler), opt-level \"z\", LTO, one codegen unit; wasm-opt -Oz --strip-debug --strip-producers",
+      "from": ".cache/snug-wasm-cc/snug.wasm",
+      "bytes": 151945,
+      "gzip": 69080,
+      "sha256": "86b3128abc114c07c348432773900915b21ff6397eef320b26ff7aea7da9e91d",
+      "features": [
+        "bulk-memory",
+        "sign-ext"
+      ]
+    }
+  }
+}

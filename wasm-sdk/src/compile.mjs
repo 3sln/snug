@@ -1,0 +1,121 @@
+// `snug/compile` over wasm. The compiler is its own module
+// (host/wasm/src/cc.rs, `kin/scripts/wasm-build cc`), compiled and
+// instantiated on the first call, as the native package loads its compiler
+// chunk on the first call. The Program's words and pool are copied out (the
+// public Program keeps them for its accessors) and loaded into the runtime
+// instance, where vm-verify checks them.
+//
+// The options are the native ones, checked by the
+// native validator (`profile`, `limits`, `unicode` tables from snug/unicode,
+// `controls` and `controlsInBus`); the extension-control registry rides after
+// the option words exactly as native compile.mjs builds it (ext.mjs
+// registryWords), so the Program (format 1.1 when a control is used) and its
+// SOURCE_KEY are byte-identical; a control's argument check runs here, in JS,
+// after compilation, as the native host does. SchemaError is the native public
+// class, with the native message.
+import { Program, Schema } from './schema.mjs';
+import * as rt from './runtime.mjs';
+import { toModule, compiler as slot } from './load.mjs';
+import { SchemaError } from '../native/schema-error.mjs';
+import { schemaWarnings } from '../native/schema-state.mjs';
+import { validateCompileOptions } from '../native/options.mjs';
+import { controlEntries, registryWords, programControls, programArguments } from '../native/ext.mjs';
+
+export { SchemaError };
+const PROFILES = { full: 0, bindle: 1, bus: 2 };
+const COMPILE_OPTIONS = ['schemaBytes', 'nesting', 'astNodes', 'instantiations', 'alternatives',
+  'arrayPositions', 'regexpPositions', 'width', 'poolBytes', 'totalBytes', 'compileBudget', 'depth', 'inputBytes',
+  'entries', 'items', 'bignumBytes', 'budget', 'leaves'];
+const te = new TextEncoder(), td = new TextDecoder();
+
+// The module is load.mjs's slot, which init({ compiler }) can fill too (P9.17);
+// `x` is this instance's exports, `xMod` the module they came from.
+let x = null, xMod = null;
+/** Where the compiler module comes from (a WebAssembly.Module, bytes, a Response, a URL or a path; load.mjs);
+ *  undefined: the module next to the SDK. Compiled on the next compile(). */
+export function compilerSource(s) { slot.source = s; slot.module = null; x = null; xMod = null; }
+/** Drop the compiler instance (its memory, grown by a large schema, goes with it). */
+export function releaseCompiler() { x = null; xMod = null; }
+
+async function compiler() {
+  if (!slot.module) slot.module = await toModule(slot.source ?? rt.defaultCompiler());
+  if (x && xMod === slot.module) return x;
+  x = new WebAssembly.Instance(slot.module, {}).exports; xMod = slot.module;
+  return x;
+}
+export const compilerMemoryBytes = () => (x ? x.memory.buffer.byteLength : 0);
+
+function refused(code, line, column, rule, detail) {
+  const e = new SchemaError(code, line, column, rule);
+  e.message = `CDDL schema refused: ${code}` + (line > 0 ? ` at ${line}:${column}` : '') + (rule ? ` in rule ${rule}` : '') + detail;
+  return e;
+}
+
+export async function compile(text, options = {}) {
+  validateCompileOptions(options);
+  const { profile = 'full', limits = {}, unicode, controls, controlsInBus = false, regexp = 'xsd', abnf = 'strict' } = options;
+  const entries = controlEntries(controls);
+  const bytes = typeof text === 'string' ? te.encode(text) : text;
+  if (!(bytes instanceof Uint8Array)) throw new TypeError('compile expects CDDL text.');
+  // D340: the ABNF parse mode rides in the registry flags (the source key binds it)
+  const registry = registryWords(entries, controlsInBus, abnf === 'lenient');
+  // format 2.0: options 20 (cuts), 21 (groupWords) and 22 (D359: the .default reading) precede the registry
+  const opt = new Int32Array(23 + registry.length).fill(-1);
+  opt.set(registry, 23);
+  opt[20] = options.cuts === 'branch' ? 1 : 0; // D301: 0 rfc (default), 1 branch
+  opt[22] = options.defaultControl === 'annotation' ? 1 : 0; // D359: 0 the implied .ne (default), 1 annotation
+  if (options.groupWords !== undefined) opt[21] = Math.min(options.groupWords, 0x7fffffff);
+  opt[0] = PROFILES[profile];
+  opt[19] = regexp === 'iregexp' ? 1 : 0;
+  for (const [i, k] of COMPILE_OPTIONS.entries()) if (limits[k] !== undefined) opt[i + 1] = Math.min(limits[k], 0x7fffffff);
+  const c = await compiler();
+  let P, B, warnings;
+  try {
+    const tp = c.cc_text(bytes.length);
+    new Uint8Array(c.memory.buffer, tp, bytes.length).set(bytes);
+    const op = c.cc_opt(opt.length);
+    new Int32Array(c.memory.buffer, op, opt.length).set(opt);
+    const tables = unicode ?? new Int32Array(0);
+    const up = c.cc_unicode(tables.length);
+    if (tables.length) new Int32Array(c.memory.buffer, up, tables.length).set(tables);
+    const r = c.cc_compile(bytes.length);
+    if (r !== 0) {
+      const p = c.cc_error();
+      const m = new Uint8Array(c.memory.buffer), inf = new Int32Array(c.memory.buffer, c.cc_info(), 8);
+      const code = td.decode(m.subarray(p, p + inf[0]));
+      const rl = Math.max(inf[3], 0);
+      const rule = inf[3] >= 0 ? td.decode(m.subarray(p + inf[0], p + inf[0] + rl)) : undefined;
+      const name = inf[4] >= 0 ? td.decode(m.subarray(p + inf[0] + rl, p + inf[0] + rl + inf[4])) : undefined;
+      const detail = inf[5] === 1 ? '; Unicode categories require tables from @3sln/snug/unicode'
+        : inf[5] === 2 ? '; XSD block escapes require unavailable pinned Unicode block data'
+        : inf[5] === 3 ? '; .abnf and .abnfb require the ABNF controls from @3sln/snug/abnf'
+        : code === 'unknown_control' && name !== undefined ? ` (.${name} is not a registered control)` : '';
+      c.cc_release();
+      throw refused(code, inf[1], inf[2], rule, detail);
+    }
+    const pp = c.cc_program(), bp = c.cc_pool();
+    const info = new Int32Array(c.memory.buffer, c.cc_info(), 8);
+    const words = info[0], nb = info[1];
+    P = new Int32Array(c.memory.buffer, pp, words).slice();
+    B = new Uint8Array(c.memory.buffer, bp, nb).slice();
+    // P9.16: the warnings, as the native compile's (cc_warnings: JSON text, its length in INFO[0])
+    const wp = c.cc_warnings();
+    warnings = JSON.parse(td.decode(new Uint8Array(c.memory.buffer, wp, new Int32Array(c.memory.buffer, c.cc_info(), 8)[0])));
+    c.cc_release();
+  } catch (e) {
+    if (e instanceof WebAssembly.RuntimeError || e instanceof RangeError) { x = null; xMod = null; throw new Error('snug wasm: the compiler instance trapped and was dropped', { cause: e }); }
+    throw e;
+  }
+  // D142: a registered control may check its argument once, at compile time
+  if (P[30] !== 0) {
+    const names = programControls(P, B), byName = new Map(entries.map(e => [e.name, e]));
+    for (const { id, argument } of programArguments(P, B)) {
+      const entry = byName.get(names[id]), r = entry.argument ? entry.argument(Uint8Array.from(argument), { abnf }) : true;
+      if (r !== true)
+        throw refused('control_value', 0, 0, undefined, ` (.${entry.name} argument${typeof r === 'string' ? ': ' + r : ''})`);
+    }
+  }
+  const schema = new Schema(new Program(P, B, controls === undefined ? {} : { controls }));
+  schemaWarnings.set(schema, Object.freeze(warnings.map(w => Object.freeze(w))));
+  return schema;
+}
