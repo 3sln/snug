@@ -6,6 +6,10 @@ zero-copy views for reading selected fields, and it encodes deterministic
 bytes from owned values or typed `Writer` calls. The crate has no
 dependencies.
 
+> **Experimental.** snug-cbor 0.1.0 is an early release. The API may change
+> between 0.x versions, and it has not seen production use yet.
+> [Issues and feedback](https://github.com/3sln/snug/issues) are welcome.
+
 ```sh
 cargo add snug-cbor
 ```

@@ -12662,6 +12662,15 @@ can run alongside them; its build work is post-RC unless it is cheap.
   - The owner's go, relayed by the coordinator, in the owner's words: "go
     ahead and prep the release and drive the publish commands, I'll login
     and approve where needed".
+  - **Experimental notice** (owner's request, relayed by the coordinator,
+    2026-11-17, before anything was published).
+    - Every README marks 0.1.0 as experimental: README.md,
+      host/rust/README.md and host/wasm-sdk/README.md each have a short
+      "Experimental" notice that ships (no pre-release markers).
+      docs-test accepts it unchanged.
+    - That commit replaces `0eb45c6` as the release commit. The artefacts
+      below for `0eb45c6` are superseded and kept in
+      `.cache/release-out-0eb45c6`.
   - **Roles:**
     - the manager prepares everything up to the publish;
     - the coordinator pushes, tags and publishes;
