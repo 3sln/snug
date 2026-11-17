@@ -12658,7 +12658,7 @@ can run alongside them; its build work is post-RC unless it is cheap.
     docs/release-policy.md §4 (release commit with the README pre-release
     block removed, stamp, build, owner go, publish, tags) are the owner's
     call.
-- [ ] **Release 0.1.0** (owner go, 2026-11-17, on top of the RC `0f4f480`).
+- [x] **Release 0.1.0** (owner go, 2026-11-17, on top of the RC `0f4f480`).
   - The owner's go, relayed by the coordinator, in the owner's words: "go
     ahead and prep the release and drive the publish commands, I'll login
     and approve where needed".
@@ -12740,13 +12740,45 @@ can run alongside them; its build work is post-RC unless it is cheap.
       passes again.
     - dist: commit `a8b2102a2375cb32e271251d0893e4a3175d3d91` with the tag
       `v0.1.0`, source `bcfd46d`, in a fresh `.cache/dist-repo`.
-  - **Next:**
-    - the coordinator moves the tags (`src/v0.1.0` to `bcfd46d`, `v0.1.0`
-      to the new dist commit) and publishes;
-    - the owner logs in to the registries.
-  - **Post-release nit:** the repository README's "Design" link line
-    (removed along with its pre-release block) needs a repo-only marker
-    to return.
+  - **Published 2026-11-17 (release-policy §4 step 8; manager's record,
+    from the coordinator's report).** snug 0.1.0 is out, from source
+    commit `bcfd46d`.
+
+    | Registry | Package | Check |
+    | --- | --- | --- |
+    | crates.io | `snug-cbor` 0.1.0 | index cksum `bed3798eac1a9fc4881656b40b77da5e117752d86a1e1eb40c7099d062f13a95`, the local .crate's SHA-256 |
+    | npm | `@3sln/snug` 0.1.0 | dist.integrity (sha512) equals the local tarball's (SHA-256 `624605fc80348119b4e1b6fef85d531cfc553df1fd38de355795937ed3a4987e`) |
+    | npm | `@3sln/snug-wasm` 0.1.0 | dist.integrity (sha512) equals the local tarball's (SHA-256 `62cb7e2c9486f1348d64df9cca95e3731e9b9fefdf65fd4ccbfc7e9a657fa3c2`) |
+
+    - **Who published:** the owner published both npm packages, with an
+      OTP; the coordinator published the crate.
+    - **GitHub Release:** https://github.com/3sln/snug/releases/tag/v0.1.0,
+      marked as a pre-release. It carries the three artefacts and
+      SHA256SUMS.
+    - **Tags and dist:**
+      - `src/v0.1.0` points to `bcfd46d`;
+      - `v0.1.0` and the `dist` branch point to `a8b2102`.
+      - The coordinator first pushed them for the `0eb45c6`/`ffbfceb`
+        build, then force-moved them to the experimental-notice build
+        before anything was published. No registry ever saw the
+        superseded artefacts.
+    - **Hosted runs, both green:**
+      - tag run 44177756624 on `bcfd46d`: all five shards and every
+        compat and Linux cell;
+      - push run 44177745456 on `5cd7b41`.
+    - **After the release:** CHANGELOG has a new `## [Unreleased]` section
+      above `[0.1.0]`.
+  - **Post-release plan** (coordinator, 2026-11-17):
+    1. A release workflow triggered by a `version.edn` bump on main. It
+       tests, tags and creates the GitHub Release, then publishes through
+       trusted publishing (OIDC, no stored tokens).
+    2. Consolidate the CI jobs to stay within the free plan's 5 macOS
+       jobs: one macOS release job running the shards in sequence, and one
+       compat job looping over the toolchains.
+    3. A repo-only README marker, so the "Design" link line (specification,
+       architecture, Program format) can return to the repository README
+       without shipping.
+    4. The P9.13 post-RC nits listed under P9.13.
 
 **Assignment (2026-11-11):** P9.1–P9.4 go to the P8.5 VM engineer, in that
 order. P9.5 onward are scheduled as the earlier items land.

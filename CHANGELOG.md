@@ -10,6 +10,8 @@ artefact — `[js]`, `[rust]`, `[wasm-sdk]` — when they do not apply to all;
 paths, not links, because this file ships in the npm package and the crate,
 and neither contains those files.
 
+## [Unreleased]
+
 ## [0.1.0] — 2026-11-17
 
 The first release. The **Breaking**, **Fixed** and **Security** entries
