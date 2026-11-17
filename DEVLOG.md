@@ -12716,9 +12716,33 @@ can run alongside them; its build work is post-RC unless it is cheap.
     root), with the tag `v0.1.0`, built into the scratch repository
     `.cache/dist-repo` so that no tag is written to this one. Its DIST.json
     lists the three SHA-256s.
+  - **Superseded by `bcfd46d`, the experimental notice.** The new release
+    commit is `bcfd46d`. Everything above for `0eb45c6` is kept for the
+    record in `.cache/*-0eb45c6`.
+    - Gates on `bcfd46d`: `bb gates land wasm-package-test stamp-test`,
+      all 13 ok, exit 0 (docs-test, npm-test and rust-api-test included).
+    - `bb identity` was not repeated for this README-only change. Stamping
+      does not touch the READMEs, and identity passed 11/11 on the
+      stamped `0eb45c6` tree above. A started run was stopped on the
+      coordinator's instruction.
+    - Artefacts, rebuilt from a fresh stamped worktree of `bcfd46d`. A
+      second build gave the same bytes, and the file lists match the
+      `0eb45c6` build. Each packed README shows the notice.
+
+    | Artefact | Files | SHA-256 |
+    | --- | ---: | --- |
+    | `3sln-snug-0.1.0.tgz` | 119 | `624605fc80348119b4e1b6fef85d531cfc553df1fd38de355795937ed3a4987e` |
+    | `3sln-snug-wasm-0.1.0.tgz` | 93 | `62cb7e2c9486f1348d64df9cca95e3731e9b9fefdf65fd4ccbfc7e9a657fa3c2` |
+    | `snug-cbor-0.1.0.crate` | 84 | `bed3798eac1a9fc4881656b40b77da5e117752d86a1e1eb40c7099d062f13a95` |
+
+    - The wasm modules are unchanged (snug.wasm `df36d58e…`,
+      snug-compiler.wasm `86b3128a…`). The licence and notice check
+      passes again.
+    - dist: commit `a8b2102a2375cb32e271251d0893e4a3175d3d91` with the tag
+      `v0.1.0`, source `bcfd46d`, in a fresh `.cache/dist-repo`.
   - **Next:**
-    - the coordinator pushes, tags (`src/v0.1.0` on `0eb45c6`, `v0.1.0`
-      from the dist repository) and publishes;
+    - the coordinator moves the tags (`src/v0.1.0` to `bcfd46d`, `v0.1.0`
+      to the new dist commit) and publishes;
     - the owner logs in to the registries.
   - **Post-release nit:** the repository README's "Design" link line
     (removed along with its pre-release block) needs a repo-only marker
