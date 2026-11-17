@@ -8661,6 +8661,13 @@ engineer).
 * **Regression.** The corpus suite "map cursor after a 2^31 - 1 head"
   (regressions.json) has the reviewer's input, its 2³¹−2 twin and the
   `//`-reversed schema.
+- [x] **Signed off** (manager, 2026-11-16). Merged at c2ae9c7.
+  - On p913-wp1 530b07d: the full set (land and the release-only gates),
+    all 20 ok.
+  - On the merged main cef3b29: `bb gates land runtime rust-api-test-full`,
+    all 13 ok.
+  - The fix is proven: reverting only it makes the overflow-checked arm
+    panic.
 
 ### D363 — One rule for bignums under `valid`: type names and literals select data items, ranges and numeric controls compare numeric values (RFC 8949 §3.4.3); `biguint`/`bignint`/`bigint`/`#6.2/3(bstr)` match every bignum, leading zeroes included (P9.13 WP1 SPEC-F1)
 **Decision** (P8.5 VM engineer, provisional):
@@ -8715,6 +8722,9 @@ engineer).
 * **Docs.** profiles.md (the "Values" paragraph), cddl-support.md (the
   prelude row and the semantic notes) and program.md (the INT leaf row,
   notes and failure table).
+- [x] **Signed off** (manager, 2026-11-16). Merged at c2ae9c7; gates as in
+  D362. The rfc-corpus gate caught and pinned the RFC 8610 figure 10
+  `.bits` regression.
 
 ### D358 — Under `valid` a tag-24 payload need only be well-formed (RFC 8949 §3.4.5.1); `tag24: 'valid'` asks for a valid item; `.cbor T` and the deterministic and Bindle presets are unchanged (P9.13 WP1 decision 1)
 **Decision** (coordinator-decided, P9.13 decision 1; implemented by the P8.5 VM engineer):
@@ -8851,6 +8861,12 @@ engineer).
     which the fixed tree refuses with `text`. The corpus verdicts, run
     through the VM, do not see the leak, so a JS host test now holds
     `decode` to `text` and `duplicate_key` after a payload.
+- [x] **Signed off** (manager, 2026-11-16). Merged at c2ae9c7; gates as in
+  D362.
+  - Size: within the five caps the coordinator applied under D303. After
+    the rebase over WP2, the cut pass brought snug gzip and snug/compile
+    static gzip back under their caps with no further raise.
+  - valid-test's cbor2 count deltas are traced above.
 
 ### D359 — `.default` carries RFC 8610 §3.8.6's implied `.ne` by default; `defaultControl: 'annotation'` keeps the annotation-only reading of erratum 9229 (status Reported) and is bound into the source key (P9.13 WP1 decision 2)
 **Decision** (coordinator-decided, P9.13 decision 2; implemented by the P8.5 VM engineer):
@@ -8895,6 +8911,9 @@ engineer).
     host/rust/src/compile.rs), the field `default_control` on both
     `snug::CompileOptions` (api.rs) and `compile::CompileOptions`, and
     host/wasm/src/cc.rs, which reads word 22 with the registry from word 23.
+- [x] **Signed off** (manager, 2026-11-16). Merged at c2ae9c7; gates as in
+  D362. Coordinator decision 2 is implemented as stated, with erratum
+  9229 cited as Reported.
 
 ### P9.13 WP1 should-fixes (spec review F3–F6, F12)
 * **`.det` over CR LF lines (F3).** RFC 9165 §2.3 counts a blank line's
