@@ -62,9 +62,10 @@ and neither contains those files.
 ### Fixed
 
 - `bstr .cborseq any` compiles: `any` matches every array, so the content
-  is any CBOR sequence, as `[* any]` (RFC 8610 §3.8.4). A controller type
-  that is not an array describes no sequence and matches nothing
-  (`bstr .cborseq uint`); both were `control_value` (D372).
+  is any CBOR sequence, as `[* any]` (RFC 8610 §3.8.4); it was
+  `control_value`. Every other controller type must still be an array:
+  `bstr .cborseq uint` and an AND of arrays such as
+  `[* uint] .and [2*2 any]` stay `control_value` (D372, D373).
 - An occurrence `n*m` with m < n, such as `[3*2 uint]`, compiles and
   matches nothing (RFC 8610 §3.2); it was `syntax`. The new compile
   warning W9 flags it (D372).

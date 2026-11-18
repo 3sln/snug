@@ -9798,6 +9798,23 @@ digits" comments in `host/js/src/compile.mjs` and `host/rust/src/compile.rs`.
     AND-of-arrays `.cborseq` controller should be refused rather than matching nothing; and
     `b64''` comments (RFC 9682 Appendix B.2).
 
+### D373 — A `.cborseq` controller is arrays or `any`, anything else stays `control_value`; strict lexing by default with `lexing: 'lenient'`; stale host comments (the next batch after D372)
+**Decision** (D373 engineer; work package WP-K2 from the manager; the coordinator's decisions
+of 2026-11-18 recorded under "Release 0.1.0 → The next batch", and the owner's F9 decision of
+2026-11-18 recorded under D037). Entries in CHANGELOG `[Unreleased]`.
+
+**`.cborseq` controllers (release-blocking; coordinator, 2026-11-18).**
+* **Rule** (`kin/compile/lower.kin`, `lower-ctl`): every leaf of a `.cborseq` controller must be
+  an ARRAY or `any`. `any` matches every array and stands for `[* any]` (D372, kept); any
+  other leaf is `control_value`, as in 0.1.0: a non-array type (`uint`, `tstr`), an AND of
+  arrays (`[* uint] .and [2*2 any]`, which D372 dropped to match-nothing), a tag, an EXT. So
+  the rule differs from 0.1.0 only for `any`. A controller with no leaves (an unplugged `$x`)
+  matches nothing, as before. `seq-content` drops nothing any more.
+* **Vectors** (`regressions.json`): the AND of arrays, `bstr .cborseq uint` and
+  `([uint] / tstr)` refused (`snugSchemaError: control_value`); the D372 suite keeps `any`,
+  a choice of arrays `([uint] / [tstr])` and `.cborseq any` inside an array. **Fails on
+  ec940e2**: all 3 refusal suites compiled there; 0 failing on the branch.
+
 ## Findings
 
 - 2026-11-11 (manager): **the 6½-day `scan-test.mjs 300 1` process
@@ -13571,7 +13588,7 @@ can run alongside them; its build work is post-RC unless it is cheap.
     - Hosted CI covers the rest: push CI runs land, linux and compat, and the release workflow
       runs the full set before any publish.
   - **The next batch:**
-    - [ ] **RELEASE-BLOCKING (coordinator, 2026-11-18):** an AND of arrays as a `.cborseq`
+    - [x] **RELEASE-BLOCKING (coordinator, 2026-11-18):** an AND of arrays as a `.cborseq`
       controller (e.g. `[* uint] .and [2*2 any]`) must be refused with `control_value`, as it
       was in 0.1.0. Since D372 it silently matches nothing. Main is unreleased, so it may be
       carried briefly, but it must be fixed before any `version.edn` bump.

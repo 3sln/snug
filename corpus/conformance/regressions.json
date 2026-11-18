@@ -293,8 +293,8 @@
       "cddl": "r = uint\nr = uint\n", "snugSchemaError": "duplicate_rule", "cases": []
     },
     {
-      "category": "regression", "name": "D372: .cborseq any is .cborseq [* any]; non-array controller leaves match nothing",
-      "cddl": "r = bstr .cborseq any\ns = bstr .cborseq uint\nt = bstr .cborseq ([uint] / tstr)\nu = [bstr .cborseq any, uint]\n",
+      "category": "regression", "name": "D372: .cborseq any is .cborseq [* any]",
+      "cddl": "r = bstr .cborseq any\nt = bstr .cborseq ([uint] / [tstr])\nu = [bstr .cborseq any, uint]\n",
       "cases": [
         {"rule": "r", "hex": "40", "expect": true, "note": "0.1.0 refused the schema (control_value)"},
         {"rule": "r", "hex": "420102", "expect": true},
@@ -302,15 +302,25 @@
         {"rule": "r", "hex": "41ff", "expect": false},
         {"rule": "r", "hex": "4118", "expect": false},
         {"rule": "r", "hex": "6161", "expect": false},
-        {"rule": "s", "hex": "40", "expect": false},
-        {"rule": "s", "hex": "4101", "expect": false},
         {"rule": "t", "hex": "4101", "expect": true},
+        {"rule": "t", "hex": "426161", "expect": true},
         {"rule": "t", "hex": "40", "expect": false},
         {"rule": "t", "hex": "420101", "expect": false},
-        {"rule": "t", "hex": "4161", "expect": false},
         {"rule": "u", "hex": "8242010203", "expect": true},
         {"rule": "u", "hex": "8241ff03", "expect": false}
       ]
+    },
+    {
+      "category": "regression", "name": "D373: an AND of arrays as a .cborseq controller stays control_value, as in 0.1.0",
+      "cddl": "r = bstr .cborseq ([* uint] .and [2*2 any])\n", "snugSchemaError": "control_value", "cases": []
+    },
+    {
+      "category": "regression", "name": "D373: a non-array .cborseq controller stays control_value",
+      "cddl": "r = bstr .cborseq uint\n", "snugSchemaError": "control_value", "cases": []
+    },
+    {
+      "category": "regression", "name": "D373: a .cborseq controller with an array and a non-array leaf stays control_value",
+      "cddl": "r = bstr .cborseq ([uint] / tstr)\n", "snugSchemaError": "control_value", "cases": []
     },
     {
       "category": "regression", "name": "D372: an occurrence n*m with m < n matches nothing",

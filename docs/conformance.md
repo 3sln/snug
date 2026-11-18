@@ -16,7 +16,7 @@
 > | Prelude float widths are encoded widths | sets of values | D328 |
 > | wasm SDK sequences deferred | `@3sln/snug-wasm/sequence` exists (P7.13w) | — |
 > | Decimal float literals limited to 17 significant digits (D020, D032) | up to 20, still exact on every host | D372 |
-> | `.cborseq any` refused (D040, S52) | `.cborseq [* any]`; non-array controller types match nothing | D372 |
+> | `.cborseq any` refused (D040, S52) | `.cborseq [* any]`; other non-array controller types stay refused | D372, D373 |
 >
 > The inventory totals below are the audit's and are not recomputed. `.default` (S46): since D359 (P9.13, coordinator-decided) snug applies RFC 8610 §3.8.6's implied `.ne` by default; the annotation-only reading of Erratum 9229 (status Reported, not verified) is the compile option `defaultControl: 'annotation'`. S46 is therefore **conformant** again (totals with that change: 144 conformant, 43 conformant but incomplete, 20 deliberate deviation, 9 non-conformant).
 
