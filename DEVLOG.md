@@ -13549,6 +13549,23 @@ can run alongside them; its build work is post-RC unless it is cheap.
        architecture, Program format) can return to the repository README
        without shipping.
     4. The P9.13 post-RC nits listed under P9.13.
+  - **Status, 2026-11-18 (manager).** Items 1–3 are done: D368, then D369. Item 4 was triaged
+    by the coordinator; D370, D371, D371a and D372 landed it.
+  - **The next batch:**
+    - [ ] **RELEASE-BLOCKING (coordinator, 2026-11-18):** an AND of arrays as a `.cborseq`
+      controller (e.g. `[* uint] .and [2*2 any]`) must be refused with `control_value`, as it
+      was in 0.1.0. Since D372 it silently matches nothing. Main is unreleased, so it may be
+      carried briefly, but it must be fixed before any `version.edn` bump.
+    - [ ] F9, strict lexing by default (the owner's decision of 2026-11-18, recorded under
+      D037). It is waiting on the owner's answer to a permission refusal of the kin and host
+      edits. D037 stays unsigned until it lands.
+    - [ ] Stale host comments: the warning range W1..W8 (now W9) in docs/api.md,
+      host/js/types/schema.d.ts and host/rust/src/compile.rs, and "at most 17 significant
+      digits" (now 20) in host/js/src/compile.mjs and host/rust/src/compile.rs.
+  - **Post-release nits:**
+    - `b64''` comments (RFC 9682 Appendix B.2);
+    - a `SequenceOptions` builder;
+    - SEC-F7 sizing the first compile arena from the schema's length (speed only).
 
 **Assignment (2026-11-11):** P9.1–P9.4 go to the P8.5 VM engineer, in that
 order. P9.5 onward are scheduled as the earlier items land.
