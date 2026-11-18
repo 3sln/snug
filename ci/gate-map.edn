@@ -81,8 +81,8 @@
                     :doc "host/js's node --test suite, including the version-site test (P9.15)"}
   rfc-corpus       {:cmd ["node" "corpus/tools/run-rfc-corpus.mjs" "--gate"] :caps [2400 4800]
                     :doc "no unexplained or stale RFC corpus checks"}
-  proptest         {:cmd ["bb" "proptest" "--minutes=2" "--props=1,2,3,4,5"] :caps [10800 43200]
-                    :mode "the 2-minute P1-P5 campaign on HEAD (policy §4's minimum)"}
+  proptest         {:cmd ["bb" "proptest" "--minutes=2" "--props=1,2,3,4,5" "--tree=working"] :caps [10800 43200]
+                    :mode "the 2-minute P1-P5 campaign (policy §4's minimum) on the working tree, as every gate of a set (D370), its uncommitted paths logged; findings under .cache/proptest/"}
   crate-diff       {:cmd ["bb" "crate-diff"] :caps [3600 7200]
                     :doc "differential vs the cddl crate; needs its native build (P9.8 re-runs it)"}
   regexp-diff      {:cmd ["bb" "regexp-diff"] :caps [300 600]
@@ -138,4 +138,38 @@
  ;; D368: the cells hosted CI's compat (macOS) and linux jobs each run, one after another
  ;; in one job: npm-test on these Node majors, rust-api-test on these Rust toolchains
  ;; (rust-version: host/rust/Cargo.toml's). `bb gates --check` reads ci.yml against it.
- :ci-compat {:node ["20" "22" "24"] :rust ["rust-version" "stable"]}}
+ :ci-compat {:node ["20" "22" "24"] :rust ["rust-version" "stable"]}
+
+ ;; D370 (P9.13 gates N2): the environment variables gate code reads, by what they may do to
+ ;; a gate's coverage. A gate run by `bb gates` (or ci/run-gate.sh) never sees a :clear knob:
+ ;; the runner removes it from the gate's environment and prints which it removed, so a gate
+ ;; that reports ok ran at full coverage. A gate's own command may still set one for its
+ ;; children (rust-api-test sets SNUG_ASYNC_FULL, node-oldest SNUG_NODE_OLDEST, the sh gates
+ ;; SNUG_RS_ONLY). A :floor knob relaxes a check only where a toolchain floor lacks a tool:
+ ;; the runner passes it to the named gates only on that floor (:node, the engines.node major
+ ;; of host/js/package.json; :rust, the rust-version of host/rust/Cargo.toml) and removes it
+ ;; everywhere else. `bb gates --check` refuses a workflow that sets a :clear knob, or a
+ ;; :floor knob on a step that is not one of its floor's cells. :keep knobs choose a tool,
+ ;; a cap or a diagnostic output, not how much a gate runs; they pass through. `bb gates
+ ;; --check` also refuses a SNUG_/SEQ_/VMTEST_/RUBY_/CDDL_/RFC_/PEG_ variable that gate code
+ ;; reads and this map does not classify (kin/scripts/gates, knob-problems).
+ :knobs
+ {:clear [SEQ_SLOW SEQ_DRY SEQ_HOSTONLY          ; sequence-test: diagnostics that exit early; no JS arm
+          SNUG_GEN                               ; the *-crate scripts: Rust from another gen/ tree
+          SNUG_RS_ONLY                           ; rust-crate, wasm-build: a crate of fewer modules
+          SNUG_WASM_TOOLCHAIN                    ; wasm-build, wasm-release: not the pinned nightly
+          SNUG_SCAN_WASM SNUG_VM_WASM            ; scan-test, vm-test: a module not built from this tree
+          SNUG_PARITY_MUTATIONS SNUG_PARITY_SEED SNUG_PARITY_SCHEMAS SNUG_PARITY_SEQ_MATCH ; wasm-sdk-test: parity scale, sequence filter
+          SNUG_ASYNC_CASES SNUG_ASYNC_FULL       ; rust-api-test: the async differential's scale
+          SNUG_PROPTEST_SELFTEST                 ; proptest: 0 skips its self-test
+          SNUG_WASM_RELEASE                      ; wasm-package-test: release modules from elsewhere
+          SNUG_STAMPED_VERSION]                  ; npm-test's version test: another tree's stamped version
+  :floor {SNUG_NODE_OLDEST {:gates [npm-test] :on :node
+                            :doc "host/js/test/oracle.mjs: leave out comparisons with a test-only oracle the engines Node lacks"}
+          SNUG_CLIPPY_OPTIONAL {:gates [rust-api-test] :on :rust
+                                :doc "host/rust/tests/run: no Clippy on the rust-version toolchain (D344)"}}
+  :keep [SNUG_GATE_WALL SNUG_GATE_CPU SNUG_GATE_*  ; the watchdog's caps: a cap fails a gate, never passes one
+         SNUG_WATCHDOG                             ; set by the watchdog for the gate it runs
+         SNUG_TYPESCRIPT SNUG_ESBUILD SNUG_CHROME SNUG_WORKERD SNUG_WRANGLER SNUG_NODE_OLDEST_NODE ; tool locators (CI sets some)
+         RUBY_CDDL RUBY_CDDL_GEM_HOME RFC_RUBY RFC_GEM_HOME PEG_RUBY CDDL_NATIVE ; oracle locators (corpus/tools/ORACLES.md)
+         SNUG_LINT SNUG_SHOW SNUG_FULL SNUG_DUMP SNUG_LOUD VMTEST_LOG]}} ; diagnostics: extra output only

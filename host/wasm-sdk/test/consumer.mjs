@@ -33,6 +33,7 @@ import { basename, dirname, extname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { promisify } from 'node:util';
 import { buildPackage } from '../package-build.mjs';
+import { killTree } from '../../../kin/scripts/watchdog.mjs';
 
 const ROOT = fileURLToPath(new URL('../../../', import.meta.url));
 const RELEASE = process.env.SNUG_WASM_RELEASE ?? join(ROOT, '.cache/release/wasm');
@@ -284,7 +285,7 @@ const config :Workerd.Config = ( services = [ (name = "main", worker = .w) ],
   sockets = [ (name = "http", address = "127.0.0.1:${port}", http = (), service = "main") ] );
 const w :Workerd.Worker = ( modules = [ ${mods.join(', ')} ], compatibilityDate = "2025-12-01" );
 `);
-  const proc = spawn(workerd, ['serve', join(dir, 'config.capnp')], { stdio: ['ignore', 'ignore', 'pipe'], detached: true });
+  const proc = spawn(workerd, ['serve', join(dir, 'config.capnp')], { stdio: ['ignore', 'ignore', 'pipe'] });   // the gate's group (D370)
   let err = ''; proc.stderr.on('data', d => { err += d; });
   const base = `http://127.0.0.1:${port}/`;
   try {
@@ -295,7 +296,7 @@ const w :Workerd.Worker = ( modules = [ ${mods.join(', ')} ], compatibilityDate 
     return await f(base);
   } finally {
     const exited = proc.exitCode === null ? new Promise(r => proc.once('exit', r)) : null;
-    try { process.kill(-proc.pid, 'SIGKILL'); } catch {}
+    killTree(proc.pid);
     await exited;
   }
 }
@@ -331,11 +332,11 @@ async function inChrome(chrome, project, name) {
   const profile = join(scratch, 'chrome-profile');
   const proc = spawn(chrome, ['--headless=new', `--user-data-dir=${profile}`, '--no-first-run', '--no-default-browser-check',
     '--disable-extensions', '--disable-background-networking', '--disable-component-update', '--disable-sync', '--no-pings',
-    '--disable-default-apps', base + '/'], { stdio: 'ignore', detached: true });
+    '--disable-default-apps', base + '/'], { stdio: 'ignore' });   // the gate's group: the watchdog covers Chrome (D370)
   try { return await Promise.race([result, sleep(120000).then(() => { throw new Error('no result from Chrome in 120 s'); })]); }
   finally {
-    try { process.kill(-proc.pid, 'SIGTERM'); } catch {}
-    await Promise.race([new Promise(r => proc.once('exit', r)), sleep(3000)]);
-    try { process.kill(-proc.pid, 'SIGKILL'); } catch {}
+    const tree = killTree(proc.pid, 'SIGTERM');
+    await Promise.race([new Promise(r => proc.exitCode !== null ? r() : proc.once('exit', r)), sleep(3000)]);
+    killTree(proc.pid, 'SIGKILL', tree);
   }
 }

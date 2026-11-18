@@ -103,6 +103,32 @@ export async function run(gate, cmd, rawArgs, { env = process.env, period = 1000
   return tripped ? 124 : status;
 }
 
+// D370 (P9.13 gates N9): a gate never starts a process in a group of its own (spawn's
+// `detached`): a browser or workerd it starts stays in the gate's process group, so the
+// watchdog counts its CPU and kills it with the gate (watchdog-test refuses a detached spawn
+// in gate code, but for this file's own). The gate ends such a helper itself with killTree: the process and every
+// descendant (Chrome's helpers, workerd behind its npm launcher), found by parent pid before
+// any is signalled.
+/** pid and its descendants (ps's ppid links), parents first. */
+export function processTree(pid) {
+  let out = '';
+  try { out = execFileSync('ps', ['-A', '-o', 'pid=,ppid='], { encoding: 'utf8' }); } catch { return [pid]; }
+  const kids = new Map();
+  for (const line of out.split('\n')) {
+    const [p, pp] = line.trim().split(/\s+/).map(Number);
+    if (p > 0) { if (!kids.has(pp)) kids.set(pp, []); kids.get(pp).push(p); }
+  }
+  const all = [];
+  const walk = p => { if (all.includes(p)) return; all.push(p); for (const c of kids.get(p) ?? []) walk(c); };
+  walk(pid);
+  return all;
+}
+/** Signal pid's whole tree (or the given pids); answers the pids, to signal again later. */
+export function killTree(pid, sig = 'SIGKILL', pids = processTree(pid)) {
+  for (const p of pids) { try { process.kill(p, sig); } catch {} }
+  return pids;
+}
+
 /** A node gate: re-run this process under the watchdog unless it already is (call first). */
 export function selfWatch(gate, metaUrl) {
   if (process.env.SNUG_WATCHDOG) return;

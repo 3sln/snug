@@ -12,10 +12,17 @@
 //   --tree=head|working  the tree under test (default head): head re-runs this
 //                       campaign inside a `git archive HEAD` snapshot (plus this
 //                       tools/proptest), so uncommitted work in the shared checkout
-//                       is never imported by properties 1-5 nor emitted by the gates
+//                       is never imported by properties 1-5 nor emitted by the gates;
+//                       working tests the checkout as it is, and logs and records its
+//                       uncommitted paths. The `proptest` gate (ci/gate-map.edn) runs
+//                       --tree=working, the tree every other gate of a set tests (D370).
 //   --gate-scale=K      multiply each gate's default case/mutation counts (default 10)
 //   --gates=a,b         only these gates
-//   --out=DIR           findings directory (default tools/proptest/findings)
+//   --out=DIR           findings directory (default: findings/ in this run's log directory,
+//                       .cache/proptest/<start time>/; D370). The classification is always
+//                       read from the tracked tools/proptest/findings/triage.json
+//   --refresh-findings  write the findings to the tracked tools/proptest/findings/ instead
+//                       (its P*.json and summary.json are replaced), to record a campaign
 //   --replay=P:SEED:IDX re-run one case and print its inputs and failures
 //   --seed-offset=N     where each worker starts in its share of --seeds (default: from HEAD and the UTC
 //                       date, or 0 with an explicit --seeds); logged with the flags that replay the run
@@ -43,7 +50,7 @@
 // classifies signatures; the summary carries that classification forward.
 import { Worker } from 'node:worker_threads';
 import { mkdirSync, readdirSync, rmSync, writeFileSync, readFileSync, existsSync } from 'node:fs';
-import { join } from 'node:path';
+import { join, relative } from 'node:path';
 import { cpus, totalmem } from 'node:os';
 import { execFileSync } from 'node:child_process';
 import { prepareTree, runGates, repo } from './gates.mjs';
@@ -51,7 +58,7 @@ import { selfWatch } from '../../kin/scripts/watchdog.mjs';
 selfWatch('proptest', import.meta.url);   // P9.1 caps (a long campaign: --gate-wall= / --gate-cpu=)
 
 const args = Object.fromEntries(process.argv.slice(2).map(a => { const m = /^--([a-z-]+)(?:=(.*))?$/.exec(a); if (!m) throw new Error(`bad argument ${a}`); return [m[1], m[2] ?? 'true']; }));
-const known = ['minutes', 'seeds', 'cases-per-seed', 'props', 'workers', 'timeout', 'tree', 'gate-scale', 'gates', 'out', 'replay', 'scratch', 'in-snapshot', 'log-dir', 'snapshot-of', 'inject', 'inject-slow', 'inject-exit', 'seed-offset'];
+const known = ['minutes', 'seeds', 'cases-per-seed', 'props', 'workers', 'timeout', 'tree', 'gate-scale', 'gates', 'out', 'replay', 'scratch', 'in-snapshot', 'log-dir', 'snapshot-of', 'inject', 'inject-slow', 'inject-exit', 'seed-offset', 'refresh-findings'];
 for (const k of Object.keys(args)) if (!known.includes(k)) throw new Error(`unknown option --${k}`);
 if (args['inject-slow'] !== undefined && !/^(?:validate-)?(?:wall|cpu)$/.test(args['inject-slow'])) throw new Error(`--inject-slow is wall, cpu, validate-wall or validate-cpu, not ${JSON.stringify(args['inject-slow'])}`);
 const minutes = Number(args.minutes ?? 10);
@@ -62,7 +69,13 @@ const casesPerSeed = Number(args['cases-per-seed'] ?? 250);
 const props = (args.props ?? '1,2,3,4,5,6').split(',').map(Number);
 const workersPer = { 1: 2, 2: 1, 3: 1, 4: 1, 5: 2, ...Object.fromEntries((args.workers ?? '').split(',').filter(Boolean).map(x => x.split(':').map(Number))) };
 const timeoutMs = Number(args.timeout ?? 20000);
-const outDir = args.out ?? join(repo, 'tools/proptest/findings');
+// D370: a run writes its findings under .cache (its log directory) unless told otherwise; the
+// tracked tools/proptest/findings/ changes only under --refresh-findings, and its triage.json
+// (hand-written) is what every run reads
+const trackedFindings = join(repo, 'tools/proptest/findings');
+if (args['refresh-findings'] !== undefined && args.out !== undefined) throw new Error('--refresh-findings writes tools/proptest/findings; it takes no --out');
+const logDir = args['log-dir'] ?? join(repo, '.cache/proptest', new Date().toISOString().replace(/[:.]/g, '-'));
+const outDir = args.out ?? (args['refresh-findings'] !== undefined ? trackedFindings : join(logDir, 'findings'));
 const budgetMs = minutes * 60_000;
 
 // ------------------------------------------------------------------ replay
@@ -109,11 +122,11 @@ if ((args.tree ?? 'head') === 'head' && !args['in-snapshot']) {
   const { cpSync } = await import('node:fs');
   const snap = prepareTree('head', args.scratch);
   cpSync(join(repo, 'tools/proptest'), join(snap.dir, 'tools/proptest'), { recursive: true, filter: src => !src.includes('/findings/') || src.endsWith('triage.json') });
-  const stamp = new Date().toISOString().replace(/[:.]/g, '-');
-  const rest = process.argv.slice(2).filter(a => !/^--(tree|out|log-dir|in-snapshot|snapshot-of)=/.test(a));
+  const rest = process.argv.slice(2).filter(a => !/^--(tree|out|log-dir|in-snapshot|snapshot-of)=|^--refresh-findings(=|$)/.test(a));
   console.log(`[proptest] running inside ${snap.describe} (${snap.dir})`);
+  // the snapshot's run writes this checkout's log directory and findings directory (outDir)
   const child = spawnSync(process.execPath, [join(snap.dir, 'tools/proptest/campaign.mjs'), ...rest, '--tree=working', '--in-snapshot=true',
-    `--out=${outDir}`, `--log-dir=${join(repo, '.cache/proptest', stamp)}`, `--snapshot-of=${snap.head}`], { stdio: 'inherit' });
+    `--out=${outDir}`, `--log-dir=${logDir}`, `--snapshot-of=${snap.head}`], { stdio: 'inherit' });
   snap.cleanup();
   process.exit(child.status ?? 1);
 }
@@ -121,7 +134,9 @@ if ((args.tree ?? 'head') === 'head' && !args['in-snapshot']) {
 // ------------------------------------------------------------------ run
 const started = new Date();
 const head = args['snapshot-of'] ?? execFileSync('git', ['-C', repo, 'rev-parse', 'HEAD']).toString().trim();
-const dirty = args['in-snapshot'] ? [] : execFileSync('git', ['-C', repo, 'status', '--porcelain', '--', 'kin', 'gen', 'host', 'corpus', 'bench/baseline']).toString().trim().split('\n').filter(Boolean);
+// D370 (P9.13 gates N7): the working tree's uncommitted paths are under test, so they are
+// logged and recorded (summary.json "uncommitted"); tools/proptest, the campaign itself, too
+const dirty = args['in-snapshot'] ? [] : execFileSync('git', ['-C', repo, 'status', '--porcelain', '--', 'kin', 'gen', 'host', 'corpus', 'bench/baseline', 'tools/proptest']).toString().split('\n').filter(Boolean);
 // recorded paths are repository-relative (.cache/proptest/...), never this machine's absolute ones
 const shown = p => p && p.replace(/^.*?(?=\.cache\/proptest\/)/, '');
 // P9.13 WP3 (S9): the campaign starts at a different place in the seed range each day and
@@ -132,16 +147,20 @@ const seedOffset = args['seed-offset'] !== undefined ? Number(args['seed-offset'
   : args.seeds !== undefined ? 0
   : parseInt((await import('node:crypto')).createHash('sha256').update(`${head} ${today}`).digest('hex').slice(0, 12), 16) % (seedHi - seedLo + 1);
 if (!Number.isSafeInteger(seedOffset) || seedOffset < 0) throw new Error('--seed-offset is a non-negative integer');
-const treeDescription = args['in-snapshot'] ? `git archive of HEAD ${head} (+ working tools/proptest) in a scratch snapshot` : 'the working checkout';
+const treeDescription = args['in-snapshot'] ? `git archive of HEAD ${head} (+ working tools/proptest) in a scratch snapshot`
+  : `the working checkout at HEAD ${head}${dirty.length ? ` with ${dirty.length} uncommitted path(s)` : ', clean'}`;
 mkdirSync(outDir, { recursive: true });
 for (const f of readdirSync(outDir)) if (/^P\d.*\.json$|^summary\.json$/.test(f)) rmSync(join(outDir, f));
-const logDir = args['log-dir'] ?? join(repo, '.cache/proptest', started.toISOString().replace(/[:.]/g, '-'));
 mkdirSync(logDir, { recursive: true });
-const triage = existsSync(join(outDir, 'triage.json')) ? JSON.parse(readFileSync(join(outDir, 'triage.json'), 'utf8')) : {};
+const triageFile = join(trackedFindings, 'triage.json');
+const triage = existsSync(triageFile) ? JSON.parse(readFileSync(triageFile, 'utf8')) : {};
 const log = m => { const line = `[${((Date.now() - started) / 1000).toFixed(0)}s] ${m}`; console.log(line); try { writeFileSync(join(logDir, 'campaign.log'), line + '\n', { flag: 'a' }); } catch { /* ignore */ } };
 log(`tree under test: ${treeDescription}`);
+for (const d of dirty.slice(0, 20)) log(`  uncommitted (under test): ${d}`);
+if (dirty.length > 20) log(`  ... and ${dirty.length - 20} more uncommitted path(s)`);
+log(`findings: ${relative(repo, outDir)}${outDir === trackedFindings ? ' (the tracked findings, --refresh-findings)' : ''}`);
 log(`seed offset ${seedOffset}${args['seed-offset'] === undefined && args.seeds === undefined ? ` (from HEAD ${head.slice(0, 12)} and ${today})` : ''}; replay this run with --seeds=${seedLo}..${seedHi} --seed-offset=${seedOffset}`);
-log(`P4.2 campaign: ${minutes} min, seeds ${seedLo}..${seedHi}, ${casesPerSeed} cases/seed, properties ${props.join(',')}, timeout ${timeoutMs} ms; HEAD ${head}${dirty.length ? `; uncommitted under kin/gen/host/corpus: ${dirty.length} paths (--tree=working: they are under test)` : ''}`);
+log(`P4.2 campaign: ${minutes} min, seeds ${seedLo}..${seedHi}, ${casesPerSeed} cases/seed, properties ${props.join(',')}, timeout ${timeoutMs} ms; HEAD ${head}${dirty.length ? `; uncommitted under kin/gen/host/corpus/bench/baseline/tools/proptest: ${dirty.length} paths (--tree=working: they are under test)` : ''}`);
 
 const sigs = new Map();   // sig -> {count, examples: []}
 const warns = new Map();  // sig -> {count, examples: []}: non-failing (wall-clock overruns, with the load average)
@@ -248,7 +267,7 @@ for (const [sig, s] of [...sigs].sort()) {
   findings.push({ sig, count: s.count, triage: triage[sig]?.class ?? 'untriaged', files });
 }
 const summary = {
-  campaign: 'P4.2', started: started.toISOString(), wallMs, minutes, seeds: [seedLo, seedHi], seedOffset, casesPerSeed, timeoutMs, head, uncommittedPaths: dirty.length,
+  campaign: 'P4.2', started: started.toISOString(), wallMs, minutes, seeds: [seedLo, seedHi], seedOffset, casesPerSeed, timeoutMs, head, uncommittedPaths: dirty.length, uncommitted: dirty.slice(0, 200),
   machine: { node: process.version, platform: `${process.platform} ${process.arch}`, cpus: cpus().length, cpu: cpus()[0]?.model, memGB: Math.round(totalmem() / 2 ** 30) },
   properties: Object.fromEntries(Object.entries(perProp).map(([p, x]) => [p, { workers: x.workers, cases: x.stats.cases ?? 0, stats: x.stats, failures: x.failures, hangs: x.hangs, workerCrashes: x.crashes }])),
   gates: gateResults.map(r => ({ gate: r.gate, round: r.round, seed: r.seed, args: r.args, exit: r.exit, signal: r.signal, seconds: Math.round(r.ms / 1000), fails: r.fails, summary: r.summary })),

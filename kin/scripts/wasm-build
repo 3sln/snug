@@ -58,7 +58,9 @@ sysroot=$("$rustc" --print sysroot)
 if [ ! -d "$sysroot/lib/rustlib/wasm32-unknown-unknown/lib" ]; then echo "SKIP wasm -- $tc lacks wasm32-unknown-unknown" >&2; exit 3; fi
 if [ ! -d "$sysroot/lib/rustlib/src/rust/library" ]; then echo "SKIP wasm -- $tc lacks rust-src (needed for -Zbuild-std)" >&2; exit 3; fi
 SNUG_RS_ONLY="${SNUG_RS_ONLY:-$only}" ./kin/scripts/rust-crate "$crate" host/wasm/src host/wasm/Cargo.toml
-case "$mode" in cc*) for f in compile sha256; do cmp -s "host/rust/src/$f.rs" "$crate/src/$f.rs" 2>/dev/null || cp "host/rust/src/$f.rs" "$crate/src/$f.rs"; done ;; esac
+# (cp -p: rust-crate removes these, which host/wasm/src lacks, D370; the source's own mtime
+# keeps cargo's build fresh when they come back unchanged)
+case "$mode" in cc*) for f in compile sha256; do cmp -s "host/rust/src/$f.rs" "$crate/src/$f.rs" 2>/dev/null || cp -p "host/rust/src/$f.rs" "$crate/src/$f.rs"; done ;; esac
 lld="$sysroot/lib/rustlib/$("$rustc" -vV | sed -n 's/^host: //p')/bin/rust-lld"
 wrap="$crate/lld.sh"
 printf '#!/bin/sh\nDYLD_LIBRARY_PATH=%s/lib exec %s "$@"\n' "$sysroot" "$lld" > "$wrap.new"
@@ -71,13 +73,13 @@ cmp -s "$wrap.new" "$wrap" 2>/dev/null || { mv "$wrap.new" "$wrap"; chmod +x "$w
 out="$crate/target/wasm32-unknown-unknown/$profile/snug_wasm.wasm"
 if [ -n "$optflags" ]; then
   shipped="$crate/snug.wasm"
-  # rerun only when cargo's output or the flags changed
-  stamp="$crate/snug.wasm.flags"; want="$optflags $(cksum < "$out")"
+  # rerun only when cargo's output, the flags or wasm-opt changed: the stamp records all of
+  # them, wasm-opt by its --version and its binaryen package version (D370)
+  flags="$optflags --strip-debug --strip-producers --enable-bulk-memory --enable-sign-ext --enable-mutable-globals --enable-nontrapping-float-to-int --enable-multivalue --enable-reference-types"
+  optversion="$(node "$wasmopt" --version) (binaryen $(sed -n 's/^ *"version": *"\([^"]*\)".*/\1/p' "$(dirname "$wasmopt")/../package.json" | head -1))"
+  stamp="$crate/snug.wasm.flags"; want="$flags; $optversion; $(cksum < "$out")"
   if [ ! -f "$shipped" ] || [ "$(cat "$stamp" 2>/dev/null)" != "$want" ]; then
-    node "$wasmopt" $optflags --strip-debug --strip-producers \
-      --enable-bulk-memory --enable-sign-ext --enable-mutable-globals \
-      --enable-nontrapping-float-to-int --enable-multivalue --enable-reference-types \
-      "$out" -o "$shipped.new" >&2
+    node "$wasmopt" $flags "$out" -o "$shipped.new" >&2
     mv "$shipped.new" "$shipped"; printf '%s' "$want" > "$stamp"
   fi
   out="$shipped"

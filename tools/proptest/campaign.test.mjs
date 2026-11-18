@@ -6,7 +6,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
-import { mkdirSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync } from 'node:fs';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -69,6 +69,23 @@ test('a property whose workers exit is recorded as P<n>/worker-exit and P<n>/no-
   assert.equal(r.status, 1, r.stdout);
   assert.ok(r.summary.findings.some(f => f.sig === 'P4/worker-exit'), JSON.stringify(r.summary.findings));
   assert.ok(r.summary.findings.some(f => f.sig === 'P4/no-cases'), JSON.stringify(r.summary.findings));
+});
+
+// D370: without --out a run writes its findings in its log directory; the tracked findings stay as they are
+test('a run without --out leaves tools/proptest/findings alone and writes findings/ in its log directory', () => {
+  const tracked = join(repo, 'tools/proptest/findings');
+  const snapshot = () => readdirSync(tracked).sort().map(f => `${f} ${statSync(join(tracked, f)).mtimeMs} ${readFileSync(join(tracked, f), 'utf8').length}`).join('\n');
+  const before = snapshot();
+  mkdirSync(join(repo, '.cache'), { recursive: true });
+  const dir = mkdtempSync(join(repo, '.cache', 'proptest-selftest-'));
+  try {
+    const r = spawnSync(process.execPath, [campaign, '--tree=working', `--log-dir=${join(dir, 'log')}`, '--minutes=0.05', '--props=4', '--workers=4:1'],
+      { encoding: 'utf8', env: { ...process.env, SNUG_WATCHDOG: '1', SNUG_PROPTEST_SELFTEST: '0' } });
+    const summary = JSON.parse(readFileSync(join(dir, 'log', 'findings', 'summary.json'), 'utf8'));
+    assert.ok(summary.properties[4].cases > 0, r.stdout + r.stderr);
+    assert.match(r.stdout, /findings: \.cache\/proptest-selftest-[^/]+\/log\/findings/);
+    assert.equal(snapshot(), before, 'tools/proptest/findings changed');
+  } finally { rmSync(dir, { recursive: true, force: true }); }
 });
 
 // P9.13 WP3 (S9): the start in the seed range moves with HEAD and the date, is logged, and replays
