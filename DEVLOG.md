@@ -9480,7 +9480,9 @@ restored afterwards.
   - **Fix, abd76e6:** the script re-runs itself under bash when `$BASH_VERSION` is empty.
   - Checked under /bin/dash, sh and bash. A missing host dir still fails under dash, and the
     package test passes.
-  - CI run 44409924904 was started on abd76e6.
+  - Push CI run 44409924904 on abd76e6 is green: land, linux and compat; release skipped as
+    designed; the `ci` aggregate passed. On the failing run 44408392052 (ec940e2), land and
+    compat passed and only linux failed.
   - **Lesson:** a script started with `sh` must stay POSIX, or be checked against dash
     (/bin/dash on this machine) before landing. Engineer briefs now say so.
 
