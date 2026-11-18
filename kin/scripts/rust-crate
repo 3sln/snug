@@ -18,7 +18,11 @@
 # gen/rust/snug (default: all), so a sibling work item's unfinished modules
 # cannot break this item's gates.
 set -e
-set -o pipefail   # D370: a failing find (or put) in a pipeline fails the assembly
+# D370: a failing find (or put) in a pipeline fails the assembly. pipefail is
+# not in every sh (Debian's dash lacks it), so `sh rust-crate` re-runs under
+# bash rather than lose it.
+[ -n "$BASH_VERSION" ] || exec bash "$0" "$@"
+set -o pipefail
 cd "$(dirname "$0")/../.."
 dir="$1"; host="${2:-host/rust/src}"; manifest="${3:-host/rust/Cargo.toml}"
 # The full host now exposes navigation and encoding alongside the legacy APIs.
