@@ -9324,7 +9324,11 @@ format](…/docs/program.md)", absolute `https://github.com/3sln/snug/blob/main/
   `bb wasm-package-test` ok (package test, consumer smoke: Node loaders, workerd, wrangler
   dry run, Chrome); `bb stamp-test` ok. At ea9744a (the docs-test label change only):
   `bb docs-test` ok (0 pre-release blocks, 1 repo-only block) and `bb gates --check` ok.
-- [ ] **Signed off** (manager)
+- [x] **Signed off** (manager, 2026-11-18). Merged at the p-d369 merge on a300574, the
+  same tree as the branch. docs-test on the merged main is ok, with 1 repo-only block.
+  - The README's Design line is restored for repository readers and never ships.
+  - The strip, the docs-test rules and the package tests each failed under mutation.
+  - The release set runs once for the whole follow-up batch.
 
 ## Findings
 
