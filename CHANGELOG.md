@@ -30,11 +30,13 @@ and neither contains those files.
 - `[rust]` `SourceError::TooLarge` is removed, and with it
   `Error::Source("too_large")`. A blob of 2³¹ bytes or more now gets the
   verdict `cbor/too_large` at offset 0, unread, as a smaller blob over the
-  input limit does. `[js]` `[wasm-sdk]` The same for a handle:
-  `validateHandle` and `validateHandleSync` answer that verdict, and
-  `scanHandle` and `scanHandleSync` throw `SnugFault` `too_large`; they
-  threw `TypeError`. `openSession(schema, rule, length)` still refuses such
-  a length with `TypeError` (D371).
+  input limit does. `[js]` `[wasm-sdk]` The same for a handle, and for a
+  push source's declared length: `validateHandle`, `validateHandleSync` and
+  `pushValidator(schema, length, …)` answer that verdict, and `scanHandle`,
+  `scanHandleSync` and `pushScanner(length)` throw `SnugFault` `too_large`
+  (a push source at its first step, as one of 2³¹ − 1 bytes over the limit);
+  they threw `TypeError`. `openSession(schema, rule, length)` still refuses
+  such a length with `TypeError` (D371, D371a).
 
 ### Budget and limits
 

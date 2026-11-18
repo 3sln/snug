@@ -856,6 +856,38 @@ test('P9.13: failed streams and push sources free their sessions (CODE-S3); a vo
 
 // D371 (S4): view() and View.validateAt take only a Schema of their own package: an object with a Schema's methods
 // (and, for the SDK, a real `program` and a lying ruleIndex) is the same TypeError as natively, and never asked.
+// D371a: pushScanner / pushValidator with a declared length of 2^31 or more answer as natively (the first step
+// too_large at offset 0; finalize still wants every declared byte), as one of 2^31-1 bytes does; they threw a
+// TypeError for the length.
+test('D371a: a push source of a declared length of 2^31 or more is too_large at offset 0, as natively', async () => {
+  const ws = await wcompile('r = bstr'), ns = await ncompile('r = bstr');
+  const base = WSRC.sessionLimits().live;
+  const script = p => {
+    const b = Uint8Array.of(0x41, 0x00);
+    return [outcome(() => p.feed(new Uint8Array(0))), outcome(() => p.feed(b)), outcome(() => p.resume()), outcome(() => p.finalize())];
+  };
+  const t = tally('push sources of 2^31 bytes or more');
+  for (const o of [{}, { maxBytes: 2 ** 31 - 1 }, { wire: 'valid' }]) {
+    for (const size of [2 ** 31, 2 ** 53 - 1]) {
+      const label = `${size} ${JSON.stringify(o)}`;
+      const wv = script(WSRC.pushValidator(ws, size, 'r', o));
+      t.same(`pushValidator ${label}`, wv, script(NSRC.pushValidator(ns, size, 'r', o)));
+      t.same(`pushValidator ${label} == 2^31-1`, wv.slice(0, 3), script(WSRC.pushValidator(ws, 2 ** 31 - 1, 'r', o)).slice(0, 3));
+      assert.deepEqual(wv[1], { ok: { state: 'done', result: { ok: false, reason: 'cbor/too_large', path: [], offset: 0 } } }, label);
+      const wp = script(WSRC.pushScanner(size, o));
+      t.same(`pushScanner ${label}`, wp, script(NSRC.pushScanner(size, o)));
+      assert.equal(wp[1].code, 'too_large', label);
+      t.same(`resume first ${label}`, outcome(() => WSRC.pushValidator(ws, size, 'r', o).resume()),
+        outcome(() => NSRC.pushValidator(ns, size, 'r', o).resume()));
+    }
+  }
+  for (const [label, f] of [['unknown rule', lib => lib.pushValidator(lib === WSRC ? ws : ns, 2 ** 31, 'nope')],
+    ['bad option', lib => lib.pushScanner(2 ** 31, { maxDepth: 257 })], ['not a safe integer', lib => lib.pushScanner(2 ** 60)]])
+    t.same(label, outcome(() => f(WSRC)), outcome(() => f(NSRC)));
+  t.done();
+  assert.equal(WSRC.sessionLimits().live, base);
+});
+
 test('D371: a fake schema object is a TypeError for view() and View.validateAt, as natively', async () => {
   const ws = await wcompile('r = uint'), ns = await ncompile('r = uint');
   let asked = 0;

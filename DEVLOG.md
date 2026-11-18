@@ -9596,6 +9596,8 @@ Entries in CHANGELOG `[Unreleased]` (Breaking, Budget and limits, Fixed, Securit
   153,564 / 69,851).
 * **Miri not run:** no local toolchain has the `miri` component (`rustup component list
   --installed` on all 13); not downloaded, per the work package.
+* Soundness evidence: code review plus a mutation of the re-entry guard; Miri not run (no local
+  toolchain has the component).
 
 **S4 `[js]` `[wasm-sdk]` — a view's schema** (Security).
 * **Fix.** `view()` and `View.validateAt` throw `TypeError('snug view: the schema option must
@@ -9650,6 +9652,39 @@ Entries in CHANGELOG `[Unreleased]` (Breaking, Budget and limits, Fixed, Securit
   like `openSession`).
 * Rust users of `SequenceOptions { .. }` literals must move to field assignment; a builder
   (`SequenceOptions::default().with_...`) would be friendlier, if wanted.
+
+**D371a — a push source's declared length of 2³¹ or more** (follow-up, the manager's work
+package, approved by the coordinator; settles the first Open item above).
+* **Change** `[js]` `[wasm-sdk]`. `pushValidator(schema, length, ...)` and `pushScanner(length)`
+  with a declared length of 2³¹ or more (a safe integer) open their session for 0 bytes, so the
+  schema, rule and options are checked as before, then close it. The source answers as one of
+  2³¹ − 1 bytes over the limit does: an empty feed is `need`; the first non-empty feed, or
+  `resume()`, is the validator's `{ state: 'done', result: cbor/too_large at offset 0 }` and the
+  scanner's `SnugFault` `too_large`; `finalize()` still wants every declared byte
+  (`length_mismatch`). Natively the closed session is replaced by a one-step stand-in in
+  `pushSession`; the SDK, whose `pushSession` writes into the session's linear-memory window,
+  gets a small `tooLargePush` with the same answers. `openSession` and `ScanSession` keep their
+  `TypeError`, and so does a length that is no safe integer. Rust has no public declared-length
+  push source (`schema::Session` is the hidden low-level API, as `openSession`). The CHANGELOG
+  Breaking N5 entry and docs/api.md cover both handles and declared lengths.
+* **Size.** The first form put `snug/sources` at 184,168 min bytes (cap 183,997). Two
+  behaviour-preserving helpers bring it to 183,984: `fed`/`mismatch` for the push sources' four
+  `length_mismatch` and two `feed` refusals (same messages), and `vmDrive` for the two schema
+  handle drivers' shared part (the SDK already had one). No cap edited.
+* **Regressions.** `host/js/test/sources.test.mjs` `D371a: ...`: for 2³¹ and 2⁵³ − 1 under three
+  option sets, the validator's empty feed, feed and resume equal the 2³¹ − 1 source's, its
+  finalize is a `SourceError`, the scanner's feed is `SnugFault` `too_large`, a fresh validator's
+  `resume()` answers at once; unknown rule, bad option and an unsafe length stay `TypeError`.
+  The SDK parity test `D371a: ...`: the same scripts, 27/27 wasm == native, equal to the
+  2³¹ − 1 source's, live sessions back at baseline.
+* **Fails without the change** (main 9b383d4's `sources.mjs`): the JS test FAILED and the SDK
+  test FAILED, both on `TypeError: ... length must be an integer in 0..2^31-1`.
+* **Gates** (main 9b383d4 plus this change): `bb gates land wasm-package-test wasm-size`: all 13
+  ok, exit 0 (npm-test 1521/1521; wasm-sdk-test 31/31; size snug/sources 183,984; wasm-size
+  sdk-runtime 327,443, compiler 152,060, both unchanged); `bb gates --check` ok (the local
+  `../kin` warning as before).
+* [ ] **D371a signed off** (manager).
+
 - [x] **Signed off** (manager, 2026-11-18). Merged on 7b808fa. docs-test is ok on the merged
   main.
   - Every fix has a regression that failed on main's code.

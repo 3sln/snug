@@ -256,7 +256,34 @@ function checkRead(chunk, offset, length) {
  *  sized by the length), freed unread, and the answer is too_large at offset 0, as natively. */
 function checkHandle(handle) {
   if (!handle || !Number.isSafeInteger(handle.size) || handle.size < 0 || typeof handle.read !== 'function') throw new TypeError('a handle is {size, read(offset, length)}.');
-  return handle.size > I32_MAX ? 0 : handle.size;
+  return huge(handle.size) ? 0 : handle.size;
+}
+// D371, D371a: a handle size or declared length past every limit, and the answer it gets
+const huge = n => Number.isSafeInteger(n) && n > I32_MAX;
+const TOO_LARGE = () => ({ ok: false, reason: 'cbor/too_large', path: [], offset: 0 });
+
+/** D371a: a push source of a declared length of 2^31 or more, as natively. Its session (opened for 0
+ *  bytes, so every argument is checked) is freed, and the source answers as an over-limit one of
+ *  2^31-1 bytes does: its first step (a non-empty feed, resume, or finalize once every declared byte
+ *  was delivered) is too_large at offset 0, through `settle` (scanResult for a scanner). */
+function tooLargePush(session, length, settle) {
+  session.free();
+  let delivered = 0, want = null;
+  const step = () => (want ??= { state: 'done', result: settle(TOO_LARGE()) });
+  return {
+    feed(chunk) {
+      if (!(chunk instanceof Uint8Array)) throw new TypeError('feed expects a Uint8Array.');
+      if (delivered + chunk.length > length) throw new SourceError('length_mismatch', 'More bytes were pushed than the declared length.');
+      delivered += chunk.length;
+      return want || chunk.length ? step() : { state: 'need' };
+    },
+    resume: step,
+    close() {},
+    finalize() {
+      if (delivered !== length) throw new SourceError('length_mismatch', `The source delivered ${delivered} of ${length} declared bytes.`);
+      return step().result ?? true;
+    },
+  };
 }
 
 /** settle: the answer of a validation result (scanResult for a scan; none: the result itself). */
@@ -264,7 +291,7 @@ function* driveSession(session, handle, chunk, settle) {
   let base = 0, window = new Uint8Array(0);
   let want = { state: 'need', offset: 0, length: Math.min(chunk, handle.size) };
   try {
-    if (handle.size > I32_MAX) { const r = { ok: false, reason: 'cbor/too_large', path: [], offset: 0 }; return settle ? settle(r) : r; }
+    if (huge(handle.size)) { const r = TOO_LARGE(); return settle ? settle(r) : r; }
     for (;;) {
       if (want.state !== 'done') {
         const at = want.state === 'need' ? want.offset : want.position;
@@ -369,7 +396,8 @@ export function validateHandleSync(schema, handle, rule, options = {}, opts = {}
 
 export function pushScanner(length, options = {}, scheduling = {}) {
   if (length === undefined) return pushUnknown(scanUnknown(options, scheduling), scheduling, scanResult);
-  const session = scanSession(length, options, scheduling);
+  const session = scanSession(huge(length) ? 0 : length, options, scheduling);
+  if (huge(length)) return tooLargePush(session, length, scanResult);
   return pushSession(session, length, want => session.scanning ? want.keep : Math.min(want.state === 'need' ? want.offset : want.position, session.position()));
 }
 export function pushValidator(schema, length, rule, options = {}, scheduling = {}) {
@@ -379,7 +407,9 @@ export function pushValidator(schema, length, rule, options = {}, scheduling = {
   if (length === undefined) return pushUnknown(PublicSession.host(openSession(schema, rule, undefined, options, sessionScheduling)), scheduling, r => r);
   // failFast only changes an unknown-length message; a declared length is read whole either way (as
   // pushScanner, the handle drivers and Rust's SourceOptions), so it is accepted and has no effect (P9.13)
-  return pushSession(PublicSession.host(openSession(schema, rule, length, options, sessionScheduling)), length, want => want.keep);
+  const session = PublicSession.host(openSession(schema, rule, huge(length) ? 0 : length, options, sessionScheduling));
+  if (huge(length)) return tooLargePush(session, length, r => r);
+  return pushSession(session, length, want => want.keep);
 }
 
 // ---------------------------------------------------------------- unknown length (D085, D173)
