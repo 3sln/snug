@@ -32,7 +32,7 @@ put() { mkdir -p "$(dirname "$2")"; cmp -s "$1" "$2" 2>/dev/null || cp "$1" "$2"
 puttext() { tmp=$(mktemp); printf '%s' "$1" > "$tmp"; put "$tmp" "$2"; rm -f "$tmp"; }
 put "$manifest" "$dir/Cargo.toml"
 if [ "$manifest" = host/rust/Cargo.toml ]; then put host/rust/build.rs "$dir/build.rs"; fi
-# The README without its pre-release block (GitHub only; kin/scripts/prerelease.mjs, D366)
+# The README without its pre-release and repo-only blocks (GitHub only; kin/scripts/prerelease.mjs, D366, D369)
 readme=$(mktemp); node kin/scripts/prerelease.mjs strip host/rust/README.md "$readme"; put "$readme" "$dir/README.md"; rm -f "$readme"
 for f in LICENSE THIRD_PARTY_NOTICES.md SECURITY.md CHANGELOG.md; do put "$f" "$dir/$f"; done
 (cd "$host" && find . -type f -name '*.rs') | while read -r f; do put "$host/$f" "$dir/src/$f"; done

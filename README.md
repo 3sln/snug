@@ -180,6 +180,10 @@ The [guide](docs/guide.md) covers TypeScript, browser and Workers setup.
 - [Release policy](https://github.com/3sln/snug/blob/main/docs/release-policy.md): versioning and what counts as breaking
 - [Changelog](CHANGELOG.md)
 
+<!-- repo-only -->
+Design: [specification](https://github.com/3sln/snug/blob/main/SPEC.md), [architecture](https://github.com/3sln/snug/blob/main/docs/architecture.md), [Program format](https://github.com/3sln/snug/blob/main/docs/program.md).
+<!-- /repo-only -->
+
 ## Security
 
 Report vulnerabilities privately to contact+security@3sln.com. See

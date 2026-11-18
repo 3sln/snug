@@ -99,10 +99,12 @@ function main(o) {
   for (const readme of READMES) {
     const text = run('git', ['-C', o.sourceRepo, 'show', `${src}:${readme}`], { allowFail: true });
     if (text === null) continue;
+    // Repo-only blocks (D369) are permanent and do not stop a release; the artefacts are stripped.
     const { blocks, problems } = prereleaseBlocks(text);
-    if (blocks.length || problems.length)
+    if (blocks.length)
       fail(`${src.slice(0, 12)}:${readme} still has its ${OPEN} block: remove it in the release commit ` +
         `(docs/release-policy.md §4, the bump) before building the dist for ${version}`);
+    if (problems.length) fail(`${src.slice(0, 12)}:${readme}:${problems[0][0]}: ${problems[0][1]}`);
   }
 
   // The tree.

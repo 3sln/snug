@@ -22,7 +22,7 @@ import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { buildPackage, PACKAGE_FILES, packageAllows } from '../package-build.mjs';
 import { readRelease } from '../../../kin/scripts/wasm-release.mjs';
-import { stripPrerelease } from '../../../kin/scripts/prerelease.mjs';
+import { MARKER_LIKE, repoOnlyLines, stripShipped } from '../../../kin/scripts/prerelease.mjs';
 import { oracleMissing } from '../../js/test/oracle.mjs';
 
 // Node 22.13+ (P9.18, D344): on the oldest supported Node the parse check is left out, only under SNUG_NODE_OLDEST=1
@@ -47,10 +47,12 @@ test('files: the allowlist, every listed document, no dangling link, nothing fro
   for (const name of PACKAGE_FILES.root) assert.ok(shipped.includes(name), name);
   for (const d of PACKAGE_FILES.docs) assert.ok(shipped.includes('docs/' + d), d);
   for (const w of PACKAGE_FILES.wasm) assert.ok(shipped.includes('wasm/' + w), w);
-  // the README ships without the repository copy's pre-release block (D366)
+  // the README ships without the repository copy's pre-release and repo-only blocks (D366, D369)
   const readme = readFileSync(join(target, 'README.md'), 'utf8');
-  assert.ok(!/<!--\s*\/?\s*prerelease\s*-->/i.test(readme), 'the packed README carries a pre-release marker');
-  assert.equal(readme, stripPrerelease(readFileSync(new URL('../README.md', import.meta.url), 'utf8')));
+  const source = readFileSync(new URL('../README.md', import.meta.url), 'utf8');
+  assert.ok(!MARKER_LIKE.test(readme), 'the packed README carries a pre-release or repo-only marker');
+  for (const line of repoOnlyLines(source)) assert.ok(!readme.includes(line), `the packed README carries repo-only text: ${line}`);
+  assert.equal(readme, stripShipped(source));
   assert.ok(!shipped.some(p => /(^|\/)(DEVLOG|SPEC)\.md$|^bench\/|^corpus\/|^tools\/|^docs\/reviews\/|package-build|\.test\.mjs$/.test(p)));
   for (const md of shipped.filter(p => p.endsWith('.md')))
     for (const [, href] of readFileSync(join(target, md), 'utf8').matchAll(/\]\(([^)\s#]+)(?:#[^)\s]*)?\)/g))

@@ -9,7 +9,7 @@ import { oracleMissing } from './oracle.mjs';
 import { spawnSync } from 'node:child_process';
 import { buildPackage, PACKAGE_FILES, packageAllows } from '../src/package-build.mjs';
 import { SNUG_VERSION } from '../src/version.mjs';
-import { stripPrerelease } from '../../../kin/scripts/prerelease.mjs';
+import { MARKER_LIKE, repoOnlyLines, stripShipped } from '../../../kin/scripts/prerelease.mjs';
 import { SNUG_VERSION as compilerVersion } from '../src/compile.mjs';
 import { compile, SchemaError } from '@3sln/snug/compile';
 import { validate, decode as schemaDecode, validateAt } from '@3sln/snug/schema';
@@ -112,10 +112,13 @@ test('self-contained staged package works away from the repository through all e
       .map(e => join(e.parentPath ?? e.path, e.name).slice(target.length + 1).split(sep).join('/'));
     assert.deepEqual(shipped.filter(p => !packageAllows(p)), [], 'files outside the package allowlist');
     for (const d of PACKAGE_FILES.docs) assert.ok(shipped.includes('docs/' + d), d);
-    // D366: the README ships without the repository copy's pre-release block
+    // D366, D369: the README ships without the repository copy's pre-release and repo-only blocks
     const readme = readFileSync(join(target, 'README.md'), 'utf8');
-    assert.ok(!/<!--\s*\/?\s*prerelease\s*-->/i.test(readme), 'the packed README carries a pre-release marker');
-    assert.equal(readme, stripPrerelease(readFileSync(new URL('../../../README.md', import.meta.url), 'utf8')));
+    const source = readFileSync(new URL('../../../README.md', import.meta.url), 'utf8');
+    assert.ok(!MARKER_LIKE.test(readme), 'the packed README carries a pre-release or repo-only marker');
+    for (const line of repoOnlyLines(source)) assert.ok(!readme.includes(line), `the packed README carries repo-only text: ${line}`);
+    assert.ok(!readme.includes('Design: [specification]'), 'the packed README carries the repo-only design links');
+    assert.equal(readme, stripShipped(source));
     assert.ok(!shipped.some(p => /(^|\/)(DEVLOG|SPEC)\.md$|^bench\/|^docs\/reviews\//.test(p)));
     for (const md of shipped.filter(p => p.endsWith('.md')))
       for (const [, href] of readFileSync(join(target, md), 'utf8').matchAll(/\]\(([^)\s#]+)(?:#[^)\s]*)?\)/g))
@@ -165,15 +168,17 @@ test('self-contained staged package works away from the repository through all e
   } finally { await rm(temp, { recursive: true, force: true }); }
 });
 
-test('the assembled crate\'s README is the repository copy without its pre-release block (D366)', async () => {
+test('the assembled crate\'s README is the repository copy without its pre-release and repo-only blocks (D366, D369)', async () => {
   const temp = await mkdtemp(join(tmpdir(), 'snug-crate-readme-'));
   try {
     const repo = new URL('../../../', import.meta.url).pathname;
     const r = spawnSync('sh', ['kin/scripts/rust-crate', join(temp, 'crate')], { cwd: repo, encoding: 'utf8', timeout: 60000 });
     assert.equal(r.status, 0, r.stderr);
     const readme = readFileSync(join(temp, 'crate', 'README.md'), 'utf8');
-    assert.ok(!/<!--\s*\/?\s*prerelease\s*-->/i.test(readme), 'the crate README carries a pre-release marker');
-    assert.equal(readme, stripPrerelease(readFileSync(join(repo, 'host/rust/README.md'), 'utf8')));
+    const source = readFileSync(join(repo, 'host/rust/README.md'), 'utf8');
+    assert.ok(!MARKER_LIKE.test(readme), 'the crate README carries a pre-release or repo-only marker');
+    for (const line of repoOnlyLines(source)) assert.ok(!readme.includes(line), `the crate README carries repo-only text: ${line}`);
+    assert.equal(readme, stripShipped(source));
   } finally { await rm(temp, { recursive: true, force: true }); }
 });
 
