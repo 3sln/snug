@@ -19,14 +19,35 @@ struct State {
     result: Option<Result<Compiled, SchemaError>>,
     info: [i32; 8],
 }
-struct Cell(UnsafeCell<Option<State>>);
-// wasm32-unknown-unknown is single-threaded and the host never re-enters.
-unsafe impl Sync for Cell {}
-static STATE: Cell = Cell(UnsafeCell::new(None));
+struct StateCell {
+    state: UnsafeCell<Option<State>>,
+    /// An export is running with the state (`with_state`).
+    busy: std::cell::Cell<bool>,
+}
+// wasm32-unknown-unknown is single-threaded; `with_state` refuses a nested entry.
+unsafe impl Sync for StateCell {}
+static STATE: StateCell = StateCell { state: UnsafeCell::new(None), busy: std::cell::Cell::new(false) };
 
-fn st() -> &'static mut State {
-    // SAFETY: single-threaded; each export holds it only for its own duration.
-    let s = unsafe { &mut *STATE.0.get() };
+/// D371 (as sdk.rs): run `f` with the module's state, the only place a `&mut State` is made,
+/// for `f`'s duration only. The module has no imports, so nothing can enter twice; a nested
+/// entry would abort (a trap) rather than alias the state. (No unwinding: the module is built
+/// with panic=abort, so `busy` is always cleared on return.)
+fn with_state<R>(f: impl FnOnce(&mut State) -> R) -> R {
+    let s = enter();
+    // SAFETY: `enter` set `busy`, so this is the only reference to the state until it is cleared.
+    let r = f(unsafe { &mut *s });
+    STATE.busy.set(false);
+    r
+}
+/// Mark the state entered (a nested entry aborts) and make it on first use; not generic, so every
+/// export shares it.
+#[inline(never)]
+fn enter() -> *mut State {
+    if STATE.busy.replace(true) {
+        std::process::abort();
+    }
+    // SAFETY: single-threaded, and `busy` is now set: no other reference to the state exists.
+    let s = unsafe { &mut *STATE.state.get() };
     s.get_or_insert_with(|| State { text: Vec::new(), opt: vec![-1; 20], unicode: Vec::new(), result: None, info: [0; 8] })
 }
 
@@ -40,36 +61,41 @@ impl Registry for Words<'_> {
 /// The schema text buffer, at least n bytes.
 #[no_mangle]
 pub extern "C" fn cc_text(n: usize) -> *mut u8 {
-    let s = st();
-    if s.text.len() < n { s.text.resize(n, 0); }
-    s.text.as_mut_ptr()
+    with_state(|s| {
+        if s.text.len() < n { s.text.resize(n, 0); }
+        s.text.as_mut_ptr()
+    })
 }
 /// The option words, n >= 20 of them: [profile, then the 18 limits in
 /// COMPILE_OPTIONS order, -1 = default, then the registry words (D141)].
 #[no_mangle]
 pub extern "C" fn cc_opt(n: usize) -> *mut i32 {
-    let s = st();
-    s.opt.clear();
-    s.opt.resize(n.max(20), -1);
-    s.opt.as_mut_ptr()
+    with_state(|s| {
+        s.opt.clear();
+        s.opt.resize(n.max(20), -1);
+        s.opt.as_mut_ptr()
+    })
 }
 /// The Unicode table words (D110), n of them (0: none).
 #[no_mangle]
 pub extern "C" fn cc_unicode(n: usize) -> *mut i32 {
-    let s = st();
-    s.unicode.clear();
-    s.unicode.resize(n, 0);
-    s.unicode.as_mut_ptr()
+    with_state(|s| {
+        s.unicode.clear();
+        s.unicode.resize(n, 0);
+        s.unicode.as_mut_ptr()
+    })
 }
 #[no_mangle]
 pub extern "C" fn cc_info() -> *mut i32 {
-    st().info.as_mut_ptr()
+    with_state(|s| s.info.as_mut_ptr())
 }
 /// Compile text[0..n): 0, or 1 for a SchemaError. Then cc_program/cc_pool
 /// (lengths in INFO[0], INFO[1]) or cc_error.
 #[no_mangle]
 pub extern "C" fn cc_compile(n: usize) -> i32 {
-    let s = st();
+    with_state(|s| compile_in(s, n))
+}
+fn compile_in(s: &mut State, n: usize) -> i32 {
     let registry = Words(s.opt.get(23..).unwrap_or(&[]));
     let options = CompileOptions {
         profile: s.opt[0],
@@ -92,15 +118,14 @@ pub extern "C" fn cc_compile(n: usize) -> i32 {
 }
 #[no_mangle]
 pub extern "C" fn cc_program() -> *const i32 {
-    let s = st();
-    match &s.result {
+    with_state(|s| match &s.result {
         Some(Ok(c)) => { s.info[0] = c.program.len() as i32; s.info[1] = c.pool.len() as i32; c.program.as_ptr() }
         _ => std::ptr::null(),
-    }
+    })
 }
 #[no_mangle]
 pub extern "C" fn cc_pool() -> *const u8 {
-    match &st().result { Some(Ok(c)) => c.pool.as_ptr(), _ => std::ptr::null() }
+    with_state(|s| match &s.result { Some(Ok(c)) => c.pool.as_ptr(), _ => std::ptr::null() })
 }
 /// The error: a buffer holding the code name, the rule name, then the detail
 /// (D141: an unknown control's name). INFO: code length, line, column, rule
@@ -108,7 +133,9 @@ pub extern "C" fn cc_pool() -> *const u8 {
 /// (2 block data, 3 the ABNF controls, D334).
 #[no_mangle]
 pub extern "C" fn cc_error() -> *const u8 {
-    let s = st();
+    with_state(error_in)
+}
+fn error_in(s: &mut State) -> *const u8 {
     let mut buf = Vec::new();
     if let Some(Err(e)) = &s.result {
         buf.extend_from_slice(e.code.as_bytes());
@@ -133,10 +160,11 @@ pub extern "C" fn cc_error() -> *const u8 {
 /// Drop the last result and the text buffer.
 #[no_mangle]
 pub extern "C" fn cc_release() {
-    let s = st();
-    s.result = None;
-    s.text = Vec::new();
-    s.unicode = Vec::new();
+    with_state(|s| {
+        s.result = None;
+        s.text = Vec::new();
+        s.unicode = Vec::new();
+    })
 }
 /// P9.16: the last successful compile's warnings as JSON text, `[{"code", "rule"
 /// (null for none), "line", "column", "message"}]` in the native order; its length
@@ -180,39 +208,40 @@ pub extern "C" fn cc_warnings() -> *const u8 {
             out.push(b as char);
         }
     }
-    let s = st();
-    let mut j = String::from("[");
-    if let Some(Ok(c)) = &s.result {
-        for (i, w) in c.warnings.iter().enumerate() {
-            if i > 0 {
-                j.push(',');
+    with_state(|s| {
+        let mut j = String::from("[");
+        if let Some(Ok(c)) = &s.result {
+            for (i, w) in c.warnings.iter().enumerate() {
+                if i > 0 {
+                    j.push(',');
+                }
+                j.push_str("{\"code\":");
+                js(&mut j, w.code);
+                j.push_str(",\"rule\":");
+                match &w.rule {
+                    Some(r) => js(&mut j, r),
+                    None => j.push_str("null"),
+                }
+                j.push_str(",\"line\":");
+                int(&mut j, w.line);
+                j.push_str(",\"column\":");
+                int(&mut j, w.column);
+                j.push_str(",\"message\":");
+                js(&mut j, w.message);
+                j.push('}');
             }
-            j.push_str("{\"code\":");
-            js(&mut j, w.code);
-            j.push_str(",\"rule\":");
-            match &w.rule {
-                Some(r) => js(&mut j, r),
-                None => j.push_str("null"),
-            }
-            j.push_str(",\"line\":");
-            int(&mut j, w.line);
-            j.push_str(",\"column\":");
-            int(&mut j, w.column);
-            j.push_str(",\"message\":");
-            js(&mut j, w.message);
-            j.push('}');
         }
-    }
-    j.push(']');
-    s.text.clear();
-    s.text.extend_from_slice(j.as_bytes());
-    s.info[0] = s.text.len() as i32;
-    s.text.as_ptr()
+        j.push(']');
+        s.text.clear();
+        s.text.extend_from_slice(j.as_bytes());
+        s.info[0] = s.text.len() as i32;
+        s.text.as_ptr()
+    })
 }
 /// kin's snug version string; its length in INFO[0].
 #[no_mangle]
 pub extern "C" fn cc_version() -> *const u8 {
     let v = snug_version();
-    st().info[0] = v.len() as i32;
+    with_state(|s| s.info[0] = v.len() as i32);
     v.as_ptr()
 }

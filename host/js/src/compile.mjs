@@ -158,7 +158,9 @@ function checkArguments(program, pool, entries, context) {
   }
 }
 
-/** Compile budget units the last compile() spent (benchmarks, fuzz tests). */
+/** Compile budget units the last compile()'s last attempt spent (benchmarks, fuzz tests). An arena
+ *  restart starts a fresh attempt with a fresh budget, so a compile that restarted spent more than
+ *  this in all: up to (restarts + 1) x compileBudget. */
 export function lastBudgetUsed() { return budgetUsed(arena); }
 
 /** The rule names of a Program, in RULES order (a rule's index is its position). */

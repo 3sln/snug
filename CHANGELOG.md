@@ -12,6 +12,60 @@ and neither contains those files.
 
 ## [Unreleased]
 
+### Breaking
+
+- `[rust]` `SequenceOptions` is `#[non_exhaustive]`: build it from
+  `SequenceOptions::default()` and set its fields; a struct literal, even
+  with `..SequenceOptions::default()`, no longer compiles outside the crate.
+  It has a new field, `quantum`: work units between yields for
+  `read_sequence_async` and `Schema::read_sequence_async`, which answer
+  `Pending` (after waking themselves) once per yield, inside a long message
+  too. The sync readers (`read_sequence`, `Schema::read_sequence`,
+  `Sequence`) never yield, and refuse a nonzero quantum with
+  `Error::Usage("options")`, as JS's `sequenceReader` refuses one (D371).
+- `[rust]` `Sequence::feed` and `Sequence::finish` after the sequence has
+  ended (`finish`, or a refusal that stops it) answer one
+  `Error::Usage("ended")`; they answered nothing. JS and the wasm SDK throw
+  `TypeError` there already (D371).
+- `[rust]` `SourceError::TooLarge` is removed, and with it
+  `Error::Source("too_large")`. A blob of 2³¹ bytes or more now gets the
+  verdict `cbor/too_large` at offset 0, unread, as a smaller blob over the
+  input limit does. `[js]` `[wasm-sdk]` The same for a handle:
+  `validateHandle` and `validateHandleSync` answer that verdict, and
+  `scanHandle` and `scanHandleSync` throw `SnugFault` `too_large`; they
+  threw `TypeError`. `openSession(schema, rule, length)` still refuses such
+  a length with `TypeError` (D371).
+
+### Budget and limits
+
+- Documented: under `wire: 'valid'` a validation call can do up to about
+  twice its budget's work, plus passes linear in the input, and one compile
+  can do up to (restarts + 1) × `compileBudget` (at most 9×, usually under
+  2×). Size budgets for both (D371).
+
+### Fixed
+
+- `[wasm-sdk]` A session or sequence reader closed by an extension
+  predicate from inside its own step is freed when the step ends, and that
+  step answers `TypeError` ("closed during its step"), as natively. Before,
+  the close met the instance's guard and threw, and a predicate that caught
+  that left the session live: the reader counted as ended, so nothing freed
+  it until garbage collection. A reader whose close throws is no longer
+  marked ended, so a later close still frees it (D371).
+- `[wasm-sdk]` The runtime module no longer makes two mutable references
+  to its state at once (navigation lookups read the key buffer while
+  holding the navigation words); an export called while another runs now
+  traps, which the SDK reports as `InstanceLost`. No verdict changes (D371).
+
+### Security
+
+- `[js]` `[wasm-sdk]` `view(bytes, { schema, rule })` and
+  `View.validateAt(rule, { schema })` take only a Schema made by the same
+  package; any other object is a `TypeError`. An object with a Schema's
+  methods passed the options check: the JS view trusted its answer, so one
+  that answered `ok` opened a View of bytes nothing had checked, and the
+  wasm SDK's let it choose the rule the bytes were checked against (D371).
+
 ## [0.1.0] — 2026-11-17
 
 The first release. The **Breaking**, **Fixed** and **Security** entries

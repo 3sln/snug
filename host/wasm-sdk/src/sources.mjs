@@ -58,11 +58,16 @@ class WasmSession {
   constructor(h) {
     if (h === -3) throw sessionLimitFault();
     if (h < 0) throw new Error(`snug wasm: session refused (${h})`);
-    this.h = h; this.gen = rt.generation; this.wp = 0; this.wcap = 0; this.done = false;
+    this.h = h; this.gen = rt.generation; this.wp = 0; this.wcap = 0; this.done = false; this.stepping = false;
     this.token = {}; sessions.register(this, { h, gen: this.gen }, this.token);
     this.lastWindow = null; this.lastLen = -1; this.lastBase = -1;
   }
-  free() { if (this.h >= 0) { if (this.gen === rt.generation) rt.x.sdk_ses_free(this.h); sessions.unregister(this.token); this.h = -1; } }
+  // D371 (the native D347): freed from inside its own step (an extension predicate closing it), the
+  // session keeps its state until the step has left the instance; the step then frees it
+  free() {
+    if (this.stepping) return;
+    if (this.h >= 0) { if (this.gen === rt.generation) rt.x.sdk_ses_free(this.h); sessions.unregister(this.token); this.h = -1; }
+  }
   live() { if (this.h < 0 || this.gen !== rt.generation) throw new Error('snug wasm: the session is finished or its instance was reset'); }
   /** The window buffer, at least n bytes (contents kept): its pointer. */
   window(n) {
@@ -80,8 +85,10 @@ class WasmSession {
   raw(n, base) {
     this.live();
     let r;
+    this.stepping = true;
     try { r = rt.withExt(this.ext ?? null, () => rt.x.sdk_ses_step(this.h, n, base)); }
     catch (e) { this.h = -1; rt.lost(e); }
+    finally { this.stepping = false; }
     rt.refresh();   // a step may grow memory (key arena copies, the EXT window): re-derive the views first
     return r;
   }
@@ -150,6 +157,8 @@ class VmSession extends WasmSession {
     const r = this.raw(n, base);
     // a predicate that threw voids the session (its walk went on with a false verdict)
     try { rethrow(this.ext); } catch (e) { this.dead = e; this.free(); throw e; }
+    // closed during the step (D371, as native D347): freed now, and the step has no answer
+    if (this.closed) { this.free(); throw new TypeError('snug: the session was closed during its step'); }
     if (r === VMS_NEED) return { state: 'need', offset: this.info(0), length: this.info(1), keep: this.info(3) };
     if (r === VMS_YIELD) return { state: 'yield', position: this.info(2), keep: this.info(3) };
     if (r === VMS_HELD) return { state: 'held', result: this.inner.result() };
@@ -242,14 +251,20 @@ function checkRead(chunk, offset, length) {
   if (chunk.length !== length) throw new SourceError('short_read', `A handle read at ${offset} gave ${chunk.length} of ${length} bytes.`);
   return chunk;
 }
+/** The length a handle's session is opened for. D371: a handle of 2^31 bytes or more is larger than
+ *  every limit allows: its session is opened for 0 bytes (the checks of any handle, no allocation
+ *  sized by the length), freed unread, and the answer is too_large at offset 0, as natively. */
 function checkHandle(handle) {
   if (!handle || !Number.isSafeInteger(handle.size) || handle.size < 0 || typeof handle.read !== 'function') throw new TypeError('a handle is {size, read(offset, length)}.');
+  return handle.size > I32_MAX ? 0 : handle.size;
 }
 
-function* driveSession(session, handle, chunk) {
+/** settle: the answer of a validation result (scanResult for a scan; none: the result itself). */
+function* driveSession(session, handle, chunk, settle) {
   let base = 0, window = new Uint8Array(0);
   let want = { state: 'need', offset: 0, length: Math.min(chunk, handle.size) };
   try {
+    if (handle.size > I32_MAX) { const r = { ok: false, reason: 'cbor/too_large', path: [], offset: 0 }; return settle ? settle(r) : r; }
     for (;;) {
       if (want.state !== 'done') {
         const at = want.state === 'need' ? want.offset : want.position;
@@ -338,15 +353,13 @@ function scanDrive(handle, options, opts) {
   validateOptions(options, 'decode');
   validateOptions(opts, 'source');
   const { chunk = 65536, quantum = 0 } = opts;
-  checkHandle(handle);
-  return driveSession(scanSession(handle.size, options, { quantum }), handle, chunk);
+  return driveSession(scanSession(checkHandle(handle), options, { quantum }), handle, chunk, scanResult);
 }
 function vmDrive(schema, handle, rule, options, opts) {
   validateOptions(options, 'validation');
   validateOptions(opts, 'source');
   const { chunk = 65536, quantum = 0 } = opts;
-  checkHandle(handle);
-  return driveSession(PublicSession.host(openSession(schema, rule, handle.size, options, { quantum })), handle, chunk);
+  return driveSession(PublicSession.host(openSession(schema, rule, checkHandle(handle), options, { quantum })), handle, chunk);
 }
 
 export async function scanHandle(handle, options = {}, opts = {}) { return runAsync(scanDrive(handle, options, opts)); }

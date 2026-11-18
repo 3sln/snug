@@ -12,5 +12,11 @@ for mode in sdk cc; do
   if [ "$status" -eq 3 ]; then echo "SKIP bb wasm-sdk-test -- the wasm toolchain or wasm-opt is missing (kin/scripts/wasm-build $mode); parity NOT run"; exit 0; fi
   if [ "$status" -ne 0 ]; then echo "FAIL kin/scripts/wasm-build $mode exited $status"; exit "$status"; fi
 done
+# D371: the runtime's host-side Rust tests (its exports' state access), on the crate the sdk build
+# assembled; one thread, as the module's state is the one instance's
+if ! out=$(cd .cache/snug-wasm-sdk && cargo test --offline --quiet --features sdk --lib -- --test-threads=1 2>&1); then
+  echo "FAIL host/wasm/src/sdk.rs host-side tests:"; printf '%s\n' "$out" | sed 's/^/    /'; exit 1
+fi
+echo "  ok   host/wasm/src/sdk.rs host-side tests: $(printf '%s\n' "$out" | grep -E '^test result:' | head -1)"
 SNUG_PARITY_MUTATIONS="${1:-20000}" SNUG_PARITY_SEED="${2:-1}" SNUG_PARITY_SCHEMAS="${3:-400}" \
   exec node --test --test-reporter=spec host/wasm-sdk/test/parity.test.mjs

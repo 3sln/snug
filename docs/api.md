@@ -230,6 +230,12 @@ There is no public effective-limits object. See the [operational limits
 reference](guide.md#limits), including root/item accounting. Malformed or
 unknown options reject with TypeError before compilation.
 
+`compileBudget` bounds one compile attempt. When the compiler's working
+memory runs out, it grows that memory and starts again with a fresh budget,
+so one `compile` can do up to (restarts + 1) × `compileBudget` units of work:
+at most 9×, and usually under 2×. Size `compileBudget` with that in mind if
+you compile untrusted schemas.
+
 `SchemaError` extends Error: constructor
 `(code, line = 0, column = 0, rule?)`, fields `code`, `line`, `column`,
 `rule`. The compiler supplies positions in code points and safe schema
@@ -345,7 +351,12 @@ a `value` refusal a cut decided: a key matched a cut member (`name:` or
 ([discriminated unions](guide.md#discriminated-unions-under-the-rfc-cut)).
 
 `ValidationOptions` extends DecodeOptions with `maxBignumBytes` and `budget`.
-Per-call schema limits only lower compiled limits. SpanOptions adds
+Per-call schema limits only lower compiled limits. `budget` counts the
+schema walk's work units. Under `wire: 'valid'` a call can do up to about
+twice the budget's work, plus passes over the input that are linear in its
+size: when the first walk meets an encoding only valid CBOR allows, or runs
+out of budget, a second walk with its own budget runs over the input's
+canonical copy. Size budgets for that. SpanOptions adds
 `depth?: number` and `items?: number`, both defaulting to 0.
 A failure is one deterministic witness, not a full
 error list or necessarily the application's intended branch explanation.
@@ -403,7 +414,9 @@ in a worker/process. See the [worked isolation recipe](guide.md#programs-caching
 `view(bytes: Uint8Array, options?: ViewOptions): View` checks before opening.
 ViewOptions extends ValidationOptions with `schema?`, `rule?`, `borrow?`
 (false), `directories?` (false, experimental). A schema requires its rule.
-The default owned view copies before checking; borrowed bytes and every alias
+`schema` (here and in `View.validateAt`) must be a Schema from this package's
+`compile` or `fromProgram`/`fromSerialized`; any other object, even one with
+the same methods, is a TypeError. The default owned view copies before checking; borrowed bytes and every alias
 must remain unchanged. `View` is obtained through `view`, not constructed
 directly; `new Cursor(view)` is also available.
 Mutation of borrowed input or any alias invalidates the check; snug does not
@@ -529,6 +542,13 @@ with top defaulting to any and limits only lowering the compiled values.
 | `SourceError` | Error subclass, `(code: string, message: string)`, field `code` |
 | `sessionLimits(set?)` | The isolate's session policy: `{ maxLive, maxPooledBytes, live, pooledBytes }`; `set` changes `maxLive` (default 1024, at least 1) and/or `maxPooledBytes` (default 2 MiB). Also exported by `@3sln/snug/sequence` |
 | `releasePool()` | Drops every idle pooled session array now, e.g. in a long-lived process trimming memory. Also exported by `@3sln/snug/sequence` |
+
+A handle whose `size` is 2³¹ or more is larger than every limit allows, and
+is never read: `validateHandle` and `validateHandleSync` answer
+`cbor/too_large` at offset 0, and `scanHandle` and `scanHandleSync` throw
+`SnugFault` `too_large`, as for a smaller handle over the limit.
+`openSession` and `ScanSession` take lengths up to 2³¹−1 only (more is a
+TypeError).
 
 The Rust host has the same drivers, sync and async, over the same
 session, with the same verdicts for every chunking: `validateHandle` is
@@ -848,7 +868,7 @@ help. Never raise caps automatically in response to an untrusted message.
 | `control` | A registered extension control's predicate refused the item |
 | `control_size` | The item is longer than the extension control's `maxBytes`; the predicate was not asked |
 | `group_limit` | The PEG group arena (A2 array records, T map records, recursive group frames) reached its cap: compile option `groupWords`, else the default 4,194,304 words; a memory policy, not proof of invalid data |
-| `budget` | VM work policy exhausted, not proof of invalid data; reduce complexity or review compiled/per-call budget and concurrency |
+| `budget` | VM work policy exhausted, not proof of invalid data; reduce complexity or review compiled/per-call budget and concurrency (under `wire: 'valid'` a call can do up to about twice the budget's work, plus linear passes) |
 
 | Other code / class | Meaning / next action |
 | --- | --- |
@@ -909,7 +929,7 @@ SchemaError recovery (line/column locate schema text, not payload):
 | `limit_width` | Reachable leaf width cap; simplify choices or review width |
 | `limit_pool_bytes` | Literal/automaton pool cap; reduce data or review poolBytes |
 | `limit_total_bytes` | Program/pool/scratch cap; simplify or review totalBytes |
-| `limit_compile_budget` | Compile work exhausted; simplify schema/tables or review compileBudget and isolation |
+| `limit_compile_budget` | Compile work exhausted; simplify schema/tables or review compileBudget and isolation (the budget is per attempt: a compile can do up to 9× it) |
 | `limit_leaves` | Leaf count cap; reduce choices/expansion or review leaves |
 | `limit_memory` | Compiler arena capacity exhausted; simplify schema; investigate if unexpectedly small |
 | `internal` | Implementation invariant failure; report a minimal schema reproducer, do not reinterpret as a deliberate feature refusal |

@@ -35,6 +35,8 @@ const VMS_NEED: i32 = -64;
 const VMS_YIELD: i32 = -65;
 const VMS_HELD: i32 = -67;
 const VMS_RESUME: i32 = -68;
+// host: step again (a run that stopped at a session yield, resumed)
+const STEP: i32 = -1000;
 
 /// `r = any` compiled with the largest limits — host/js/src/any-program.mjs's words
 /// (checked against the compiler by the Rust API tests): the VM against it gives
@@ -72,7 +74,17 @@ pub enum OnInvalid {
 /// Options of a sequence reader. Every limit applies to each message from zero;
 /// `None` is the compiled limit with a schema, the decode default
 /// (as [`DecodeOptions`]'s) without one.
+///
+/// Not exhaustive: a later release may add a field. Start from the default and
+/// set the fields you need:
+///
+/// ```
+/// let mut options = snug::SequenceOptions::default();
+/// options.on_invalid = snug::OnInvalid::Skip;
+/// options.max_message_bytes = Some(1 << 20);
+/// ```
 #[derive(Debug, Clone)]
+#[non_exhaustive]
 pub struct SequenceOptions {
     /// Required root shape of every message.
     pub top: Top,
@@ -99,6 +111,13 @@ pub struct SequenceOptions {
     pub fail_fast: bool,
     /// Read size of [`read_sequence`] (positive; default 65536).
     pub chunk: usize,
+    /// Work units between yields to the executor, for
+    /// [`read_sequence_async`](crate::read_sequence_async) and
+    /// [`Schema::read_sequence_async`] only (as [`SourceOptions::quantum`](crate::SourceOptions::quantum)):
+    /// 0, the default, never yields; at most 2³¹ − 1. The sync readers
+    /// ([`read_sequence`], [`Sequence`]) never yield, so a nonzero quantum there is
+    /// `Error::Usage("options")`.
+    pub quantum: u32,
 }
 impl Default for SequenceOptions {
     fn default() -> Self {
@@ -115,6 +134,7 @@ impl Default for SequenceOptions {
             on_invalid: OnInvalid::Stop,
             fail_fast: false,
             chunk: 65536,
+            quantum: 0,
         }
     }
 }
@@ -231,7 +251,12 @@ pub struct Sequence<'p> {
     out: Vec<i32>,
     skip: bool,
     fail_fast: bool,
+    // the session's work quantum: positive only under the async reader, whose runs stop at a
+    // session yield and resume over the same chunk
+    quantum: i32,
     delivered: u64,
+    // the absolute offset of the chunk being read
+    cb: u64,
     next: u64,
     index: u64,
     done: bool,
@@ -274,8 +299,12 @@ impl Drop for Sequence<'_> {
 impl Sequence<'static> {
     /// A profile-only sequence reader (the VM against `any`). Its limits are a codec's,
     /// as [`DecodeOptions`]'s: a depth above 256 or a count of 2³¹ − 1 or more is
-    /// `Error::Usage("options")`.
+    /// `Error::Usage("options")`, as is a nonzero `quantum` (a push reader never yields).
     pub fn new(options: &SequenceOptions) -> Result<Self, Error> {
+        Sequence::new_with(options, sync_quantum(options)?)
+    }
+    /// The profile-only reader of the async reader, with its quantum.
+    pub(crate) fn new_with(options: &SequenceOptions, quantum: i32) -> Result<Self, Error> {
         let d = Limits::DEFAULT;
         Limits {
             max_bytes: options.max_message_bytes.unwrap_or(d.max_bytes),
@@ -284,12 +313,26 @@ impl Sequence<'static> {
             max_items: options.max_items.unwrap_or(d.max_items),
         }
         .check()?;
-        Sequence::start(any_program(), 0, options.words(true), options)
+        Sequence::start(any_program(), 0, options.words(true), options, quantum)
     }
 }
 
+/// The sync readers never yield: their quantum is 0, and any other is `Error::Usage("options")`
+/// (as JS's `sequenceReader` refuses a `quantum`).
+fn sync_quantum(options: &SequenceOptions) -> Result<i32, Error> {
+    if options.quantum != 0 {
+        return Err(Error::Usage("options"));
+    }
+    Ok(0)
+}
+
+/// The async reader's quantum: at most 2³¹ − 1, else `Error::Usage("options")`.
+pub(crate) fn async_quantum(options: &SequenceOptions) -> Result<i32, Error> {
+    i32::try_from(options.quantum).map_err(|_| Error::Usage("options"))
+}
+
 impl<'p> Sequence<'p> {
-    fn start(prog: &'p schema::Program, rule: i32, lim: [i32; 10], options: &SequenceOptions) -> Result<Self, Error> {
+    fn start(prog: &'p schema::Program, rule: i32, lim: [i32; 10], options: &SequenceOptions, quantum: i32) -> Result<Self, Error> {
         let p = prog.words();
         let total = vms_unknown_total(p, &lim);
         // P9.7 (D327): the reader's arrays from the Program's pool under the live bound, back on drop
@@ -305,7 +348,9 @@ impl<'p> Sequence<'p> {
             out: vec![0i32; 8 + 2 * 257],
             skip: options.on_invalid == OnInvalid::Skip,
             fail_fast: options.fail_fast,
+            quantum,
             delivered: 0,
+            cb: 0,
             next: 0,
             index: 0,
             done: false,
@@ -336,23 +381,16 @@ impl<'p> Sequence<'p> {
     }
 
     /// The messages this chunk completes (an empty chunk is not the end). After the
-    /// sequence has ended it answers nothing.
+    /// sequence has ended (a stopping refusal, or [`Sequence::finish`]) it answers one
+    /// `Error::Usage("ended")`, as does `finish`.
     /// After a panic out of an extension predicate inside a call the sequence is
     /// poisoned: every later call answers one `Error::Usage("poisoned")`.
     pub fn feed<'c>(&mut self, chunk: &'c [u8]) -> Vec<Result<Message<'c>, Error>> {
         let mut out = Vec::new();
-        if self.poisoned {
-            out.push(Err(Error::Usage("poisoned")));
-            return out;
+        let mut yielded = self.feed_run(chunk, &mut out);
+        while yielded {
+            yielded = self.resume_run(Some(chunk), &mut out);
         }
-        if self.done || chunk.is_empty() {
-            return out;
-        }
-        let c = Chunk { bytes: chunk, base: self.delivered };
-        self.poisoned = true;
-        self.delivered += chunk.len() as u64;
-        self.run(Some(c), false, &mut out);
-        self.poisoned = false;
         out
     }
 
@@ -360,31 +398,79 @@ impl<'p> Sequence<'p> {
     /// `cbor/truncated`); the sequence is then done.
     pub fn finish(&mut self) -> Vec<Result<Message<'static>, Error>> {
         let mut out = Vec::new();
-        if self.poisoned {
-            out.push(Err(Error::Usage("poisoned")));
-            return out;
-        }
-        if !self.done {
-            self.poisoned = true;
-            self.run(None, true, &mut out);
-            self.poisoned = false;
-            self.done = true;
+        let mut yielded = self.finish_run(&mut out);
+        while yielded {
+            yielded = self.resume_run(None, &mut out);
         }
         out
     }
 
-    fn run<'c>(&mut self, c: Option<Chunk<'c>>, fin: bool, out: &mut Vec<Result<Message<'c>, Error>>) {
+    /// `feed`'s run, which stops at a session yield (true) when the quantum is positive;
+    /// `resume_run` goes on over the same chunk.
+    pub(crate) fn feed_run<'c>(&mut self, chunk: &'c [u8], out: &mut Vec<Result<Message<'c>, Error>>) -> bool {
+        if self.refused(out) || chunk.is_empty() {
+            return false;
+        }
+        let c = Chunk { bytes: chunk, base: self.delivered };
+        self.cb = self.delivered;
+        self.delivered += chunk.len() as u64;
+        self.go(Some(c), false, out)
+    }
+
+    /// `finish`'s run, which stops at a session yield (true) as `feed_run`'s.
+    pub(crate) fn finish_run(&mut self, out: &mut Vec<Result<Message<'static>, Error>>) -> bool {
+        if self.refused(out) {
+            return false;
+        }
+        self.go(None, true, out)
+    }
+
+    /// Go on with a run that stopped at a session yield: `chunk` is the one it was
+    /// reading (`None`: `finish_run`'s).
+    pub(crate) fn resume_run<'c>(&mut self, chunk: Option<&'c [u8]>, out: &mut Vec<Result<Message<'c>, Error>>) -> bool {
+        if self.poisoned {
+            out.push(Err(Error::Usage("poisoned")));
+            return false;
+        }
+        let c = chunk.map(|bytes| Chunk { bytes, base: self.cb });
+        self.go(c, chunk.is_none(), out)
+    }
+
+    /// A call after a panic (`poisoned`) or after the end (`ended`) answers one `Usage`.
+    fn refused<T>(&self, out: &mut Vec<Result<T, Error>>) -> bool {
+        let e = if self.poisoned { "poisoned" } else if self.done { "ended" } else { return false };
+        out.push(Err(Error::Usage(e)));
+        true
+    }
+
+    fn go<'c>(&mut self, c: Option<Chunk<'c>>, fin: bool, out: &mut Vec<Result<Message<'c>, Error>>) -> bool {
+        self.poisoned = true;
+        let yielded = self.run(c, fin, out);
+        self.poisoned = false;
+        if fin && !yielded {
+            self.done = true;
+        }
+        yielded
+    }
+
+    /// Read the chunk (`c`) or settle the end (`fin`): false when it is done with them, true
+    /// at a session yield under a positive quantum (resume with the same chunk).
+    fn run<'c>(&mut self, c: Option<Chunk<'c>>, fin: bool, out: &mut Vec<Result<Message<'c>, Error>>) -> bool {
         loop {
             let o = match self.msg {
                 Some(o) => o,
                 None => {
                     if !self.begin(c) {
-                        return self.drained(c);
+                        self.drained(c);
+                        return false;
                     }
                     self.r = self.step(c);
                     self.msg.unwrap_or(0)
                 }
             };
+            if self.r == STEP {
+                self.r = self.step(c);
+            }
             let r = self.r;
             let avail = (self.delivered - o) as i64;
             if r == VMS_HELD {
@@ -393,7 +479,8 @@ impl<'p> Sequence<'p> {
                 let keeps = hc == 0 || (self.skip && ml >= 0 && skippable_code(hc));
                 if !keeps {
                     if self.fail_fast {
-                        return self.stop(out);
+                        self.stop(out);
+                        return false;
                     }
                     self.dropping = true;
                     self.mb = Vec::new();
@@ -410,11 +497,12 @@ impl<'p> Sequence<'p> {
                     self.r = self.eof();
                     continue;
                 }
-                return self.drained(c);
+                self.drained(c);
+                return false;
             }
             if r >= 0 {
                 if !self.verdict(c, out) {
-                    return;
+                    return false;
                 }
                 continue;
             }
@@ -424,6 +512,11 @@ impl<'p> Sequence<'p> {
                 let want = i64::from(no) + if need { i64::from(vms_need_length(&self.ss)) } else { 0 };
                 self.at = no;
                 if want <= avail && want <= self.end {
+                    // the quantum is spent: the async reader yields to its executor, then resumes
+                    if !need && self.quantum > 0 {
+                        self.r = STEP;
+                        return true;
+                    }
                     self.r = self.step(c);
                     continue;
                 }
@@ -436,7 +529,8 @@ impl<'p> Sequence<'p> {
                     }
                     continue;
                 }
-                return self.drained(c);
+                self.drained(c);
+                return false;
             }
             panic!("snug: vms-step answered {} for a verified Program", r);
         }
@@ -448,7 +542,7 @@ impl<'p> Sequence<'p> {
             return false;
         }
         let ci = vms_init_seq(self.prog.words(), self.prog.pool(), self.rule, &self.lim, &mut self.s, &mut self.ss,
-                              &mut self.ka, 0);
+                              &mut self.ka, self.quantum);
         assert!(ci >= 0, "snug: vms-init-seq answered {} for a verified Program", ci);
         self.msg = Some(o);
         self.at = 0;
@@ -610,11 +704,16 @@ impl<'p> Sequence<'p> {
 }
 
 impl Schema {
-    /// A push reader of a CBOR sequence whose messages are validated against `rule`.
+    /// A push reader of a CBOR sequence whose messages are validated against `rule`
+    /// (a nonzero `quantum` is `Error::Usage("options")`: a push reader never yields).
     pub fn sequence(&self, rule: &str, options: &SequenceOptions) -> Result<Sequence<'_>, Error> {
+        self.sequence_with(rule, options, sync_quantum(options)?)
+    }
+    /// The schema reader of the async reader, with its quantum.
+    pub(crate) fn sequence_with(&self, rule: &str, options: &SequenceOptions, quantum: i32) -> Result<Sequence<'_>, Error> {
         let host = self.program().host();
         let r = host.rule(rule).ok_or(Error::Usage("unknown_rule"))?;
-        Sequence::start(host, r, options.words(false), options)
+        Sequence::start(host, r, options.words(false), options, quantum)
     }
     /// Read a CBOR sequence from `reader` until EOF, each message validated against `rule`.
     pub fn read_sequence<R: Read>(&self, reader: R, rule: &str, options: &SequenceOptions) -> Result<SequenceReader<'_, R>, Error> {
@@ -659,6 +758,8 @@ impl<R: Read> Iterator for SequenceReader<'_, R> {
                         return Some(e);
                     }
                 }
+                // never: a sync reader's quantum is 0; it would go straight on
+                Pump::Yield => self.pump.resume(),
             }
         }
     }
@@ -670,6 +771,9 @@ pub(crate) enum Pump {
     Item(Option<Result<Message<'static>, Error>>),
     /// Read into `SeqPump::buf` and give the outcome to `SeqPump::filled`.
     Read,
+    /// The quantum is spent (a positive quantum only): yield to the executor, then call
+    /// `SeqPump::resume`.
+    Yield,
 }
 
 /// The sans-IO core of [`SequenceReader`] and the async reader
@@ -681,16 +785,33 @@ pub(crate) struct SeqPump<'p> {
     buf: Vec<u8>,
     queue: VecDeque<Result<Message<'static>, Error>>,
     finished: bool,
+    // a run stopped at a session yield: over buf[..n] (Some(n)) or the end (None)
+    paused: Option<Option<usize>>,
 }
 impl<'p> SeqPump<'p> {
     pub(crate) fn new(seq: Sequence<'p>, chunk: usize) -> Self {
-        SeqPump { seq, buf: vec![0u8; chunk], queue: VecDeque::new(), finished: false }
+        SeqPump { seq, buf: vec![0u8; chunk], queue: VecDeque::new(), finished: false, paused: None }
     }
     pub(crate) fn next(&mut self) -> Pump {
         if let Some(x) = self.queue.pop_front() {
             return Pump::Item(Some(x));
         }
+        if self.paused.is_some() {
+            return Pump::Yield;
+        }
         if self.finished { Pump::Item(None) } else { Pump::Read }
+    }
+    /// Go on with the run that stopped at a yield (the buffer still holds its chunk).
+    pub(crate) fn resume(&mut self) {
+        let Some(p) = self.paused.take() else { return };
+        let mut items = Vec::new();
+        let yielded = self.seq.resume_run(p.map(|n| &self.buf[..n]), &mut items);
+        self.queue.extend(items.into_iter().map(|x| x.map(Message::into_owned)));
+        if yielded {
+            self.paused = Some(p);
+        } else if self.seq.is_done() {
+            self.finished = true;
+        }
     }
     pub(crate) fn buf(&mut self) -> &mut [u8] {
         &mut self.buf
@@ -707,13 +828,19 @@ impl<'p> SeqPump<'p> {
         match read {
             Ok(0) => {
                 self.finished = true;
-                let items = self.seq.finish();
+                let mut items = Vec::new();
+                if self.seq.finish_run(&mut items) {
+                    self.paused = Some(None);
+                }
                 self.queue.extend(items);
             }
             Ok(n) => {
-                let items = self.seq.feed(&self.buf[..n]);
+                let mut items = Vec::new();
+                let yielded = self.seq.feed_run(&self.buf[..n], &mut items);
                 self.queue.extend(items.into_iter().map(|x| x.map(Message::into_owned)));
-                if self.seq.is_done() {
+                if yielded {
+                    self.paused = Some(Some(n));
+                } else if self.seq.is_done() {
                     self.finished = true;
                 }
             }

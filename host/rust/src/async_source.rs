@@ -29,7 +29,7 @@
 //! # Ok::<(), Box<dyn std::error::Error>>(())
 //! ```
 use crate::schema::{self, BlobCore, Failure, Io, SourceError, StreamCore};
-use crate::sequence::{Message, Pump, SeqPump, Sequence, SequenceOptions};
+use crate::sequence::{async_quantum, Message, Pump, SeqPump, Sequence, SequenceOptions};
 use crate::{BytesBlob, Error, Schema, SourceOptions, ValidationOptions};
 use std::future::{poll_fn, Future};
 use std::io;
@@ -205,7 +205,8 @@ impl Schema {
     }
 
     /// [`Schema::read_sequence`] over an [`AsyncSource`]: each message validated
-    /// against `rule`.
+    /// against `rule`. A positive `options.quantum` yields to the executor once per
+    /// session yield.
     pub fn read_sequence_async<S: AsyncSource + Unpin>(
         &self,
         source: S,
@@ -215,19 +216,22 @@ impl Schema {
         if options.chunk == 0 || options.chunk > crate::api::MAX_CHUNK {
             return Err(Error::Usage("options"));
         }
-        Ok(AsyncSequenceReader::new(self.sequence(rule, options)?, source, options.chunk))
+        let quantum = async_quantum(options)?;
+        Ok(AsyncSequenceReader::new(self.sequence_with(rule, options, quantum)?, source, options.chunk))
     }
 }
 
 /// [`read_sequence`](crate::read_sequence) over an [`AsyncSource`]: a profile-checked
-/// CBOR sequence read until EOF.
+/// CBOR sequence read until EOF. A positive `options.quantum` yields to the executor
+/// once per session yield.
 /// `Err(Error::SessionLimit)` when the live-session bound is reached.
 pub fn read_sequence_async<S: AsyncSource + Unpin>(source: S, options: &SequenceOptions) -> Result<AsyncSequenceReader<'static, S>, Error> {
     // chunk 0 is refused, as Schema::read_sequence_async refuses it (P9.13)
     if options.chunk == 0 || options.chunk > crate::api::MAX_CHUNK {
         return Err(Error::Usage("options"));
     }
-    Ok(AsyncSequenceReader::new(Sequence::new(options)?, source, options.chunk))
+    let quantum = async_quantum(options)?;
+    Ok(AsyncSequenceReader::new(Sequence::new_with(options, quantum)?, source, options.chunk))
 }
 
 /// The async reader of [`read_sequence_async`] / [`Schema::read_sequence_async`]:
@@ -240,11 +244,13 @@ pub fn read_sequence_async<S: AsyncSource + Unpin>(source: S, options: &Sequence
 pub struct AsyncSequenceReader<'p, S> {
     pump: SeqPump<'p>,
     source: S,
+    // the quantum was spent and `Pending` answered: the next poll resumes the run
+    yielded: bool,
 }
 
 impl<'p, S: AsyncSource + Unpin> AsyncSequenceReader<'p, S> {
     fn new(seq: Sequence<'p>, source: S, chunk: usize) -> Self {
-        AsyncSequenceReader { pump: SeqPump::new(seq, chunk), source }
+        AsyncSequenceReader { pump: SeqPump::new(seq, chunk), source, yielded: false }
     }
 
     /// The next item, or `None` after the last.
@@ -264,6 +270,17 @@ impl<'p, S: AsyncSource + Unpin> AsyncSequenceReader<'p, S> {
                     if let Some(e) = self.pump.filled(r) {
                         return Poll::Ready(Some(e));
                     }
+                }
+                // a session yield (positive quantum): wake ourselves and answer `Pending` once,
+                // as `yield_now` does for the other drivers
+                Pump::Yield => {
+                    if !self.yielded {
+                        self.yielded = true;
+                        cx.waker().wake_by_ref();
+                        return Poll::Pending;
+                    }
+                    self.yielded = false;
+                    self.pump.resume();
                 }
             }
         }

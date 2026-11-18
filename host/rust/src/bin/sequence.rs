@@ -345,19 +345,18 @@ fn render_failure(tag: &str, e: &Error) -> String {
 #[allow(clippy::too_many_arguments)]
 fn run_host(prog: Option<&(Vec<i32>, Vec<u8>)>, rule: &str, opts: &SequenceOptions, input: &[u8], kind: i32, w: i32,
             seed: u32, k: i32) -> String {
-    let schema;
-    let mut seq = match prog {
-        Some((p, pool)) => {
-            let program = match snug::Program::from_parts_with(p, pool, &test_controls()) {
-                Ok(x) => x,
-                Err(_) => return "UNVERIFIED".to_string(),
-            };
-            schema = Schema::from_program(program);
-            match schema.sequence(rule, opts) {
-                Ok(s) => s,
-                Err(e) => return format!("E {}", e.code()),
-            }
-        }
+    let schema = match prog {
+        Some((p, pool)) => match snug::Program::from_parts_with(p, pool, &test_controls()) {
+            Ok(x) => Some(Schema::from_program(x)),
+            Err(_) => return "UNVERIFIED".to_string(),
+        },
+        None => None,
+    };
+    let mut seq = match &schema {
+        Some(schema) => match schema.sequence(rule, opts) {
+            Ok(s) => s,
+            Err(e) => return format!("E {}", e.code()),
+        },
         None => Sequence::new(opts).expect("profile-only sequence"),
     };
     let mut lines: Vec<String> = Vec::new();
@@ -422,7 +421,98 @@ fn run_host(prog: Option<&(Vec<i32>, Vec<u8>)>, rule: &str, opts: &SequenceOptio
             lines.push("end".to_string());
         }
     }
+    drop(seq);
+    // D371: the async reader with a positive quantum over the same chunks gives the push
+    // reader's verdicts (its messages are owned, so borrowing is not compared). That it
+    // yields at all is tests/async_sources.rs's (`Pending` mid-message)
+    let quantum = [1u32, 7, 64, 1000][(seed % 4) as usize];
+    let async_lines = run_async(schema.as_ref(), rule, opts, input, &ends, quantum);
+    let want: Vec<String> = lines.iter().map(|l| l.replace(" BADBORROW", "")).collect();
+    if async_lines != want {
+        lines.push(format!("ASYNCDIFF quantum {} got {}", quantum, async_lines.join(" | ")));
+    }
     lines.join(" | ")
+}
+
+/// An AsyncSource giving the input in the push run's chunks, one per read.
+struct Chunks<'a> {
+    input: &'a [u8],
+    ends: &'a [usize],
+    at: usize,
+    next: usize,
+}
+impl snug::AsyncSource for Chunks<'_> {
+    fn poll_read(mut self: std::pin::Pin<&mut Self>, _cx: &mut std::task::Context<'_>, buf: &mut [u8])
+                 -> std::task::Poll<std::io::Result<usize>> {
+        while self.next < self.ends.len() && self.ends[self.next] <= self.at {
+            self.next += 1;
+        }
+        let end = if self.next < self.ends.len() { self.ends[self.next] } else { self.input.len() };
+        let n = (end - self.at).min(buf.len());
+        buf[..n].copy_from_slice(&self.input[self.at..self.at + n]);
+        self.at += n;
+        std::task::Poll::Ready(Ok(n))
+    }
+}
+
+/// `read_sequence_async` (or the schema's) with `quantum`, polled by hand: the verdict lines,
+/// as the push run renders them (borrowing aside).
+fn run_async(schema: Option<&Schema>, rule: &str, opts: &SequenceOptions, input: &[u8], ends: &[usize], quantum: u32)
+             -> Vec<String> {
+    struct W;
+    impl std::task::Wake for W {
+        fn wake(self: Arc<Self>) {}
+    }
+    let waker = std::task::Waker::from(Arc::new(W));
+    let mut cx = std::task::Context::from_waker(&waker);
+    let mut o = opts.clone();
+    o.quantum = quantum;
+    let src = Chunks { input, ends, at: 0, next: 0 };
+    let mut reader = match schema {
+        Some(s) => match s.read_sequence_async(src, rule, &o) {
+            Ok(r) => r,
+            Err(e) => return vec![format!("E {}", e.code())],
+        },
+        None => snug::read_sequence_async(src, &o).expect("profile-only async sequence"),
+    };
+    let mut lines = Vec::new();
+    loop {
+        let item = match reader.poll_next(&mut cx) {
+            std::task::Poll::Pending => continue,
+            std::task::Poll::Ready(None) => {
+                lines.push("end".to_string());
+                break;
+            }
+            std::task::Poll::Ready(Some(x)) => x,
+        };
+        match item {
+            Ok(m) => {
+                let (o, len) = (m.offset as usize, m.len());
+                let good = o + len <= input.len() && m.bytes() == &input[o..o + len];
+                let vw = if opts.wire.valid {
+                    let big = (i32::MAX - 1) as u32;
+                    let d = snug::DecodeOptions { top: Top::Any, cose: opts.cose, wire: opts.wire,
+                        max_bytes: Some(big), max_depth: Some(256), max_entries: Some(big), max_items: Some(big) };
+                    snug::Document::open(m.bytes(), &d).is_ok_and(|doc| doc.view().raw() == m.view().raw())
+                } else {
+                    m.view().raw().len() == len
+                };
+                lines.push(format!("m {} {} {}{}", m.index, o, len, if good && vw { "" } else { " BAD" }));
+            }
+            Err(e) => {
+                let stop = !matches!(&e, Error::Sequence(f) if f.skippable && opts.on_invalid == OnInvalid::Skip);
+                lines.push(render_failure(if stop { "x" } else { "s" }, &e));
+                if stop {
+                    // the stopping refusal is the last item
+                    if !matches!(reader.poll_next(&mut cx), std::task::Poll::Ready(None)) {
+                        lines.push("AFTERSTOP".to_string());
+                    }
+                    break;
+                }
+            }
+        }
+    }
+    lines
 }
 
 fn main() {
@@ -453,20 +543,19 @@ fn main() {
                 let pi = n(1);
                 let rule = String::from_utf8(unhex(f[2])).expect("rule");
                 let o = |i: usize| -> Option<u32> { let v = n(i); if v < 0 { None } else { Some(v as u32) } };
-                let opts = SequenceOptions {
-                    top: if n(3) == 1 { Top::Map } else { Top::Any },
-                    cose: n(4) == 1,
-                    max_message_bytes: o(5),
-                    max_depth: o(6),
-                    max_entries: o(7),
-                    max_items: o(8),
-                    max_bignum_bytes: o(9),
-                    budget: o(10),
-                    wire: profile_of(n(11)),
-                    on_invalid: if n(16) == 1 { OnInvalid::Skip } else { OnInvalid::Stop },
-                    fail_fast: n(17) == 1,
-                    ..SequenceOptions::default()
-                };
+                // SequenceOptions is non-exhaustive (D371): set the fields on the default
+                let mut opts = SequenceOptions::default();
+                opts.top = if n(3) == 1 { Top::Map } else { Top::Any };
+                opts.cose = n(4) == 1;
+                opts.max_message_bytes = o(5);
+                opts.max_depth = o(6);
+                opts.max_entries = o(7);
+                opts.max_items = o(8);
+                opts.max_bignum_bytes = o(9);
+                opts.budget = o(10);
+                opts.wire = profile_of(n(11));
+                opts.on_invalid = if n(16) == 1 { OnInvalid::Skip } else { OnInvalid::Stop };
+                opts.fail_fast = n(17) == 1;
                 let (kind, w, seed, k) = (n(12), n(13), f[14].parse::<u32>().expect("seed"), n(15));
                 let input = unhex(f[18]);
                 let prog = if pi < 0 { None } else { Some(&progs[pi as usize]) };

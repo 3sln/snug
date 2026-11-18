@@ -37,7 +37,7 @@ pub enum Error {
     /// API misuse; fixed codes never contain caller-provided strings.
     Usage(&'static str),
     /// Source protocol failure, using JS SourceError codes (`short_read`,
-    /// `too_large`).
+    /// `read`).
     Source(&'static str),
     /// The source's transport failed: its own error, whole. `code()` is
     /// `read`; [`std::error::Error::source`] answers the [`io::Error`].
@@ -110,6 +110,7 @@ impl fmt::Display for Error {
             Self::Usage("poisoned") => f.write_str(
                 "snug: an extension predicate panicked inside an earlier call; this sequence cannot go on (poisoned)",
             ),
+            Self::Usage("ended") => f.write_str("snug: the sequence has ended (ended)"),
             _ => write!(f, "snug: operation refused ({})", self.code()),
         }
     }
@@ -147,7 +148,6 @@ impl From<crate::schema::SourceError> for Error {
         match e {
             S::ShortRead { .. } => Self::Source("short_read"),
             S::Read => Self::Source("read"),
-            S::TooLarge => Self::Source("too_large"),
             S::SessionLimit => Self::SessionLimit,
             S::Io(e) => Self::Io(e),
         }

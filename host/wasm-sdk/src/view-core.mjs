@@ -27,7 +27,9 @@
 // fields and refuse construction outside this module (a brand on its private Message
 // class), so no public field or constructor reaches unchecked bytes.
 import * as rt from './runtime.mjs';
-import { innerOf } from './schema.mjs';
+import { innerOf, isSchema } from './schema.mjs';
+/** As the native view's (D371). */
+const NOT_A_SCHEMA = 'snug view: the schema option must be a snug Schema';
 import { resolveLimits } from '../../js/src/limits.mjs';
 import { SnugFault } from '../../js/src/fault.mjs';
 import { validationFault } from '../../js/src/public-errors.mjs';
@@ -381,6 +383,7 @@ export class View {
     validateOptions(options, 'viewSpan');
     const m = this.#m, s = options.schema ?? m.schema;
     if (!s) throw new TypeError('snug view: validateAt needs a schema');
+    if (!isSchema(s)) throw new TypeError(NOT_A_SCHEMA);   // D371, as view()'s
     const e = m.skip(this.#p), inner = innerOf(s.program), ri = s.ruleIndex(rule);
     try {
       return inner.runAt(ri, m.ptr, m.end, { ...m.limits, cose: m.cose && this.#d === 0, top: 'any' }, { start: this.#p, end: e, depth: this.#d, items: 0 });
@@ -497,6 +500,8 @@ export function view(bytes, opts = {}) {
   const n = bytes.length;
   // P9.13: an oversized document is refused before its copy into linear memory (which never shrinks)
   if (opts.schema) {
+    // D371: only an SDK Schema (an object with a Schema's methods and a real `program` once minted a View)
+    if (!isSchema(opts.schema)) throw new TypeError(NOT_A_SCHEMA);
     if (typeof opts.rule !== 'string') throw new TypeError('snug view: a schema needs a rule');
     const big = innerOf(opts.schema.program).oversize(n, selectOptions(opts, 'validation'));
     if (big) throw validationFault(big);

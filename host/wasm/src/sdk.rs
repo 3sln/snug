@@ -146,15 +146,43 @@ struct State {
     ws: [i32; 4],
 }
 
-struct Cell(UnsafeCell<Option<State>>);
-// wasm32-unknown-unknown is single-threaded and the host never re-enters.
-unsafe impl Sync for Cell {}
-static STATE: Cell = Cell(UnsafeCell::new(None));
+struct StateCell {
+    state: UnsafeCell<Option<State>>,
+    /// An export is running with the state (`with_state`).
+    busy: std::cell::Cell<bool>,
+}
+// wasm32-unknown-unknown is single-threaded; `with_state` refuses a nested entry.
+unsafe impl Sync for StateCell {}
+static STATE: StateCell = StateCell { state: UnsafeCell::new(None), busy: std::cell::Cell::new(false) };
 
-fn st() -> &'static mut State {
-    // SAFETY: single-threaded; every export takes this once and holds it only for its own duration.
-    let s = unsafe { &mut *STATE.0.get() };
-    s.get_or_insert_with(|| State {
+/// D371: run `f` with the SDK's state. This is the only place a `&mut State` is made, and it lives
+/// only while `f` runs, so an export's borrows of the state are the borrow checker's to keep apart
+/// (before, `st()` handed out `&'static mut State` and an export could hold two at once). Every
+/// export enters once. A nested entry -- an export called while another runs, which only a host
+/// predicate (the one import) could attempt, and the SDK's guard stops first -- aborts (a trap:
+/// the SDK resets the instance, InstanceLost) instead of making a second `&mut State`. (No
+/// unwinding: the module is built with panic=abort, so `busy` is always cleared on return.)
+fn with_state<R>(f: impl FnOnce(&mut State) -> R) -> R {
+    let Some(s) = enter() else { std::process::abort() };
+    // SAFETY: `enter` set `busy`, so this is the only reference to the state until it is cleared.
+    let r = f(unsafe { &mut *s });
+    STATE.busy.set(false);
+    r
+}
+/// Mark the state entered and make it on first use: `None` when an export already holds it. Not
+/// generic, so every export shares it.
+#[inline(never)]
+fn enter() -> Option<*mut State> {
+    if STATE.busy.replace(true) {
+        return None;
+    }
+    // SAFETY: single-threaded, and `busy` is now set: no other reference to the state exists.
+    let s = unsafe { &mut *STATE.state.get() };
+    Some(s.get_or_insert_with(new_state))
+}
+
+fn new_state() -> State {
+    State {
         vs: vec![0; 512],
         cb: vec![0; 1024],
         svs: vec![0; 512],
@@ -182,7 +210,7 @@ fn st() -> &'static mut State {
         pairs: Vec::new(),
         x: Vec::new(),
         ws: [0; 4],
-    })
+    }
 }
 
 fn grow<T: Copy + Default>(v: &mut Vec<T>, n: usize) -> *mut T {
@@ -215,35 +243,37 @@ pub extern "C" fn sdk_free(p: *mut u8, n: usize) {
 /// The reusable input buffer, at least n bytes (grown, never shrunk here).
 #[no_mangle]
 pub extern "C" fn sdk_input(n: usize) -> *mut u8 {
-    grow(&mut st().input, n)
+    with_state(|s| grow(&mut s.input, n))
 }
 /// A reusable byte scratch (rule names, lookup keys), at least n bytes.
 #[no_mangle]
 pub extern "C" fn sdk_kbuf(n: usize) -> *mut u8 {
-    grow(&mut st().kbuf, n)
+    with_state(|s| grow(&mut s.kbuf, n))
 }
 /// A reusable word scratch (batched navigation steps), at least n words.
 #[no_mangle]
 pub extern "C" fn sdk_steps(n: usize) -> *mut i32 {
-    grow(&mut st().steps, n)
+    with_state(|s| grow(&mut s.steps, n))
 }
 #[no_mangle]
 pub extern "C" fn sdk_info() -> *mut i32 {
-    st().info.as_mut_ptr()
+    with_state(|s| s.info.as_mut_ptr())
 }
 #[no_mangle]
 pub extern "C" fn sdk_out() -> *mut i32 {
-    st().out.as_mut_ptr()
+    with_state(|s| s.out.as_mut_ptr())
 }
 #[no_mangle]
 pub extern "C" fn sdk_nav_words() -> *mut i32 {
-    st().nav.as_mut_ptr()
+    with_state(|s| s.nav.as_mut_ptr())
 }
 /// Drop every reusable buffer (programs and sessions are kept). The allocator
 /// reuses the space; linear memory itself never shrinks.
 #[no_mangle]
 pub extern "C" fn sdk_trim() {
-    let s = st();
+    with_state(trim)
+}
+fn trim(s: &mut State) {
     s.input = Vec::new();
     s.kbuf = Vec::new();
     s.steps = Vec::new();
@@ -260,7 +290,7 @@ pub extern "C" fn sdk_trim() {
 #[no_mangle]
 pub extern "C" fn sdk_code_name(code: i32) -> *const u8 {
     let n = code_name(code);
-    st().info[0] = n.len() as i32;
+    with_state(|s| s.info[0] = n.len() as i32);
     n.as_ptr()
 }
 
@@ -278,7 +308,12 @@ unsafe fn bytes<'a>(p: *const u8, n: usize) -> &'a [u8] {
 pub extern "C" fn sdk_scan(p: *const u8, n: usize, top_any: i32, cose: i32, max_bytes: i32, max_depth: i32,
                            max_entries: i32, max_items: i32, flags: i32) -> i32 {
     let b = unsafe { bytes(p, n) };
-    let st = st();
+    with_state(|st| scan_in(st, b, top_any, cose, max_bytes, max_depth, max_entries, max_items, flags))
+}
+#[allow(clippy::too_many_arguments)]
+fn scan_in(st: &mut State, b: &[u8], top_any: i32, cose: i32, max_bytes: i32, max_depth: i32, max_entries: i32,
+           max_items: i32, flags: i32) -> i32 {
+    let n = b.len();
     let c = loop {
         scan_options(&mut st.vs, top_any, cose, max_bytes, max_depth, max_entries, max_items);
         scan_profile(&mut st.vs, flags);
@@ -315,7 +350,7 @@ fn grow_scan(o: &mut Vec<i32>, cb: &mut Vec<u8>) {
 }
 /// The canonical copy of the last scan or validation that made one (INFO[2] bytes).
 #[no_mangle]
-pub extern "C" fn sdk_copy() -> *const u8 { st().copy.as_ptr() }
+pub extern "C" fn sdk_copy() -> *const u8 { with_state(|s| s.copy.as_ptr()) }
 
 // ---------------------------------------------------------------- Programs and the VM
 
@@ -335,21 +370,25 @@ pub extern "C" fn sdk_prog_load(pp: *const i32, words: usize, bp: *const u8, nb:
     let mut s = vec![0i32; (64 + 2 * m).max(vm_verify_words(&p, m as i32).max(0) as usize + 16)];
     s[16] = 1;
     s[17] = m as i32;
-    let st = st();
-    if vm_verify(&p, &b, &mut s) != 0 {
-        st.info[0] = s[35];
-        st.info[1] = s[36];
-        return -1;
-    }
-    let slot = st.progs.iter().position(|x| x.is_none()).unwrap_or_else(|| { st.progs.push(None); st.progs.len() - 1 });
-    st.progs[slot] = Some(Prog { p, b, ext: Vec::new(), preps: BTreeMap::new(), sw: std::cell::Cell::new(0), idle: Vec::new() });
-    slot as i32
+    with_state(|st| {
+        if vm_verify(&p, &b, &mut s) != 0 {
+            st.info[0] = s[35];
+            st.info[1] = s[36];
+            return -1;
+        }
+        let slot = st.progs.iter().position(|x| x.is_none()).unwrap_or_else(|| { st.progs.push(None); st.progs.len() - 1 });
+        st.progs[slot] = Some(Prog { p, b, ext: Vec::new(), preps: BTreeMap::new(), sw: std::cell::Cell::new(0), idle: Vec::new() });
+        slot as i32
+    })
 }
 /// Bind Program h's extension controls: n kinds (see `Prog::ext`) at kp.
 #[no_mangle]
 pub extern "C" fn sdk_prog_bind(h: usize, kp: *const i32, n: usize) {
     let kinds = if n == 0 { Vec::new() } else { unsafe { std::slice::from_raw_parts(kp, n) }.to_vec() };
-    if let Some(Some(pr)) = st().progs.get_mut(h) {
+    with_state(|st| bind(st, h, kinds))
+}
+fn bind(st: &mut State, h: usize, kinds: Vec<i32>) {
+    if let Some(Some(pr)) = st.progs.get_mut(h) {
         let mut preps = BTreeMap::new();
         let (at, n) = (pr.p[43], pr.p[16]);
         for l in 0..n {
@@ -375,40 +414,42 @@ pub extern "C" fn sdk_prog_bind(h: usize, kp: *const i32, n: usize) {
 }
 #[no_mangle]
 pub extern "C" fn sdk_prog_free(h: usize) {
-    let st = st();
-    if let Some(x) = st.progs.get_mut(h) {
-        if let Some(pr) = x { st.pooled -= pr.idle.iter().map(arrays_bytes).sum::<usize>(); }
-        *x = None;
-    }
+    with_state(|st| {
+        if let Some(x) = st.progs.get_mut(h) {
+            if let Some(pr) = x { st.pooled -= pr.idle.iter().map(arrays_bytes).sum::<usize>(); }
+            *x = None;
+        }
+    })
 }
 /// P9.7 (D327): drop every Program's idle session arrays now.
 #[no_mangle]
 pub extern "C" fn sdk_ses_release_pool() {
-    let st = st();
-    for pr in st.progs.iter_mut().flatten() { pr.idle.clear(); }
-    st.pooled = 0;
+    with_state(|st| {
+        for pr in st.progs.iter_mut().flatten() { pr.idle.clear(); }
+        st.pooled = 0;
+    })
 }
 /// P9.7 (D327): set the session limits (max_live > 0, max_pooled >= 0; others keep
 /// theirs); INFO[0..4] = max_live, max_pooled, live, pooled bytes. 0.
 #[no_mangle]
 pub extern "C" fn sdk_ses_limits(max_live: i32, max_pooled: i32) -> i32 {
-    let st = st();
-    if max_live > 0 { st.max_live = max_live as usize; }
-    if max_pooled >= 0 { st.max_pooled = max_pooled as usize; }
-    st.info[0] = st.max_live.min(i32::MAX as usize) as i32;
-    st.info[1] = st.max_pooled.min(i32::MAX as usize) as i32;
-    st.info[2] = st.live as i32;
-    st.info[3] = st.pooled.min(i32::MAX as usize) as i32;
-    0
+    with_state(|st| {
+        if max_live > 0 { st.max_live = max_live as usize; }
+        if max_pooled >= 0 { st.max_pooled = max_pooled as usize; }
+        st.info[0] = st.max_live.min(i32::MAX as usize) as i32;
+        st.info[1] = st.max_pooled.min(i32::MAX as usize) as i32;
+        st.info[2] = st.live as i32;
+        st.info[3] = st.pooled.min(i32::MAX as usize) as i32;
+        0
+    })
 }
 /// The rule index of the name in kbuf[0..n) (vm-rule-index), or -1.
 #[no_mangle]
 pub extern "C" fn sdk_rule_index(h: usize, n: usize) -> i32 {
-    let s = st();
-    match s.progs.get(h) {
+    with_state(|s| match s.progs.get(h) {
         Some(Some(pr)) => vm_rule_index(&pr.p, &pr.b, &s.kbuf[..n]),
         _ => -1,
-    }
+    })
 }
 
 fn lease(s: &mut State, h: usize, rule: i32) -> bool {
@@ -441,9 +482,11 @@ pub extern "C" fn sdk_validate_span(h: usize, rule: i32, p: *const u8, n: usize,
     run_v(h, rule, p, n, Some((start, end, depth, items)), [l0, l1, l2, l3, l4, l5, l6, l7, 0, flags])
 }
 fn run_v(h: usize, rule: i32, p: *const u8, n: usize, span: Option<(i32, i32, i32, i32)>, lim: [i32; 10]) -> i32 {
-    let s = st();
-    if !lease(s, h, rule) { return -100; }
     let input = unsafe { bytes(p, n) };
+    with_state(|s| validate_in(s, h, rule, input, span, lim))
+}
+fn validate_in(s: &mut State, h: usize, rule: i32, input: &[u8], span: Option<(i32, i32, i32, i32)>, lim: [i32; 10]) -> i32 {
+    if !lease(s, h, rule) { return -100; }
     let pr = s.progs[h].as_ref().unwrap();
     let none = |_: i32, _: &[u8], _: i32, _: i32, _: &[u8], _: i32, _: i32, _: i32| -> i32 { -2 };
     let c = loop {
@@ -474,55 +517,52 @@ fn run_v(h: usize, rule: i32, p: *const u8, n: usize, span: Option<(i32, i32, i3
 
 // ---------------------------------------------------------------- navigation over checked bytes at [m, m+n)
 
-fn nav<'a>(m: *const u8, n: usize) -> (&'a [u8], &'static mut [i32; 8]) {
-    let o = &mut st().nav;
-    o[N_STEPS as usize] = 0;
-    (unsafe { bytes(m, n) }, o)
+/// The checked bytes at [m, m+n), and the state's nav words (their step count reset) and key
+/// scratch: disjoint borrows of the one state (D371: before, the nav words were a `&'static mut`
+/// that nav-find held while a second `&mut State` reached the key scratch, aliasing it).
+fn nav<'s>(s: &'s mut State, m: *const u8, n: usize) -> (&'s [u8], &'s mut [i32; 8], &'s [u8]) {
+    let State { nav, kbuf, .. } = s;
+    nav[N_STEPS as usize] = 0;
+    // SAFETY: the host passes a live region of checked bytes (its own allocation, not the state's).
+    (unsafe { bytes(m, n) }, nav, kbuf)
 }
 #[no_mangle]
 pub extern "C" fn sdk_nav_init() {
-    nav_init(&mut st().nav, 0x7fffffff);
+    with_state(|s| { nav_init(&mut s.nav, 0x7fffffff); });
 }
 /// nav-head: content start; major, ai, hi, lo in the nav words.
 #[no_mangle]
 pub extern "C" fn sdk_nav_head(m: *const u8, n: usize, p: i32) -> i32 {
-    let (b, o) = nav(m, n);
-    nav_head(b, o, p, n as i32)
+    with_state(|s| { let (b, o, _) = nav(s, m, n); nav_head(b, o, p, n as i32) })
 }
 #[no_mangle]
 pub extern "C" fn sdk_nav_skip(m: *const u8, n: usize, p: i32) -> i32 {
-    let (b, o) = nav(m, n);
-    nav_skip(b, o, p, n as i32)
+    with_state(|s| { let (b, o, _) = nav(s, m, n); nav_skip(b, o, p, n as i32) })
 }
 #[no_mangle]
 pub extern "C" fn sdk_nav_child(m: *const u8, n: usize, p: i32, i: i32) -> i32 {
-    let (b, o) = nav(m, n);
-    nav_child(b, o, p, i, n as i32)
+    with_state(|s| { let (b, o, _) = nav(s, m, n); nav_child(b, o, p, i, n as i32) })
 }
 /// nav-find with the encoded key in kbuf[ks..ke).
 #[no_mangle]
 pub extern "C" fn sdk_nav_find(m: *const u8, n: usize, p: i32, ks: i32, ke: i32) -> i32 {
-    let (b, o) = nav(m, n);
-    nav_find(b, o, p, &st().kbuf, ks, ke, n as i32)
+    with_state(|s| { let (b, o, k) = nav(s, m, n); nav_find(b, o, p, k, ks, ke, n as i32) })
 }
 /// P8.4: nav-find over a map whose keys may be out of canonical order (every key compared).
 #[no_mangle]
 pub extern "C" fn sdk_nav_find_any(m: *const u8, n: usize, p: i32, ks: i32, ke: i32) -> i32 {
-    let (b, o) = nav(m, n);
-    nav_find_any(b, o, p, &st().kbuf, ks, ke, n as i32)
+    with_state(|s| { let (b, o, k) = nav(s, m, n); nav_find_any(b, o, p, k, ks, ke, n as i32) })
 }
 /// nav-dir into the words at d (capacity cap).
 #[no_mangle]
 pub extern "C" fn sdk_nav_dir(m: *const u8, n: usize, p: i32, d: *mut i32, cap: usize) -> i32 {
-    let (b, o) = nav(m, n);
     let d = unsafe { std::slice::from_raw_parts_mut(d, cap) };
-    nav_dir(b, o, p, d, n as i32)
+    with_state(|s| { let (b, o, _) = nav(s, m, n); nav_dir(b, o, p, d, n as i32) })
 }
 #[no_mangle]
 pub extern "C" fn sdk_nav_dir_find(m: *const u8, n: usize, d: *const i32, cnt: i32, ks: i32, ke: i32) -> i32 {
-    let (b, o) = nav(m, n);
     let d = unsafe { std::slice::from_raw_parts(d, cnt.max(0) as usize) };
-    nav_dir_find(b, o, d, cnt, &st().kbuf, ks, ke, n as i32)
+    with_state(|s| { let (b, o, k) = nav(s, m, n); nav_dir_find(b, o, d, cnt, k, ks, ke, n as i32) })
 }
 /// Batched navigation: from p, follow `count` steps in the step words (each
 /// [0, index, 0] into an array or [1, ks, ke] by the encoded key kbuf[ks..ke)
@@ -531,9 +571,11 @@ pub extern "C" fn sdk_nav_dir_find(m: *const u8, n: usize, d: *const i32, cnt: i
 /// negative nav answer.
 #[no_mangle]
 pub extern "C" fn sdk_nav_path(m: *const u8, n: usize, p: i32, count: usize) -> i32 {
-    let s = st();
     let b = unsafe { bytes(m, n) };
-    let end = n as i32;
+    with_state(|s| nav_path(s, b, p, count))
+}
+fn nav_path(s: &mut State, b: &[u8], p: i32, count: usize) -> i32 {
+    let end = b.len() as i32;
     let mut q = p;
     for k in 0..count {
         s.info[0] = k as i32;
@@ -559,15 +601,17 @@ pub extern "C" fn sdk_nav_path(m: *const u8, n: usize, p: i32, count: usize) -> 
 /// the count, or a negative nav answer.
 #[no_mangle]
 pub extern "C" fn sdk_nav_entries(m: *const u8, n: usize, p: i32, d: *mut i32, cap: usize) -> i32 {
-    let (b, o) = nav(m, n);
-    let end = n as i32;
+    let d = unsafe { std::slice::from_raw_parts_mut(d, 2 * cap) };
+    with_state(|s| { let (b, o, _) = nav(s, m, n); nav_entries(b, o, p, d, cap) })
+}
+fn nav_entries(b: &[u8], o: &mut [i32; 8], p: i32, d: &mut [i32], cap: usize) -> i32 {
+    let end = b.len() as i32;
     let c = nav_head(b, o, p, end);
     if c < 0 { return c; }
     let major = o[N_MAJOR as usize];
     let cnt = o[N_LO as usize];
     if major != 4 && major != 5 { return -3; }
     if cnt as usize > cap { return -4; }
-    let d = unsafe { std::slice::from_raw_parts_mut(d, 2 * cap) };
     let mut q = c;
     for i in 0..cnt as usize {
         o[N_STEPS as usize] = 0;
@@ -594,9 +638,11 @@ pub extern "C" fn sdk_nav_entries(m: *const u8, n: usize, p: i32, d: *mut i32, c
 /// early does not pay for the whole container.
 #[no_mangle]
 pub extern "C" fn sdk_nav_page(m: *const u8, n: usize, q: i32, count: usize, is_map: i32, d: *mut i32) -> i32 {
-    let (b, o) = nav(m, n);
-    let end = n as i32;
     let d = unsafe { std::slice::from_raw_parts_mut(d, 2 * count) };
+    with_state(|s| { let (b, o, _) = nav(s, m, n); nav_page(b, o, q, count, is_map, d) })
+}
+fn nav_page(b: &[u8], o: &mut [i32; 8], q: i32, count: usize, is_map: i32, d: &mut [i32]) -> i32 {
+    let end = b.len() as i32;
     let mut q = q;
     for i in 0..count {
         o[N_STEPS as usize] = 0;
@@ -633,7 +679,7 @@ pub extern "C" fn sdk_rs_new(total: i32, quantum: i32, top_any: i32, cose: i32, 
     scan_profile(&mut o, flags);
     let mut s = vec![0i32; rscan_scratch_len(max_depth, total.min(max_bytes)) as usize];
     rscan_init(&mut o, &mut s, total, quantum);
-    put_session(st(), Sess::Scan { o, s, w: Vec::new() })
+    with_state(|st| put_session(st, Sess::Scan { o, s, w: Vec::new() }))
 }
 /// A resumable VM validation (vms) of `total` bytes against `rule` of Program h,
 /// or (total -1, D085) of unknown length in drain mode, or (total -2, D212,
@@ -643,11 +689,12 @@ pub extern "C" fn sdk_rs_new(total: i32, quantum: i32, top_any: i32, cose: i32, 
 #[allow(clippy::too_many_arguments)]
 pub extern "C" fn sdk_vs_new(h: usize, rule: i32, total: i32, quantum: i32, l0: i32, l1: i32, l2: i32, l3: i32,
                              l4: i32, l5: i32, l6: i32, l7: i32, flags: i32) -> i32 {
-    let st = st();
+    with_state(|st| vs_new(st, h, rule, total, quantum, [l0, l1, l2, l3, l4, l5, l6, l7, 0, flags]))
+}
+fn vs_new(st: &mut State, h: usize, rule: i32, total: i32, quantum: i32, lim: [i32; 10]) -> i32 {
     // P9.7 (D327): the live bound (-3), then the arrays from the Program's pool, zeroed
     if st.live >= st.max_live { return -3; }
     let pr = match st.progs.get_mut(h) { Some(Some(pr)) => pr, _ => return -1 };
-    let lim = [l0, l1, l2, l3, l4, l5, l6, l7, 0, flags];
     let cap = pr.p[16].max(1);
     let limit = if total < 0 { vms_unknown_total(&pr.p, &lim) } else { total };
     // D286 A3: S as large as earlier sessions on this Program needed (the arena starts at the lease, D324)
@@ -679,23 +726,24 @@ pub extern "C" fn sdk_vs_new(h: usize, rule: i32, total: i32, quantum: i32, l0: 
 /// negative vms-init answer; -100 on a bad handle.
 #[no_mangle]
 pub extern "C" fn sdk_vs_reseq(h: usize, quantum: i32) -> i32 {
-    let st = st();
-    let progs = &st.progs;
-    match st.sessions.get_mut(h) {
-        Some(Some(Sess::Vm { prog, rule, lim, s, ss, ka, .. })) => match progs.get(*prog) {
-            Some(Some(pr)) => vms_init_seq(&pr.p, &pr.b, *rule, &lim[..], s, ss, ka, quantum),
+    with_state(|st| {
+        let progs = &st.progs;
+        match st.sessions.get_mut(h) {
+            Some(Some(Sess::Vm { prog, rule, lim, s, ss, ka, .. })) => match progs.get(*prog) {
+                Some(Some(pr)) => vms_init_seq(&pr.p, &pr.b, *rule, &lim[..], s, ss, ka, quantum),
+                _ => -100,
+            },
             _ => -100,
-        },
-        _ => -100,
-    }
+        }
+    })
 }
 /// The session's window buffer, at least n bytes (the host copies the window in).
 #[no_mangle]
 pub extern "C" fn sdk_ses_window(h: usize, n: usize) -> *mut u8 {
-    match st().sessions.get_mut(h) {
+    with_state(|st| match st.sessions.get_mut(h) {
         Some(Some(Sess::Scan { w, .. })) | Some(Some(Sess::Vm { w, .. })) => grow(w, n),
         _ => std::ptr::null_mut(),
-    }
+    })
 }
 /// One step over window[0..n) holding message bytes from `base`. Answers the
 /// session's code (rscan: 0, a profile code, -1 need, -2 yield; vms: >= 0 done
@@ -709,7 +757,9 @@ pub extern "C" fn sdk_ses_step(h: usize, n: usize, base: i32) -> i32 { ses_step(
 #[no_mangle]
 pub extern "C" fn sdk_ses_step_at(h: usize, off: usize, n: usize, base: i32) -> i32 { ses_step(h, off, n, base) }
 fn ses_step(h: usize, off: usize, n: usize, base: i32) -> i32 {
-    let st = st();
+    with_state(|st| step_in(st, h, off, n, base))
+}
+fn step_in(st: &mut State, h: usize, off: usize, n: usize, base: i32) -> i32 {
     let progs = &st.progs;
     let (vs, cb) = (&mut st.svs, &mut st.scb);
     match st.sessions.get_mut(h) {
@@ -757,8 +807,7 @@ fn ses_step(h: usize, off: usize, n: usize, base: i32) -> i32 {
 /// negative vms answer; INFO[4], INFO[5] as after a step (P7.13w).
 #[no_mangle]
 pub extern "C" fn sdk_ses_eof(h: usize, n: i32) -> i32 {
-    let st = st();
-    match st.sessions.get_mut(h) {
+    with_state(|st| match st.sessions.get_mut(h) {
         Some(Some(Sess::Vm { ss, out, .. })) => {
             let r = vms_eof(ss, out, n);
             st.info[2] = vms_position(ss);
@@ -769,11 +818,13 @@ pub extern "C" fn sdk_ses_eof(h: usize, n: i32) -> i32 {
             r
         }
         _ => -100,
-    }
+    })
 }
 #[no_mangle]
 pub extern "C" fn sdk_ses_free(h: usize) {
-    let st = st();
+    with_state(|st| ses_free(st, h))
+}
+fn ses_free(st: &mut State, h: usize) {
     let taken = match st.sessions.get_mut(h) { Some(x) => x.take(), None => None };
     // P9.7 (D327): a VM session's live slot is freed and its arrays kept for reuse unless too large
     if let Some(Sess::Vm { prog, s, ss, ka, .. }) = taken {
@@ -812,16 +863,16 @@ pub extern "C" fn sdk_ses_free(h: usize) {
 /// The tape, at least n words (contents kept).
 #[no_mangle]
 pub extern "C" fn sdk_enc_tape(n: usize) -> *mut i32 {
-    grow(&mut st().tape, n)
+    with_state(|s| grow(&mut s.tape, n))
 }
 /// The byte area, at least n bytes (contents kept).
 #[no_mangle]
 pub extern "C" fn sdk_enc_bytes(n: usize) -> *mut u8 {
-    grow(&mut st().bytes, n)
+    with_state(|s| grow(&mut s.bytes, n))
 }
 #[no_mangle]
 pub extern "C" fn sdk_enc_out() -> *const u8 {
-    st().eout.as_ptr()
+    with_state(|s| s.eout.as_ptr())
 }
 
 const ENC_DEPTH: i32 = 4096;
@@ -994,15 +1045,16 @@ impl Enc<'_> {
 #[allow(clippy::too_many_arguments)]
 pub extern "C" fn sdk_enc_keys(at: usize, n: usize, flags: i32, cose: i32, max_bytes: i32, max_depth: i32,
                                max_entries: i32, max_items: i32) -> i32 {
-    let s = st();
-    s.pairs.clear();
-    s.x.clear();
-    let mut e = Enc {
-        tape: &s.tape, bytes: &s.bytes, out: &mut s.eout, pos: 0, keys: &mut s.keys, kpos: 0,
-        pairs: &mut s.pairs, x: &mut s.x, ws: &mut s.ws, flags,
-        scan: [cose, max_bytes, max_depth, max_entries, max_items],
-    };
-    match e.keys_sorted(at, n, 0) { Ok(_) => 0, Err(r) => r }
+    with_state(|s| {
+        s.pairs.clear();
+        s.x.clear();
+        let mut e = Enc {
+            tape: &s.tape, bytes: &s.bytes, out: &mut s.eout, pos: 0, keys: &mut s.keys, kpos: 0,
+            pairs: &mut s.pairs, x: &mut s.x, ws: &mut s.ws, flags,
+            scan: [cose, max_bytes, max_depth, max_entries, max_items],
+        };
+        match e.keys_sorted(at, n, 0) { Ok(_) => 0, Err(r) => r }
+    })
 }
 
 /// Encode the tape's first item under the profile flags: the output length
@@ -1014,18 +1066,19 @@ pub extern "C" fn sdk_enc_keys(at: usize, n: usize, flags: i32, cose: i32, max_b
 #[allow(clippy::too_many_arguments)]
 pub extern "C" fn sdk_enc_run(flags: i32, cose: i32, max_bytes: i32, max_depth: i32, max_entries: i32,
                               max_items: i32) -> i32 {
-    let s = st();
-    s.pairs.clear();
-    s.x.clear();
-    let mut e = Enc {
-        tape: &s.tape, bytes: &s.bytes, out: &mut s.eout, pos: 0, keys: &mut s.keys, kpos: 0,
-        pairs: &mut s.pairs, x: &mut s.x, ws: &mut s.ws, flags,
-        scan: [cose, max_bytes, max_depth, max_entries, max_items],
-    };
-    match e.item(0, 0) {
-        Ok(_) => { s.epos = e.pos; e.pos as i32 }
-        Err(r) => r,
-    }
+    with_state(|s| {
+        s.pairs.clear();
+        s.x.clear();
+        let mut e = Enc {
+            tape: &s.tape, bytes: &s.bytes, out: &mut s.eout, pos: 0, keys: &mut s.keys, kpos: 0,
+            pairs: &mut s.pairs, x: &mut s.x, ws: &mut s.ws, flags,
+            scan: [cose, max_bytes, max_depth, max_entries, max_items],
+        };
+        match e.item(0, 0) {
+            Ok(_) => { let pos = e.pos; s.epos = pos; pos as i32 }
+            Err(r) => r,
+        }
+    })
 }
 
 // ---------------------------------------------------------------- boundary probe
@@ -1034,14 +1087,68 @@ pub extern "C" fn sdk_enc_run(flags: i32, cose: i32, max_bytes: i32, max_depth: 
 /// "fine-grained" encode alternative, timed per call by the bench).
 #[no_mangle]
 pub extern "C" fn sdk_probe_head(major: i32, hi: i32, lo: i32) -> i32 {
-    let s = st();
-    let at = s.epos;
-    ensure(&mut s.eout, at, 9);
-    let r = put_head(&mut s.eout, at as i32, major, hi, lo);
-    s.epos = if r > 1 << 20 { 0 } else { r as usize };
-    r
+    with_state(|s| {
+        let at = s.epos;
+        ensure(&mut s.eout, at, 9);
+        let r = put_head(&mut s.eout, at as i32, major, hi, lo);
+        s.epos = if r > 1 << 20 { 0 } else { r as usize };
+        r
+    })
 }
 #[no_mangle]
 pub extern "C" fn sdk_probe_reset() {
-    st().epos = 0;
+    with_state(|s| s.epos = 0)
+}
+
+// D371: host-side tests of the exports' state access (`cargo test --features sdk` on the assembled
+// crate, run by `bb wasm-sdk-test`).
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// The import, the test's own (no predicate is ever asked here).
+    #[no_mangle]
+    extern "C" fn snug_ext(_id: i32, _ap: *const u8, _al: i32, _ip: *const u8, _il: i32, _room: i32, _ao: i32) -> i32 {
+        -2
+    }
+
+    /// The key scratch the nav lookups read while they hold the nav words: a nav-find, an unsorted
+    /// nav-find and a directory search over {"a": 1, "bb": 2, "c": 3}, the key written through
+    /// `sdk_kbuf` as the SDK writes it. Before D371 these held a `&'static mut` into the state and
+    /// made a second `&mut State` for the key scratch (undefined behaviour, even when it read right).
+    #[test]
+    fn nav_lookups_read_the_key_scratch_beside_the_nav_words() {
+        let m: [u8; 12] = [0xa3, 0x61, b'a', 0x01, 0x62, b'b', b'b', 0x02, 0x61, b'c', 0x03, 0x00];
+        let n = 11;
+        sdk_nav_init();
+        let k = sdk_kbuf(8);
+        // SAFETY: sdk_kbuf answered at least 8 writable bytes; nothing else holds them now.
+        unsafe { std::ptr::copy_nonoverlapping([0x62u8, b'b', b'b'].as_ptr(), k, 3) };
+        assert_eq!(sdk_nav_find(m.as_ptr(), n, 0, 0, 3), 7);
+        assert_eq!(sdk_nav_find_any(m.as_ptr(), n, 0, 0, 3), 7);
+        let mut d = [0i32; 3];
+        assert_eq!(sdk_nav_dir(m.as_ptr(), n, 0, d.as_mut_ptr(), 3), 3);
+        assert_eq!(sdk_nav_dir_find(m.as_ptr(), n, d.as_ptr(), 3, 0, 3), 7);
+        // the nav words are the state's, answered through sdk_nav_words: a head read there
+        assert_eq!(sdk_nav_head(m.as_ptr(), n, 7), 8);
+        // SAFETY: the nav words are 8 i32s of the state; no export runs now.
+        let major = unsafe { *sdk_nav_words().add(N_MAJOR as usize) };
+        assert_eq!(major, 0);
+        unsafe { std::ptr::copy_nonoverlapping([0x61u8, b'z'].as_ptr(), sdk_kbuf(8), 2) };
+        assert_eq!(sdk_nav_find(m.as_ptr(), n, 0, 0, 2), -3);
+    }
+
+    /// An export holds the state for its own duration only; a nested entry is refused (the export
+    /// would abort, a trap) and the state is free again once the outer one returns.
+    #[test]
+    fn a_nested_entry_is_refused() {
+        assert!(!STATE.busy.get(), "free between exports");
+        with_state(|s| {
+            s.epos = 5;
+            assert!(enter().is_none(), "a second entry while an export runs");
+        });
+        assert!(!STATE.busy.get(), "free again after it");
+        sdk_probe_reset();
+        assert_eq!(with_state(|s| s.epos), 0);
+    }
 }

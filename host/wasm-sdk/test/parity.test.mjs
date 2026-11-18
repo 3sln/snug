@@ -854,6 +854,140 @@ test('P9.13: failed streams and push sources free their sessions (CODE-S3); a vo
   assert.equal(WSRC.sessionLimits().live, base);
 });
 
+// D371 (S4): view() and View.validateAt take only a Schema of their own package: an object with a Schema's methods
+// (and, for the SDK, a real `program` and a lying ruleIndex) is the same TypeError as natively, and never asked.
+test('D371: a fake schema object is a TypeError for view() and View.validateAt, as natively', async () => {
+  const ws = await wcompile('r = uint'), ns = await ncompile('r = uint');
+  let asked = 0;
+  const fakeOf = real => ({ validate: () => { asked++; return { ok: true }; }, validateAt: () => { asked++; return { ok: true }; },
+    program: real.program, ruleIndex: () => { asked++; return 0; } });
+  const junk = Uint8Array.of(0xff, 0x1c, 0x5f);
+  const t = tally('fake schema objects');
+  t.same('view', outcome(() => wview(junk, { schema: fakeOf(ws), rule: 'r' })), outcome(() => nview(junk, { schema: fakeOf(ns), rule: 'r' })));
+  const wv = wview(Uint8Array.of(0x01), { schema: ws, rule: 'r' }), nv = nview(Uint8Array.of(0x01), { schema: ns, rule: 'r' });
+  t.same('View.validateAt', outcome(() => wv.validateAt('r', { schema: fakeOf(ws) })), outcome(() => nv.validateAt('r', { schema: fakeOf(ns) })));
+  // a Schema of the other package is not this one's either
+  t.same('the other package\'s Schema', outcome(() => wview(Uint8Array.of(0x01), { schema: ns, rule: 'r' })),
+    outcome(() => nview(Uint8Array.of(0x01), { schema: ws, rule: 'r' })));
+  t.same('a real one', outcome(() => wv.validateAt('r')), outcome(() => nv.validateAt('r')));
+  t.done();
+  assert.deepEqual(outcome(() => wview(junk, { schema: fakeOf(ws), rule: 'r' })).err, 'TypeError');
+  assert.equal(outcome(() => wview(junk, { schema: fakeOf(ws), rule: 'r' })).message, 'snug view: the schema option must be a snug Schema');
+  assert.equal(asked, 0, 'no fake was asked');
+});
+
+// D371: a handle of 2^31 bytes or more (a fake size: nothing is allocated, nothing is read) gets what an
+// over-limit handle of 2^31-1 bytes gets -- validate* the verdict cbor/too_large at offset 0, scan* SnugFault
+// too_large -- as natively; the low-level openSession(length) still refuses such a length with a TypeError.
+// Before, every one of them threw the TypeError.
+test('D371: a handle of 2^31 bytes or more is too_large at offset 0, unread, as natively', async () => {
+  const unread = size => ({ size, read() { throw new Error('a handle past every limit was read'); } });
+  const zeros = size => ({ size, read: (_o, n) => new Uint8Array(n) });
+  const ws = await wcompile('r = bstr'), ns = await ncompile('r = bstr');
+  const base = WSRC.sessionLimits().live;
+  const t = tally('handles of 2^31 bytes or more');
+  for (const size of [2 ** 31, 2 ** 31 + 1, 2 ** 53 - 1]) {
+    for (const o of [{}, { maxBytes: 2 ** 31 - 1 }, { wire: 'valid' }, { wire: 'deterministic', top: 'map' }]) {
+      const label = `${size} ${JSON.stringify(o)}`;
+      const vw = outcome(() => WSRC.validateHandleSync(ws, unread(size), 'r', o)), vn = outcome(() => NSRC.validateHandleSync(ns, unread(size), 'r', o));
+      t.same(`validateHandleSync ${label}`, vw, vn);
+      assert.deepEqual(vw, { ok: { ok: false, reason: 'cbor/too_large', path: [], offset: 0 } }, label);
+      t.same(`validateHandle ${label}`, await outcomeAsync(() => WSRC.validateHandle(ws, unread(size), 'r', o)),
+        await outcomeAsync(() => NSRC.validateHandle(ns, unread(size), 'r', o)));
+      const co = pick(o, ['wire', 'top', 'maxBytes']);
+      const sw = outcome(() => WSRC.scanHandleSync(unread(size), co)), sn = outcome(() => NSRC.scanHandleSync(unread(size), co));
+      t.same(`scanHandleSync ${label}`, sw, sn);
+      assert.equal(sw.code, 'too_large', label);
+      t.same(`scanHandle ${label}`, await outcomeAsync(() => WSRC.scanHandle(unread(size), co)), await outcomeAsync(() => NSRC.scanHandle(unread(size), co)));
+    }
+    t.same(`bad options still a TypeError ${size}`, outcome(() => WSRC.validateHandleSync(ws, unread(size), 'r', { maxDepth: -1 })),
+      outcome(() => NSRC.validateHandleSync(ns, unread(size), 'r', { maxDepth: -1 })));
+    t.same(`unknown rule ${size}`, outcome(() => WSRC.validateHandleSync(ws, unread(size), 'nope')), outcome(() => NSRC.validateHandleSync(ns, unread(size), 'nope')));
+    assert.throws(() => WSRC.openSession(ws, 'r', size), TypeError);
+    assert.throws(() => NSRC.openSession(ns, 'r', size), TypeError);
+  }
+  // the verdict a handle of 2^31-1 bytes gets under the default limits
+  t.same('2^31-1 bytes', outcome(() => WSRC.validateHandleSync(ws, zeros(2 ** 31 - 1), 'r')), outcome(() => WSRC.validateHandleSync(ws, unread(2 ** 31), 'r')));
+  t.done();
+  assert.equal(WSRC.sessionLimits().live, base);
+});
+
+// D371 (the native D347 in the SDK): a session or sequence reader closed by an extension predicate from inside
+// its own step is freed when the step ends, and the step answers 'closed during its step'. Before, close() met
+// the instance's guard and threw; a predicate that swallowed that left the session live (and the reader marked
+// done, so nothing freed it later) until the FinalizationRegistry ran.
+test('D371: a session closed inside its own step is freed when the step ends (D347 in the SDK)', async () => {
+  const b = N.encode([1, 'x']);
+  let outer = null, closed = null, inner = null;
+  const ok = () => {
+    if (outer && closed === null) {
+      try { outer.close(); closed = 'ok'; } catch (e) { closed = e; }
+      try { inner = WSRC.openSession(schema, 'r', b.length); } catch (e) { inner = e; }
+    }
+    return true;
+  };
+  const schema = await wcompile('r = [ uint .ok 0, tstr ]', { controls: { ok } });
+  const base = WSRC.sessionLimits().live;
+  outer = WSRC.openSession(schema, 'r', b.length);
+  assert.equal(WSRC.sessionLimits().live, base + 1);
+  assert.throws(() => outer.step(b, 0), /closed during its step/);
+  assert.equal(closed, 'ok', 'close() inside the step is deferred, not refused');
+  assert.match(inner.message, /called back into snug/, 'the instance stays behind its guard: no session opens inside the step');
+  assert.equal(WSRC.sessionLimits().live, base, 'freed when the step ended');
+  assert.throws(() => outer.step(b, 0), /closed/);
+});
+
+test('D371: a sequence reader closed inside its own step is freed when the step ends, as natively', async () => {
+  const b = N.encode([1, 'x']);
+  const run = async (compile, seq, lib) => {
+    let reader = null, closed = null;
+    const ok = () => {
+      if (reader && closed === null) { try { reader.close(); closed = 'ok'; } catch (e) { closed = e; } }
+      return true;
+    };
+    const schema = await compile('r = [ uint .ok 0, tstr ]', { controls: { ok } });
+    const base = lib.sessionLimits().live;
+    reader = seq.sequenceReader({ schema, rule: 'r' });
+    const res = reader.feed(Uint8Array.of(...b, ...b));
+    const after = lib.sessionLimits().live - base;
+    let again;
+    try { reader.feed(b); } catch (e) { again = e.message; }
+    return { messages: res.messages.length, error: res.error?.message, done: reader.done, closed, after, again };
+  };
+  const w = await run(wcompile, WSEQ, WSRC), n = await run(ncompile, NSEQ, NSRC);
+  assert.deepEqual(w, n);
+  assert.deepEqual(w, { messages: 0, error: 'snug: the sequence was closed during its step', done: true, closed: 'ok', after: 0,
+    again: 'snug: the sequence has ended' });
+});
+
+test('D371: a predicate that closes a reader and swallows the error leaves no session live after the step', async () => {
+  const b = N.encode([1, 'x']);
+  let self = null, other = null, otherError = null;
+  const ok = () => {
+    // its own reader: deferred; another reader: the instance's guard refuses, and the predicate swallows that
+    if (self) { try { self.close(); } catch { /* swallowed */ } }
+    if (other) { try { other.close(); } catch (e) { otherError = e; } }
+    return true;
+  };
+  const schema = await wcompile('r = [ uint .ok 0, tstr ]', { controls: { ok } });
+  const base = WSRC.sessionLimits().live;
+  self = WSEQ.sequenceReader({ schema, rule: 'r' });
+  self.feed(b);
+  self = null;
+  assert.equal(WSRC.sessionLimits().live, base, 'the reader that closed itself is freed by the step');
+  // a reader whose close was refused stays open (not done), so a close outside the step still frees it
+  const held = WSEQ.sequenceReader({ schema, rule: 'r' });
+  other = held;
+  const runner = WSEQ.sequenceReader({ schema, rule: 'r' });
+  runner.feed(b);
+  other = null;
+  assert.match(otherError?.message ?? '', /called back into snug/);
+  assert.equal(held.done, false, 'a close that threw does not mark the reader done');
+  assert.equal(WSRC.sessionLimits().live, base + 2);
+  held.close(); runner.close();
+  assert.equal(WSRC.sessionLimits().live, base);
+});
+
 test('P9.13: an oversized input is refused before it is copied into linear memory (SEC-F3); maxDepth above 256 is a TypeError (SEC-F2)', async () => {
   const s = await wcompile('r = bstr');
   const big = new Uint8Array(32 << 20); big[0] = 0x5a;
