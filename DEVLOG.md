@@ -9784,7 +9784,19 @@ RFC 9682 Appendix B.2 applies the WS rules (comments included) to `b64''` conten
 `host/js/types/schema.d.ts` and `host/rust/src/compile.rs`, and the "at most 17 significant
 digits" comments in `host/js/src/compile.mjs` and `host/rust/src/compile.rs`.
 
-- [ ] **Signed off** (manager)
+- [x] **Signed off** (manager, 2026-11-18), for F10, F11 and F14 only.
+  - Merged on 7182bcf. On the merged main, drift (no drift) and docs-test are ok.
+  - On the branch: the land set plus the extras, 20/20 ok, and all 11 identity gates (one run
+    stopped at the background limit, so the rest were run separately).
+  - The 27 D372 regression suites: 9 checks fail on main and 0 on the branch.
+  - Sizes: no cap changed. The wasm compiler is +806 B, within its cap.
+  - **F9 is NOT in D372.** The permission system refused the engineer's first F9 edit, in
+    kin/compile/arena.kin, and earlier host comment edits. Per the standing rule it was not
+    retried or routed through another agent, and the refusal went to the coordinator. D037
+    stays unsigned until F9 lands.
+  - Open: the stale W1..W8 and "17 significant digits" host comments listed above; whether an
+    AND-of-arrays `.cborseq` controller should be refused rather than matching nothing; and
+    `b64''` comments (RFC 9682 Appendix B.2).
 
 ## Findings
 
