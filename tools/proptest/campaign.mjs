@@ -69,13 +69,12 @@ const casesPerSeed = Number(args['cases-per-seed'] ?? 250);
 const props = (args.props ?? '1,2,3,4,5,6').split(',').map(Number);
 const workersPer = { 1: 2, 2: 1, 3: 1, 4: 1, 5: 2, ...Object.fromEntries((args.workers ?? '').split(',').filter(Boolean).map(x => x.split(':').map(Number))) };
 const timeoutMs = Number(args.timeout ?? 20000);
-const started = new Date();
 // D370: a run writes its findings under .cache (its log directory) unless told otherwise; the
 // tracked tools/proptest/findings/ changes only under --refresh-findings, and its triage.json
 // (hand-written) is what every run reads
 const trackedFindings = join(repo, 'tools/proptest/findings');
 if (args['refresh-findings'] !== undefined && args.out !== undefined) throw new Error('--refresh-findings writes tools/proptest/findings; it takes no --out');
-const logDir = args['log-dir'] ?? join(repo, '.cache/proptest', started.toISOString().replace(/[:.]/g, '-'));
+const logDir = args['log-dir'] ?? join(repo, '.cache/proptest', new Date().toISOString().replace(/[:.]/g, '-'));
 const outDir = args.out ?? (args['refresh-findings'] !== undefined ? trackedFindings : join(logDir, 'findings'));
 const budgetMs = minutes * 60_000;
 
@@ -133,6 +132,7 @@ if ((args.tree ?? 'head') === 'head' && !args['in-snapshot']) {
 }
 
 // ------------------------------------------------------------------ run
+const started = new Date();
 const head = args['snapshot-of'] ?? execFileSync('git', ['-C', repo, 'rev-parse', 'HEAD']).toString().trim();
 // D370 (P9.13 gates N7): the working tree's uncommitted paths are under test, so they are
 // logged and recorded (summary.json "uncommitted"); tools/proptest, the campaign itself, too
@@ -160,7 +160,7 @@ for (const d of dirty.slice(0, 20)) log(`  uncommitted (under test): ${d}`);
 if (dirty.length > 20) log(`  ... and ${dirty.length - 20} more uncommitted path(s)`);
 log(`findings: ${relative(repo, outDir)}${outDir === trackedFindings ? ' (the tracked findings, --refresh-findings)' : ''}`);
 log(`seed offset ${seedOffset}${args['seed-offset'] === undefined && args.seeds === undefined ? ` (from HEAD ${head.slice(0, 12)} and ${today})` : ''}; replay this run with --seeds=${seedLo}..${seedHi} --seed-offset=${seedOffset}`);
-log(`P4.2 campaign: ${minutes} min, seeds ${seedLo}..${seedHi}, ${casesPerSeed} cases/seed, properties ${props.join(',')}, timeout ${timeoutMs} ms; HEAD ${head}${dirty.length ? `; uncommitted under kin/gen/host/corpus: ${dirty.length} paths (--tree=working: they are under test)` : ''}`);
+log(`P4.2 campaign: ${minutes} min, seeds ${seedLo}..${seedHi}, ${casesPerSeed} cases/seed, properties ${props.join(',')}, timeout ${timeoutMs} ms; HEAD ${head}${dirty.length ? `; uncommitted under kin/gen/host/corpus/bench/baseline/tools/proptest: ${dirty.length} paths (--tree=working: they are under test)` : ''}`);
 
 const sigs = new Map();   // sig -> {count, examples: []}
 const warns = new Map();  // sig -> {count, examples: []}: non-failing (wall-clock overruns, with the load average)
