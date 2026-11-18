@@ -9650,7 +9650,17 @@ Entries in CHANGELOG `[Unreleased]` (Breaking, Budget and limits, Fixed, Securit
   like `openSession`).
 * Rust users of `SequenceOptions { .. }` literals must move to field assignment; a builder
   (`SequenceOptions::default().with_...`) would be friendlier, if wanted.
-- [ ] **Signed off** (manager).
+- [x] **Signed off** (manager, 2026-11-18). Merged on 7b808fa. docs-test is ok on the merged
+  main.
+  - Every fix has a regression that failed on main's code.
+  - The N8 UB itself can't be shown at runtime, so its proof is a mutation of the re-entry
+    guard instead.
+  - Miri was not run: no local toolchain has the component, and none was downloaded.
+  - The sizes were cut back under their caps by the engineer; no cap changed.
+  - sequence-test, vmsession-test, rust-api-test-full, msrv and node-oldest were not rerun
+    after the final size-only change in sdk.rs/cc.rs. The batch release set covers them.
+  - Open for the coordinator: `pushScanner`/`pushValidator` with a declared length of 2³¹ or
+    more, and a `SequenceOptions` builder.
 
 ## Findings
 
