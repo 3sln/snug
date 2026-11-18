@@ -169,7 +169,7 @@ export function repoOnlyProblems(text) {
 /** A repository README: its block problems, then what its shipped form and its repo-only blocks violate. */
 export function readmeProblems(text) {
   const { problems } = readmeBlocks(text);
-  if (problems.length) return problems.map(([n, p]) => [n, 'README block', p]);
+  if (problems.length) return problems.map(([n, p]) => [n, 'block markers', p]);
   const shipped = stripShipped(text);
   return [...shippedProblems(shipped), ...leakProblems(text, shipped), ...repoOnlyProblems(text)];
 }
