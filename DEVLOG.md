@@ -9368,7 +9368,8 @@ restored afterwards.
   - Mutation: `kin/vm-session.kin` `vms-message-length` answers one byte past a completed
     message's end, with `SEQ_DRY=1` in the caller's environment. Before: sequence-test
     re-emitted the mutated gen/, printed SEQ_DRY's tally and exited 0: `ok sequence-test 248 s`.
-    After: `env  removed SEQ_DRY`, the full run, FAIL (see the gate record).
+    After: `env  removed SEQ_DRY`, the full run, and FAIL in 1791 s: the JS hosts and Rust
+    `snug::Sequence` disagree with the oracle (Rust on 25918/47834 host runs), 587227 failures.
 * **N3: types-test.** Every exports entry that is a module must have `types` and `default`
   (a plain string entry must be a `.wasm` or `.json` asset). The consumer module now reads
   every value each entry's runtime module exports (`void entry3.Writer;`): an undeclared
@@ -9452,7 +9453,12 @@ restored afterwards.
     `cpu` printed none before) and refuses an unknown name (exit 2). Before: `--skip cold,cpu`
     printed no SKIP line. After: two SKIP lines, so the runner reports NOT RUN.
 * No user-facing change and no CHANGELOG entry.
-* **Gates:** GATES-RECORD
+* **Gates** (branch p-d370 rebased on e31828f, TMPDIR under .cache): `bb gates land` 11/11
+  ok (versions, check, drift, size, types-test, docs-test, npm-test, rust-api-test,
+  wasm-sdk-test, vm-test, compile-test); `bb gates write-test stamp-test watchdog-test runtime
+  wasm-package-test proptest` 6/6 ok, the tracked findings unchanged after proptest;
+  `bb gates --check` and `bb docs-test` ok, with the expected `../kin/src differs from
+  KIN_REF` warning on this machine.
 
 ## Findings
 
