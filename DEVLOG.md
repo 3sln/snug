@@ -9459,6 +9459,17 @@ restored afterwards.
   wasm-package-test proptest` 6/6 ok, the tracked findings unchanged after proptest;
   `bb gates --check` and `bb docs-test` ok, with the expected `../kin/src differs from
   KIN_REF` warning on this machine.
+- [x] **Signed off** (manager, 2026-11-18). Merged on e31828f. `bb gates --check` and
+  docs-test are ok on the merged main.
+  - Each item's fix failed its old gate under mutation.
+  - Accepted choices:
+    - coverage-reducing knobs are removed rather than reported NOT RUN;
+    - a direct `bb proptest` keeps `head` as its default;
+    - tool locators stay `:keep` (a later decision if wanted).
+  - The release set runs once for the follow-up batch.
+  - The new N8 check shows that this machine's `../kin` differs from KIN_REF in 2 src files.
+    Hosted CI builds with KIN_REF, and the hosted drift gate has passed, so the generated code
+    is unaffected. `../kin` is read-only to snug.
 
 ## Findings
 
