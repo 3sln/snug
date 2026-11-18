@@ -1,11 +1,11 @@
 // P9.1: the gate watchdog trips on slow gates, names the gate, its arguments and the cap,
 // kills the gate's whole process group (and nothing else), and otherwise passes the
 // gate's status and arguments through.      node kin/scripts/watchdog-test.mjs  (bb watchdog-test)
-import { spawnSync } from 'node:child_process';
+import { execFileSync, spawn, spawnSync } from 'node:child_process';
 import { readFileSync, writeFileSync, mkdtempSync, mkdirSync, rmSync, existsSync } from 'node:fs';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { caps } from './watchdog.mjs';
+import { caps, killTree, processTree } from './watchdog.mjs';
 
 const root = fileURLToPath(new URL('../../', import.meta.url));
 const wd = join(root, 'kin/scripts/watchdog.mjs');
@@ -92,6 +92,41 @@ const alive = pid => { try { process.kill(pid, 0); return true; } catch { return
     const so = s.stdout + s.stderr;
     line(s.status === 124 && /WATCHDOG FAIL size exceeded its wall-clock cap/.test(so), 'a node gate (tools/size/size.mjs, selfWatch) under --gate-wall=1 fails with 124');
   }
+}
+// 7. D370 (P9.13 gates N9): a helper a gate starts (Chrome, workerd) stays in the gate's process
+// group, so a cap ends it with the gate; killTree ends a helper and its descendants; and no gate
+// code starts a process in a group of its own (spawn's `detached`), which the watchdog would miss
+{
+  mkdirSync(join(root, '.cache'), { recursive: true });
+  const dir = mkdtempSync(join(root, '.cache', 'watchdog-test-'));
+  const pidFile = join(dir, 'pid'), gate = join(dir, 'helper-gate.mjs');
+  // a stuck helper, started as tools/runtime/run.mjs starts Chrome
+  writeFileSync(gate, `import { spawn } from 'node:child_process';\nimport { writeFileSync } from 'node:fs';\n` +
+    `const h = spawn(process.execPath, ['-e', 'setInterval(() => {}, 1000)'], { stdio: 'ignore' });\n` +
+    `writeFileSync(${JSON.stringify(pidFile)}, String(h.pid));\nsetInterval(() => {}, 1000);\n`);
+  const r = watch('helper-gate', process.execPath, [gate], { SNUG_GATE_WALL: '3' });
+  const hpid = existsSync(pidFile) ? Number(readFileSync(pidFile, 'utf8')) : 0;
+  let gone = false;
+  for (let i = 0; i < 50 && !gone; i++) { gone = hpid > 0 && !alive(hpid); if (!gone) spawnSync('/bin/sleep', ['0.1']); }
+  if (!gone && hpid > 0) try { process.kill(hpid, 'SIGKILL'); } catch {}
+  line(r.status === 124 && hpid > 0 && gone, `helper: a stuck helper the gate started (pid ${hpid}) is gone after the gate's wall cap`);
+
+  const sh = spawn('/bin/sh', ['-c', 'sleep 60 & sleep 60 & wait'], { stdio: 'ignore' });
+  spawnSync('/bin/sleep', ['0.5']);
+  const tree = processTree(sh.pid);
+  killTree(sh.pid);
+  let all = false;   // the descendants (the helper itself is this process's child: a zombie until reaped)
+  for (let i = 0; i < 50 && !all; i++) { all = tree.slice(1).every(p => !alive(p)); if (!all) spawnSync('/bin/sleep', ['0.1']); }
+  for (const p of tree) try { process.kill(p, 'SIGKILL'); } catch {}
+  line(tree.length >= 3 && all, `killTree: a helper and its ${tree.length - 1} descendants are gone`);
+  rmSync(dir, { recursive: true, force: true });
+
+  const files = execFileSync('git', ['ls-files', 'kin/scripts', 'tools', 'host', 'corpus/tools', 'ci'], { cwd: root, encoding: 'utf8' })
+    .split('\n').filter(f => /\.(mjs|js|cjs)$/.test(f));
+  const found = [];
+  for (const f of files) readFileSync(join(root, f), 'utf8').split('\n').forEach((l, i) => { if (/detached:\s*true/.test(l)) found.push(`${f}:${i + 1}`); });
+  const own = found.filter(x => x.startsWith('kin/scripts/watchdog.mjs:')), other = found.filter(x => !own.includes(x));
+  line(own.length === 1 && other.length === 0, `no gate code starts a process outside the gate's group (a detached spawn only in the watchdog's own)${other.length ? ': ' + other.join(', ') : ''}`);
 }
 console.log(fails ? `  FAIL ${fails} failure(s)` : '  ok   watchdog-test');
 process.exit(fails ? 1 : 0);

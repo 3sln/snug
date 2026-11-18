@@ -27,7 +27,7 @@ import { basename, extname, join, resolve } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { gzipSync, brotliCompressSync, constants as Z } from 'node:zlib';
 import { buildFixtures } from './fixtures.mjs';
-import { selfWatch } from '../../kin/scripts/watchdog.mjs';
+import { selfWatch, killTree } from '../../kin/scripts/watchdog.mjs';
 import { verdict, selfTest } from './verdict.mjs';
 selfWatch('runtime', import.meta.url);   // P9.1 caps
 
@@ -60,7 +60,10 @@ if (!esbuild) throw new Error('esbuild not found; set SNUG_ESBUILD');
 // `bb gates` fails a set on a SKIP line on stdout (release-policy §2, P9.20).
 if (!skip.has('browser') && !chrome) console.log('SKIP runtime browser arm -- no Chrome (SNUG_CHROME): NOT RUN');
 if (!skip.has('workerd') && !workerd) console.log('SKIP runtime workerd arm -- no workerd (SNUG_WORKERD): NOT RUN');
-for (const a of ['browser', 'workerd']) if (skip.has(a)) console.log(`SKIP runtime ${a} arm -- --skip ${a}: NOT RUN`);
+// D370 (P9.13 gates N9): every --skip prints SKIP, so `bb gates` reports NOT RUN; an unknown name is refused
+const SKIPPABLE = { browser: 'browser arm', workerd: 'workerd arm', cold: 'workerd cold-start arm', cpu: 'CPU-per-call measurements' };
+for (const a of skip) if (!SKIPPABLE[a]) { console.log(`  FAIL runtime: --skip ${a}: not one of ${Object.keys(SKIPPABLE).join(', ')}`); process.exit(2); }
+for (const a of skip) console.log(`SKIP runtime ${SKIPPABLE[a]} -- --skip ${a}: NOT RUN`);
 // P9.13 WP3 (B1): the verdict must catch each kind of failure before it judges this run.
 console.error(`[runtime] verdict self-test: ${selfTest()} injected failures caught`);
 // --inject-fail: one fixture every arm must fail (proves the gate fails end to end)
@@ -231,14 +234,14 @@ if (!skip.has('browser') && chrome) {
   const proc = spawn(chrome, ['--headless=new', `--user-data-dir=${profile}`, '--no-first-run', '--no-default-browser-check',
     '--disable-extensions', '--disable-background-networking', '--disable-component-update', '--disable-sync',
     '--metrics-recording-only', '--no-pings', '--disable-default-apps', `http://127.0.0.1:${port}/`],
-  { stdio: 'ignore', detached: true });
+  { stdio: 'ignore' });   // in the gate's process group: the watchdog's caps cover Chrome (D370)
   try {
     results.browser = await Promise.race([resultP, sleep(180000).then(() => ({ fatal: 'no result in 180 s' }))]);
     results.browser.cspHeader = CSP; results.browser.cspReports = reports;
   } finally {
-    try { process.kill(-proc.pid, 'SIGTERM'); } catch {}
-    await Promise.race([new Promise(r => proc.once('exit', r)), sleep(3000)]);
-    try { process.kill(-proc.pid, 'SIGKILL'); } catch {}
+    const tree = killTree(proc.pid, 'SIGTERM');
+    await Promise.race([new Promise(r => proc.exitCode !== null ? r() : proc.once('exit', r)), sleep(3000)]);
+    killTree(proc.pid, 'SIGKILL', tree);
     server.close();
   }
 }
@@ -260,9 +263,9 @@ const w :Workerd.Worker = (
 };
 async function serve(config, port, { timeout = 20000 } = {}) {
   const t0 = performance.now();
-  const proc = spawn(workerd, ['serve', config], { stdio: ['ignore', 'ignore', 'pipe'], detached: true });
+  const proc = spawn(workerd, ['serve', config], { stdio: ['ignore', 'ignore', 'pipe'] });   // the gate's group (D370)
   let err = ''; proc.stderr.on('data', d => { err += d; });
-  const stop = async () => { const exited = proc.exitCode === null ? new Promise(r => proc.once('exit', r)) : null; try { process.kill(-proc.pid, 'SIGKILL'); } catch {} await exited; };
+  const stop = async () => { const exited = proc.exitCode === null ? new Promise(r => proc.once('exit', r)) : null; killTree(proc.pid); await exited; };
   for (;;) {
     try { const r = await fetch(`http://127.0.0.1:${port}/noop`); await r.text(); return { proc, stop, startMs: performance.now() - t0, stderr: () => err }; }
     catch { if (performance.now() - t0 > timeout || proc.exitCode !== null) { await stop(); throw new Error(`workerd did not answer: ${err}`); } await sleep(5); }
@@ -341,7 +344,7 @@ if (!skip.has('cold') && workerd) {
   }
   const once = async name => {
     const t0 = performance.now();
-    const proc = spawn(workerd, ['serve', configs[name]], { stdio: ['ignore', 'ignore', 'pipe'], detached: true });
+    const proc = spawn(workerd, ['serve', configs[name]], { stdio: ['ignore', 'ignore', 'pipe'] });   // the gate's group (D370)
     let err = ''; proc.stderr.on('data', d => { err += d; });
     try {
       for (;;) {
@@ -356,7 +359,7 @@ if (!skip.has('cold') && workerd) {
           await sleep(2);
         }
       }
-    } finally { const exited = proc.exitCode === null ? new Promise(r => proc.once('exit', r)) : null; try { process.kill(-proc.pid, 'SIGKILL'); } catch {} await exited; }
+    } finally { const exited = proc.exitCode === null ? new Promise(r => proc.once('exit', r)) : null; killTree(proc.pid); await exited; }
   };
   const names = Object.keys(entries), times = Object.fromEntries(names.map(n => [n, []])), cpu = Object.fromEntries(names.map(n => [n, []]));
   log('cold start:', SAMPLES, 'samples per worker');

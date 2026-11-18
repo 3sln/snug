@@ -18,6 +18,7 @@
 # gen/rust/snug (default: all), so a sibling work item's unfinished modules
 # cannot break this item's gates.
 set -e
+set -o pipefail   # D370: a failing find (or put) in a pipeline fails the assembly
 cd "$(dirname "$0")/../.."
 dir="$1"; host="${2:-host/rust/src}"; manifest="${3:-host/rust/Cargo.toml}"
 # The full host now exposes navigation and encoding alongside the legacy APIs.
@@ -31,7 +32,7 @@ mkdir -p "$dir/src"
 put() { mkdir -p "$(dirname "$2")"; cmp -s "$1" "$2" 2>/dev/null || cp "$1" "$2"; }
 puttext() { tmp=$(mktemp); printf '%s' "$1" > "$tmp"; put "$tmp" "$2"; rm -f "$tmp"; }
 put "$manifest" "$dir/Cargo.toml"
-if [ "$manifest" = host/rust/Cargo.toml ]; then put host/rust/build.rs "$dir/build.rs"; fi
+if [ "$manifest" = host/rust/Cargo.toml ]; then put host/rust/build.rs "$dir/build.rs"; else rm -f "$dir/build.rs"; fi
 # The README without its pre-release and repo-only blocks (GitHub only; kin/scripts/prerelease.mjs, D366, D369)
 readme=$(mktemp); node kin/scripts/prerelease.mjs strip host/rust/README.md "$readme"; put "$readme" "$dir/README.md"; rm -f "$readme"
 for f in LICENSE THIRD_PARTY_NOTICES.md SECURITY.md CHANGELOG.md; do put "$f" "$dir/$f"; done
@@ -39,7 +40,15 @@ for f in LICENSE THIRD_PARTY_NOTICES.md SECURITY.md CHANGELOG.md; do put "$f" "$
 # Public API integration tests accompany the default host only.
 if [ "$host" = host/rust/src ] && [ -d host/rust/tests ]; then
   (cd host/rust/tests && find . -type f) | while read -r f; do put "host/rust/tests/$f" "$dir/tests/$f"; done
+  (cd "$dir/tests" && find . -type f) | while read -r f; do [ -f "host/rust/tests/$f" ] || rm -f "$dir/tests/$f"; done
+else
+  rm -rf "$dir/tests"
 fi
+# D370: a host source that is gone does not linger in the crate (kin's modules are rebuilt below)
+(cd "$dir/src" && find . -type f ! -path './snug/*' ! -name snug.rs) | while read -r f; do
+  case "$f" in *.rs) [ -f "$host/$f" ] && continue ;; esac
+  rm -f "$dir/src/$f"
+done
 # kin's modules, and a mod file per directory.
 rm -rf "$dir/src/snug.new" "$dir/src/snug" "$dir/src/snug.rs"
 keep() {  # keep <path under gen/rust>: is it in SNUG_RS_ONLY?

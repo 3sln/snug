@@ -41,15 +41,21 @@ function rust(lines) {
   if (r.status !== 0) throw new Error('write-test binary failed: ' + r.stderr);
   return r.stdout.toString().replace(/\n$/, '').split('\n'); // keep empty last lines; compare() trims per line
 }
+// D370 (P9.13 gates N5): one answer per case on each side, never an empty one: a missing
+// line no longer reads as '' (equal to an empty answer), an extra Rust line fails, and so
+// does a section of 0 cases.
 function compare(name, lines, js) {
   const rs = rust(lines);
-  let same = 0, shown = 0;
+  let same = 0, shown = 0, empty = 0;
   for (let i = 0; i < lines.length; i++) {
-    if ((rs[i] ?? '').trimEnd() === (js[i] ?? '').trimEnd()) same++;
-    else if (shown++ < 3) console.log(`    differs: ${lines[i].slice(0, 100)}\n      js ${js[i]?.slice(0, 120)}\n      rs ${rs[i]?.slice(0, 120)}`);
+    const a = rs[i]?.trimEnd(), b = js[i]?.trimEnd();
+    if (!a || !b) empty++;
+    if (a && b && a === b) same++;
+    else if (shown++ < 3) console.log(`    differs: ${lines[i].slice(0, 100)}\n      js ${JSON.stringify(js[i])?.slice(0, 120)}\n      rs ${JSON.stringify(rs[i])?.slice(0, 120)}`);
   }
   const panics = rs.filter(s => s === 'PANIC').length;
-  ok(same === lines.length && panics === 0, `${name}: ${same}/${lines.length} identical across hosts, ${panics} Rust panics`);
+  ok(lines.length > 0 && rs.length === lines.length && js.length === lines.length && same === lines.length && panics === 0,
+    `${name}: ${same}/${lines.length} identical across hosts, ${panics} Rust panics, ${empty} missing or empty answers (Rust ${rs.length} lines, JS ${js.length})`);
   return rs;
 }
 const r = createRandom(SEED);

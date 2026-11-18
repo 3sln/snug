@@ -13,6 +13,14 @@
 ;; skipped", or node:test reporting a skipped or todo test. A NOT RUN, or a :blocked
 ;; gate (never run), fails the run (policy §2, §4).
 ;; The summary names every gate's result and wall time. Exit 0 only if all ok.
+;;
+;; D370 (P9.13 gates N2, N8):
+;; - each gate runs without the coverage knobs of ci/gate-map.edn :knobs :clear in its
+;;   environment, and with a :floor knob only on its toolchain floor; the runner prints what
+;;   it removed (gate-env);
+;; - --check (and every run) compares ../kin/src, which bb.edn puts on the classpath, with
+;;   the KIN_REF commit that ci.yml and release.yml build with: a difference is a warning
+;;   locally and an error in GitHub Actions (kin-problems).
 (require '[babashka.fs :as fs]
          '[babashka.process :as p]
          '[clojure.edn :as edn]
@@ -160,6 +168,134 @@
            :when (not (some-> (:if job) str (str/includes? "needs.guard.outputs.write == 'true'")))]
        (str "release.yml: job " (name k) " may write but does not require needs.guard.outputs.write == 'true'")))))
 
+;; ------------------------------------------------------------------ D370: knobs (N2)
+(def knobs (:knobs gate-map))
+(def clear-knobs (set (map str (:clear knobs))))
+(def floor-knobs (into {} (for [[k v] (:floor knobs)] [(str k) v])))
+(def keep-knobs (map str (:keep knobs)))
+(def knob-prefix #"^(SNUG|SEQ|VMTEST|RUBY|CDDL|RFC|PEG)_")
+
+(defn classified? [n]
+  (or (clear-knobs n) (contains? floor-knobs n)
+      (some #(if (str/ends-with? % "*") (str/starts-with? n (subs % 0 (dec (count %)))) (= % n)) keep-knobs)))
+
+(defn floor-version
+  "The toolchain floor a :floor knob is for: the engines.node major, or the rust-version."
+  [on]
+  (case on
+    :node (second (re-find #"^>=(\d+)$" (str (get-in (json/parse-string (slurp (str root "/host/js/package.json"))) ["engines" "node"]))))
+    :rust (second (re-find #"(?m)^rust-version\s*=\s*\"([0-9.]+)\"" (slurp (str root "/host/rust/Cargo.toml"))))))
+
+(def toolchain-version
+  (memoize (fn [on]
+             (try (case on
+                    :node (str/trim (:out (p/shell {:out :string} "node" "-p" "process.versions.node")))
+                    :rust (second (re-find #"^rustc (\S+)" (:out (p/shell {:out :string} "rustc" "--version")))))
+                  (catch Exception _ nil)))))
+
+(defn on-floor? [on]
+  (let [f (floor-version on) v (toolchain-version on)]
+    (boolean (and f v (or (= v f) (str/starts-with? v (str f ".")))))))
+
+(defn gate-env
+  "The environment gate g runs with: this process's, less every :clear knob and every :floor
+  knob that is not for g on its floor. Answers {:env :removed :floor}."
+  [g]
+  (let [env (into {} (System/getenv))
+        removed (sort (concat (filter #(contains? env %) clear-knobs)
+                              (for [[k {:keys [gates on]}] floor-knobs
+                                    :when (contains? env k)
+                                    :when (not (and (some #{g} gates) (on-floor? on)))]
+                                k)))
+        floor (for [[k {:keys [on]}] floor-knobs :when (and (contains? env k) (not (some #{k} removed)))]
+                (str k "=" (get env k) " (" (name on) " " (toolchain-version on) ", the floor)"))]
+    {:env (apply dissoc env removed) :removed removed :floor floor}))
+
+(defn knob-reads
+  "Env variable names (knob-prefix) that tracked gate code reads: process.env.X, env.X,
+  process.env['X'], env::var(\"X\"), and in sh scripts $X / ${X}. Answers {name #{files}}."
+  []
+  (let [files (->> (str/split-lines (:out (p/shell {:dir root :out :string} "git" "ls-files" "kin/scripts" "tools" "host" "corpus/tools" "ci")))
+                   (remove #(re-find #"\.(md|json|cddl|cbor|edn|txt|wasm|bin|capnp|toml|lock|diag|hex|csv|abnf|abnfb)$" %))
+                   (filter #(fs/regular-file? (str root "/" %))))
+        pats [#"\benv\.([A-Z][A-Z0-9_]*)" #"\benv\[['\"]([A-Z][A-Z0-9_]*)['\"]\]"
+              #"env::var(?:_os)?\(\"([A-Z][A-Z0-9_]*)\""]
+        sh-pat #"\$\{?([A-Z][A-Z0-9_]*)"]
+    (reduce (fn [acc f]
+              (let [text (slurp (str root "/" f))
+                    sh? (or (str/ends-with? f ".sh") (re-find #"^#!\S*\b(sh|bash)\b" text))]
+                (reduce (fn [acc n] (update acc n (fnil conj #{}) f)) acc
+                        (for [re (if sh? (conj pats sh-pat) pats) [_ n] (re-seq re text) :when (re-find knob-prefix n)] n))))
+            {} files)))
+
+(defn knob-problems
+  "D370: every knob gate code reads is classified; no workflow sets a :clear knob, nor a :floor
+  knob outside its floor's cells; ci/run-gate.sh removes exactly the :clear knobs."
+  []
+  (let [wf (fn [n] (let [f (str root "/.github/workflows/" n)] (when (fs/exists? f) (yaml/parse-string (slurp f)))))
+        floor-major (floor-version :node)
+        step-problems
+        (fn [file doc]
+          (concat
+           (for [[k v] (:env doc) :let [k (name k)] :when (or (clear-knobs k) (floor-knobs k))]
+             (str file ": the workflow's env sets " k "=" v " (ci/gate-map.edn :knobs; only a step may set a :floor knob)"))
+           (for [[jk job] (:jobs doc) [k v] (:env job) :let [k (name k)] :when (or (clear-knobs k) (floor-knobs k))]
+             (str file ": job " (name jk) "'s env sets " k "=" v " (ci/gate-map.edn :knobs; only a step may set a :floor knob)"))
+           (for [[jk job] (:jobs doc)
+                 [st node] (loop [[st & more] (:steps job) node nil acc []]
+                             (if-not st acc
+                                     (let [node (if (some-> (:uses st) (str/starts-with? "actions/setup-node@"))
+                                                  (str (get-in st [:with :node-version])) node)]
+                                       (recur more node (conj acc [st node])))))
+                 [k v] (:env st) :let [k (name k) run (str (:run st)) fl (floor-knobs k)]
+                 :when (or (clear-knobs k) fl)
+                 :let [ok (and fl (some #(str/includes? run (str %)) (:gates fl))
+                               (case (:on fl)
+                                 :node (= node floor-major)
+                                 :rust (str/includes? run "$SNUG_RUST_VERSION")))]
+                 :when (not ok)]
+             (str file ": job " (name jk) " step " (pr-str (or (:name st) run)) " sets " k "=" v
+                  (if fl (str ", a :floor knob, outside its floor (" (str/join "/" (:gates fl)) " on the " (name (:on fl)) " floor)")
+                      ", a :clear knob")))))
+        action (let [f (str root "/.github/actions/setup/action.yml")] (if (fs/exists? f) (slurp f) ""))
+        run-gate (slurp (str root "/ci/run-gate.sh"))
+        rg-list (some->> (re-find #"(?m)^knobs=\"([^\"]*)\"" run-gate) second (re-seq #"\S+") set)]
+    (concat
+     (for [[n readers] (sort (knob-reads)) :when (not (classified? n))]
+       (str "knob " n " (read by " (str/join ", " (sort readers)) ") is not in ci/gate-map.edn :knobs (:clear, :floor or :keep)"))
+     (step-problems "ci.yml" (wf "ci.yml"))
+     (step-problems "release.yml" (wf "release.yml"))
+     (for [[_ k] (re-seq #"([A-Z][A-Z0-9_]*)=[^\n]*>>\s*\"?\$GITHUB_ENV" action) :when (or (clear-knobs k) (floor-knobs k))]
+       (str ".github/actions/setup/action.yml: writes " k " to GITHUB_ENV (ci/gate-map.edn :knobs)"))
+     (when (not= rg-list clear-knobs)
+       [(str "ci/run-gate.sh: its knobs=\"...\" line must name exactly ci/gate-map.edn :knobs :clear; it has "
+             (vec (sort rg-list)) ", the map " (vec (sort clear-knobs)))]))))
+
+;; ------------------------------------------------------------------ D370: ../kin (N8)
+(defn kin-problems
+  "../kin/src (bb.edn's classpath) against ci.yml's KIN_REF: [errors warnings]. A difference
+  is an error under GitHub Actions (GITHUB_ACTIONS=true), where ../kin must be KIN_REF, and a
+  warning elsewhere."
+  []
+  (let [ci (let [f (str root "/.github/workflows/ci.yml")] (when (fs/exists? f) (yaml/parse-string (slurp f))))
+        ref (some-> (get-in ci [:env :KIN_REF]) str)
+        kin (str root "/../kin")
+        git (fn [& args] (let [r (apply p/shell {:dir kin :out :string :err :string :continue true} "git" args)]
+                           (when (zero? (:exit r)) (str/trim (:out r)))))
+        msg (cond (not (re-matches #"[0-9a-f]{40}" (str ref))) (str "ci.yml: KIN_REF " (pr-str ref) " is not a full commit SHA")
+                  (not (fs/exists? (str kin "/src"))) "../kin/src is missing (bb.edn's :paths needs kin checked out next to snug)"
+                  (not (git "cat-file" "-e" (str ref "^{commit}"))) (str "../kin does not have KIN_REF " ref " (git -C ../kin fetch); its src cannot be checked")
+                  :else (let [changed (concat (some-> (git "diff" "--name-only" ref "--" "src") str/split-lines)
+                                              (some-> (git "ls-files" "--others" "--exclude-standard" "--" "src") str/split-lines))
+                              changed (remove str/blank? changed)]
+                          (when (seq changed)
+                            (str "../kin/src differs from KIN_REF " (subs ref 0 12) " (../kin HEAD " (some-> (git "rev-parse" "--short=12" "HEAD")) "): "
+                                 (count changed) " file(s), e.g. " (str/join ", " (take 3 changed))
+                                 "; hosted CI builds with KIN_REF, so this run may not be what CI sees"))))]
+    (cond (nil? msg) [[] []]
+          (= "true" (System/getenv "GITHUB_ACTIONS")) [[msg] []]
+          :else [[] [msg]])))
+
 (defn problems
   "The map's disagreements with bb.edn and the watchdog: [errors warnings]."
   []
@@ -178,10 +314,14 @@
                   (str "set " (name s) " names " m ", which is not a gate"))
                 (partition-problems)
                 (ci-matrix-problems)
-                (workflow-problems))
-        warnings (for [t (sort tasks) :when (not (contains? named t))]
-                   (str "bb task " t " is in neither :gates nor :not-gates"))]
-    [(vec errors) (vec warnings)]))
+                (workflow-problems)
+                (knob-problems))
+        [kin-errors kin-warnings] (kin-problems)
+        warnings (concat
+                  (for [t (sort tasks) :when (not (contains? named t))]
+                    (str "bb task " t " is in neither :gates nor :not-gates"))
+                  kin-warnings)]
+    [(vec (concat errors kin-errors)) (vec warnings)]))
 
 (def not-run-patterns
   "P9.13 WP3 (S4): lines that mean part of a gate did not run. Each one fails its gate."
@@ -201,7 +341,11 @@
       (let [known (contains? (watchdog-defaults) w)
             argv (concat ["node" (str root "/kin/scripts/watchdog.mjs") w "--"] cmd
                          (when-not known [(str "--gate-wall=" (first caps)) (str "--gate-cpu=" (second caps))]))
-            proc (apply p/process {:dir (str root "/" (or dir ".")) :in :inherit} argv)
+            {:keys [env removed floor]} (gate-env g)
+            _ (when (seq removed)
+                (println (str "  env  removed " (str/join " " removed) " (coverage knobs: ci/gate-map.edn :knobs; the gate runs at full coverage)")))
+            _ (doseq [f floor] (println (str "  env  kept " f)))
+            proc (apply p/process {:dir (str root "/" (or dir ".")) :in :inherit :env env} argv)
             skip (atom nil)
             seen (fn [line] (when (not-run? line) (swap! skip #(or % line))))
             ;; stderr is read too (S4): echoed to stderr, checked like stdout
