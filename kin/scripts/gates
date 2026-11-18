@@ -62,25 +62,103 @@
        (str "shard " sh ": wall caps sum to " wall " s, past " shard-wall-max " s (one CI job)")))))
 
 (defn ci-matrix-problems
-  "P9.13 WP3 (S10): hosted CI's release jobs (.github/workflows/ci.yml, jobs.release's matrix)
-  run exactly the shards of :partitions :release, each once, and each job's timeout-minutes
-  is above its shard's wall caps and at most 360."
+  "P9.13 WP3 (S10), D368: hosted CI (.github/workflows/ci.yml) runs what this map says.
+  - release: a step per shard, exactly :partitions :release in order, each running even after an
+    earlier one failed (if: success() || failure()), each step's timeout-minutes above the
+    largest wall cap of its shard's gates (the watchdog, not GitHub, stops a stuck gate), the
+    job's at most 360;
+  - land: `bb gates land`, the job's timeout-minutes above the set's wall caps and at most 360;
+  - compat (macOS) and linux: exactly the :ci-compat cells (npm-test per Node major, rust-api-test
+    per Rust toolchain), each running after a failure, the job's timeout-minutes above their caps
+    and at most 360;
+  - ci: needs every job."
   []
   (let [f (str root "/.github/workflows/ci.yml")]
     (if-not (fs/exists? f)
       ["ci.yml: .github/workflows/ci.yml is missing"]
-      (let [rows (get-in (yaml/parse-string (slurp f)) [:jobs :release :strategy :matrix :include])
-            shards (map :shard rows)
-            want (map name (get-in gate-map [:partitions :release]))]
+      (let [jobs (:jobs (yaml/parse-string (slurp f)))
+            cap-min (fn [g] (quot (or (first (:caps (get gates g))) 0) 60))
+            sum-min (fn [gs] (reduce + (map cap-min gs)))
+            always? (fn [st] (some-> (:if st) str (str/includes? "success() || failure()")))
+            job-timeout (fn [k] (get-in jobs [k :timeout-minutes]))
+            within (fn [k need] (let [t (job-timeout k)]
+                                  (when (or (not (number? t)) (<= t need) (> t 360))
+                                    [(str "ci.yml: job " (name k) " has timeout-minutes " t
+                                          " (it must be above " need " and at most 360)")])))
+            ;; release
+            rsteps (filter #(some->> (:run %) (re-find #"^bb gates (release-\S+)$")) (get-in jobs [:release :steps]))
+            shards (map #(second (re-find #"^bb gates (release-\S+)$" (:run %))) rsteps)
+            want (map name (get-in gate-map [:partitions :release]))
+            ;; compat / linux cells: [kind value step]
+            cells (fn [k npm-re rust-re]
+                    (loop [[st & more] (get-in jobs [k :steps]) node nil acc []]
+                      (if-not st
+                        acc
+                        (let [run (str (:run st))
+                              node (if (some-> (:uses st) (str/starts-with? "actions/setup-node@"))
+                                     (str (get-in st [:with :node-version])) node)
+                              rust (second (re-find rust-re run))]
+                          (recur more node
+                                 (cond (re-find npm-re run) (conj acc [:node node st])
+                                       rust (conj acc [:rust (if (str/includes? rust "SNUG_RUST_VERSION") "rust-version" rust) st])
+                                       :else acc))))))
+            want-cells (fn [] (let [{:keys [node rust]} (:ci-compat gate-map)]
+                                (sort (concat (map #(str "node " %) node) (map #(str "rust " %) rust)))))
+            cell-problems (fn [k npm-re rust-re]
+                            (let [cs (cells k npm-re rust-re)
+                                  got (sort (map (fn [[kind v]] (str (name kind) " " v)) cs))]
+                              (concat
+                               (when (not= got (want-cells))
+                                 [(str "ci.yml: job " (name k) " runs the cells " (vec got) ", :ci-compat is " (vec (want-cells)))])
+                               (for [[kind v st] cs :when (not (always? st))]
+                                 (str "ci.yml: job " (name k) "'s " (name kind) " " v " cell must run after a failure (if: success() || failure())"))
+                               (within k (+ (* (count (filter #(= :node (first %)) cs)) (cap-min 'npm-test))
+                                            (* (count (filter #(= :rust (first %)) cs)) (cap-min 'rust-api-test)))))))]
         (concat
-         (when (not= (frequencies shards) (frequencies want))
-           [(str "ci.yml: the release matrix runs " (vec shards) ", :partitions :release is " (vec want))])
-         (for [{:keys [shard timeout]} rows
-               :let [members (get (:sets gate-map) (keyword shard))
-                     wall (reduce + (map #(or (first (:caps (get gates %))) 0) members))]
-               :when (and members (or (not (number? timeout)) (<= (* 60 timeout) wall) (> timeout 360)))]
-           (str "ci.yml: release job " shard " has timeout-minutes " timeout ", its gates' wall caps sum to "
-                (quot wall 60) " min (it must be above that and at most 360)")))))))
+         (when (not= shards want)
+           [(str "ci.yml: the release job's steps run " (vec shards) ", :partitions :release is " (vec want) " (in that order)")])
+         (for [st rsteps
+               :let [shard (second (re-find #"^bb gates (release-\S+)$" (:run st)))
+                     members (get (:sets gate-map) (keyword shard))
+                     biggest (reduce max 0 (map cap-min members))
+                     t (:timeout-minutes st)]
+               :when (and members (or (not (number? t)) (<= t biggest) (not (always? st))))]
+           (str "ci.yml: release step " shard " needs timeout-minutes above " biggest
+                " (its largest gate wall cap) and if: success() || failure(); it has " t ", " (pr-str (:if st))))
+         (let [t (job-timeout :release)] (when (or (not (number? t)) (> t 360)) [(str "ci.yml: job release has timeout-minutes " t " (at most 360)")]))
+         (when-not (some #(= "bb gates land" (:run %)) (get-in jobs [:land :steps])) ["ci.yml: job land does not run `bb gates land`"])
+         (within :land (sum-min (get-in gate-map [:sets :land])))
+         (cell-problems :compat #"^bb gates npm-test$" #"^rustup run (\S+) bb gates rust-api-test$")
+         (cell-problems :linux #"ci/run-gate\.sh npm-test " #"^rustup run (\S+) bash ci/run-gate\.sh rust-api-test ")
+         (let [needs (set (map keyword (get-in jobs [:ci :needs])))]
+           (for [k [:land :release :compat :linux] :when (not (needs k))]
+             (str "ci.yml: job ci does not need " (name k)))))))))
+
+(defn workflow-problems
+  "D368: every action a workflow or the setup action uses is local (./) or pinned by a full
+  commit SHA; release.yml builds against ci.yml's KIN_REF; and every release.yml job that may
+  write (contents: write, or id-token: write for trusted publishing) runs only when the guard
+  allows writes (needs.guard.outputs.write == 'true': main, a push or a non-dry-run dispatch)."
+  []
+  (let [dir (str root "/.github")
+        files (concat (fs/glob dir "workflows/*.yml") (fs/glob dir "actions/*/action.yml"))
+        uses (fn uses [x] (cond (map? x) (concat (when-let [u (:uses x)] [u]) (mapcat uses (vals x)))
+                                (sequential? x) (mapcat uses x) :else []))
+        rel (fn [f] (str (fs/relativize root f)))
+        doc (fn [n] (let [f (str dir "/workflows/" n)] (when (fs/exists? f) (yaml/parse-string (slurp f)))))
+        ci (doc "ci.yml") release (doc "release.yml")]
+    (concat
+     (for [f files, u (uses (yaml/parse-string (slurp (str f))))
+           :when (not (or (str/starts-with? u "./") (re-matches #"[\w.-]+/[\w./-]+@[0-9a-f]{40}" u)))]
+       (str (rel f) ": " u " is not pinned by a full commit SHA"))
+     (when-not release [".github/workflows/release.yml is missing"])
+     (when (and release (not= (get-in release [:env :KIN_REF]) (get-in ci [:env :KIN_REF])))
+       [(str "release.yml: KIN_REF " (get-in release [:env :KIN_REF]) " is not ci.yml's " (get-in ci [:env :KIN_REF]))])
+     (for [[k job] (:jobs release)
+           :let [perms (:permissions job)]
+           :when (and (map? perms) (or (= "write" (some-> (:contents perms) name)) (= "write" (some-> (:id-token perms) name))))
+           :when (not (some-> (:if job) str (str/includes? "needs.guard.outputs.write == 'true'")))]
+       (str "release.yml: job " (name k) " may write but does not require needs.guard.outputs.write == 'true'")))))
 
 (defn problems
   "The map's disagreements with bb.edn and the watchdog: [errors warnings]."
@@ -99,7 +177,8 @@
                 (for [[s members] (:sets gate-map) m members :when (not (contains? gates m))]
                   (str "set " (name s) " names " m ", which is not a gate"))
                 (partition-problems)
-                (ci-matrix-problems))
+                (ci-matrix-problems)
+                (workflow-problems))
         warnings (for [t (sort tasks) :when (not (contains? named t))]
                    (str "bb task " t " is in neither :gates nor :not-gates"))]
     [(vec errors) (vec warnings)]))

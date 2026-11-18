@@ -94,7 +94,7 @@ function main(o) {
   const placeholder = edn.replace(/;.*$/gm, '').match(/:placeholder\s+"([^"]+)"/)?.[1];
   if (!placeholder) fail(`${src}:version.edn has no :placeholder "…"`);
   if (version === placeholder) fail(`${version} is version.edn's placeholder: build from a stamped tree (bb stamp)`);
-  // A release's source commit has no README pre-release block (D366; release-policy §4 step 3):
+  // A release's source commit has no README pre-release block (D366; release-policy §4, the bump):
   // the repository's front pages must not tell visitors the release they can install is unreleased.
   for (const readme of READMES) {
     const text = run('git', ['-C', o.sourceRepo, 'show', `${src}:${readme}`], { allowFail: true });
@@ -102,7 +102,7 @@ function main(o) {
     const { blocks, problems } = prereleaseBlocks(text);
     if (blocks.length || problems.length)
       fail(`${src.slice(0, 12)}:${readme} still has its ${OPEN} block: remove it in the release commit ` +
-        `(docs/release-policy.md §4 step 3) before building the dist for ${version}`);
+        `(docs/release-policy.md §4, the bump) before building the dist for ${version}`);
   }
 
   // The tree.

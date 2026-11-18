@@ -353,185 +353,198 @@ nightly is missing, and `valid-test` skips its cbor2 arm without
 
 ## 4. How a release is cut
 
-**Who decides.** The release is the **owner's call**. The manager declares
-the release candidate (RC). The owner decides whether, when and what to
-publish. **Nothing is published, pushed to a registry, or tagged for one
-without the owner's explicit go for a named commit and version.** The
-go is recorded in DEVLOG. A coordinator or manager instruction is not a
-go. Delegations such as D303 cover size caps only, not releases.
+**Who decides.** The release is the **owner's call**. **Nothing is
+published, pushed to a registry, or tagged for one without the owner's
+go.** Since 0.1.0 (D368) the go is the release commit itself: a commit on
+`main` that sets `:version` in `version.edn`, merged or approved by the
+owner. Merging it starts the release; nobody publishes by hand. A
+coordinator or manager instruction is not a go, and neither is a commit
+that does not change `version.edn`. Delegations such as D303 cover size
+caps only, not releases.
 
-**Steps (proposed):**
+**What is manual: only the bump.** One commit (or pull request) to `main`:
 
-1. **RC.** Every Phase 9 item in DEVLOG is ticked, including "RC declared".
-   That covers:
-   - P9.8, the crate-diff re-run;
-   - P9.9, the full-length proptest, vmsession-test and `rust-api-test`
-     `full` runs, chunked under the P9.1 watchdog caps with their seeds
-     recorded;
-   - P9.12, the binary-size audit;
-   - P9.13, the final review with its blocking findings fixed.
-2. **Owner decisions.** Every box in §7 is decided. Package names and
-   registries must be settled before any manifest changes.
-3. **Release commit** on main, landed like any change:
-   - set `:version` in `version.edn` (the version sites keep the
-     placeholder: stamped versions are never checked in, §1.1);
-   - fill in the manifest fields from §8 (`private`/`publish`, `engines`,
-     `rust-version`, repository and licence metadata);
-   - move `[Unreleased]` to `[x.y.z] — date`;
-   - remove the pre-release block from the repo README in the release
-     commit: the `<!-- prerelease -->` … `<!-- /prerelease -->` block of
-     `README.md`, `host/rust/README.md` and `host/wasm-sdk/README.md` (D366;
-     it tells GitHub visitors to build from a checkout, and no shipped copy
-     carries it). `bb dist` refuses to build a release from a source commit
-     that still has one, and `bb docs-test` accepts zero or one well-formed
-     block.
-4. **Gates on that exact commit.** All must be green, and a SKIP counts
-   as a failure. Each runs under the watchdog (D326), with the result
-   recorded in DEVLOG:
-   - `bb versions`, `bb check`, `bb drift`, `bb stamp-test`;
-   - `bb scan-test`, `bb rscan-test`, `bb vm-test`, `bb vmsession-test`,
-     `bb sequence-test`, `bb valid-test` (with the cbor2 arm present);
-   - `bb compile-test`, `bb compile-fuzz`;
-   - `bb nav-test`, `bb write-test`, `bb unicode-test`, `bb abnf-test`;
-   - `bb rust-api-test` (default mode, and the `full` mode once P9.6a
-     lands);
-   - `bb wasm-sdk-test` and `bb wasm-package-test` (the SDK ships, O3);
-   - `bb size`, `bb types-test`, `bb watchdog-test`;
-   - `bb docs-test` (D366): the shipped documents, declarations, examples
-     and rustdoc carry no pre-release text ("not yet published", "private",
-     the version placeholder), no internal process references and no broken
-     links. The user docs are therefore written for the released state
-     before the release commit; this gate refuses a release whose text says
-     otherwise;
-   - `npm test` in `host/js`;
-   - `node corpus/tools/run-rfc-corpus.mjs --gate` (no unexplained or
-     stale checks);
-   - `bb proptest` (at least the 2-minute P1–P5 campaign);
-   - the runtime-support gates of §2: the oldest declared Node line, the
-     declared MSRV, and `tools/runtime/run.mjs` on Chrome and workerd.
+- `:version` in `version.edn` set to the new version (the version sites
+  keep the placeholder: stamped versions are never checked in, §1.1);
+- `CHANGELOG.md`: the `[Unreleased]` entries moved under
+  `[x.y.z] — date` (§3). The workflow takes the release notes from that
+  section and refuses a release without it;
+- no README pre-release block (D366): `bb dist` refuses a source commit
+  that still has one;
+- whatever else the release needs, landed before or in the same commit
+  (docs, manifests): the land gates and `bb docs-test` already hold `main`
+  to its released state.
 
-   If the code changed after P9.9's full runs, the owner decides whether
-   those runs are repeated, and the decision is recorded.
+**What the workflow does** (`.github/workflows/release.yml`, §4.2), in the
+owner's order — test, then tag and release, then publish:
 
-   The identity gates (`bb identity`) also run on the stamped tree of
-   step 5, because the version is in every source key.
-5. **Build the artefacts, locally, without publishing,** from a stamped
-   tree that is never committed: `git worktree add --detach .cache/release
-   <commit>`, then `bb stamp` there (it stamps `version.edn`'s
-   `:version` and re-emits `gen/`). In that tree:
-   - npm: `npm run build` in `host/js` into a fresh scratch directory,
-     then `npm pack --dry-run` there to review the file list;
-   - crate: `kin/scripts/rust-crate`, then `cargo package --list` and
-     `cargo package --no-verify`, offline, in the assembled crate;
-   - SDK: `kin/scripts/wasm-build sdk` and `cc` with the pinned toolchain
-     (`nightly-2026-09-16` with `wasm32-unknown-unknown` and `rust-src`,
-     which `-Zbuild-std` needs; the default in `kin/scripts/wasm-build`,
-     overridden only by `SNUG_WASM_TOOLCHAIN`, and the manifest records
-     which was used) and the pinned `wasm-opt` (binaryen in `bench/compare`, D341). The
-     shipped modules are `.cache/snug-wasm-sdk/snug.wasm` (opt-level 3, then
-     `wasm-opt -O3`) and `.cache/snug-wasm-cc/snug.wasm` (opt-level "z",
-     then `wasm-opt -Oz`). `bb wasm-size` gates their sizes.
-     `bb wasm-release` runs both builds and stages the release artefacts in
-     `.cache/release/wasm`: `snug.wasm`, `snug-compiler.wasm`, `SHA256SUMS`
-     and `MANIFEST.json` (version, commit, toolchain, `wasm-opt` version,
-     sizes, SHA-256, required wasm features). Then
-     `node host/wasm-sdk/package-build.mjs` stages `@3sln/snug-wasm` from
-     those exact bytes into `.cache/release/npm/snug-wasm`, and
-     `npm pack --dry-run` there lists its files. `bb wasm-package-test` does
-     all of this and installs the packed tarball into a scratch project
-     (docs/wasm-sdk.md).
+1. **Guard** (`kin/scripts/release-guard.mjs`): which parts of the
+   version's release already exist — the tag `src/vX.Y.Z`, the `dist` tag
+   `vX.Y.Z`, the GitHub release, the two npm packages, the crate.
+   Everything there: a clean no-op. Nothing there: a release of this
+   commit. A source tag but parts missing: it resumes, building the
+   tagged commit and doing only what is missing.
+2. **Gates on that exact commit:** `ci.yml`'s release job (the whole
+   release set of `ci/gate-map.edn`, §4.1), compat and linux. All must be
+   green; a NOT RUN line counts as a failure (§2).
+3. **Build** (`kin/scripts/release-build.mjs`, which runs locally too): a
+   detached worktree of the commit, `bb stamp`, the `@3sln/snug` and
+   `@3sln/snug-wasm` tarballs (package-build, `npm pack`; the wasm modules
+   from `bb wasm-release` with the pinned nightly and `wasm-opt`), the
+   `.crate` (`kin/scripts/rust-crate`, `cargo package`), `SHA256SUMS`, the
+   release notes, and the `dist` commit and tags (`kin/scripts/dist.mjs`,
+   §9) in a scratch repository. The same commit gives the same bytes on a
+   runner and on a maintainer's machine (Node 24.6.0 and its npm 11.5.1,
+   Rust 1.92.0's cargo, the pinned wasm toolchain; D368 records the 0.1.0
+   rebuild). Any artefact a registry already holds must be byte-identical
+   to the build, or nothing is tagged.
+4. **Tag and release:** an annotated `src/vX.Y.Z` on the commit; the
+   `dist` branch and `vX.Y.Z` from the build (§9); then a GitHub release
+   `vX.Y.Z` with the three artefacts, `SHA256SUMS` and the notes. **While
+   the major version is 0, the GitHub release is marked a pre-release**
+   (§1.2: 0.x makes no stability promise).
+5. **Publish** by trusted publishing (OIDC; no token exists anywhere):
+   `cargo publish` of `snug-cbor` (after checking that cargo packs the
+   built `.crate`'s bytes; then the crates.io index checksum must be the
+   `.crate`'s), and `npm publish --provenance` of both tarballs (then npm's
+   `dist.integrity` must be each tarball's). A version already published is
+   skipped.
 
-   Then build the `dist` commit and its tags from those artefacts, in the
-   local repository (`kin/scripts/dist.mjs`, §9). Nothing is pushed.
+A manual run (`workflow_dispatch`) is a **dry run** by default: it tests,
+builds and checks the bytes and uploads the artefacts, and writes nothing.
+Every run that cannot write (a dry run, or a run on another ref) tests and
+builds even when the version is fully released: on `main` it then rebuilds
+the tagged commit and checks that the artefacts are byte-identical to what
+the registries hold, a proof that the release still reproduces (elsewhere
+it builds `HEAD`). Only a run on `main` — the push of a `version.edn`
+change, or a dispatch with `dry_run` off — may tag, release or publish, and
+such a run of a fully released version is a no-op.
 
-   Record each artefact's SHA-256 and the producing commit in DEVLOG. The
-   same commit and `version.edn` give byte-identical artefacts
-   (`bb stamp-test` checks this for the npm tarball and the `.crate`).
-6. **Licence and notice check:**
-   - every artefact contains `LICENSE` (MIT, "Copyright (c) 2026 3sln"),
-     `THIRD_PARTY_NOTICES.md` and `SECURITY.md`;
-   - the crate has no dependencies (`cargo tree` shows only `snug-cbor`);
-   - neither npm package has `dependencies`;
-   - nothing under `corpus/`, `bench/` or `tools/` is inside an artefact,
-     because the notices call that material "not shipped";
-   - the `@3sln/snug/unicode` tables (generated from Node's Unicode 16.0
-     property data, `tools/unicode/gen-tables.mjs`) are covered by the
-     Unicode License v3 text in `THIRD_PARTY_NOTICES.md` (O6).
-7. **Owner go.** The owner reviews:
-   - the gate record;
-   - the changelog;
-   - the artefact listings and checksums.
+**Licence and notice check.** Every artefact contains `LICENSE` (MIT,
+"Copyright (c) 2026 3sln"), `THIRD_PARTY_NOTICES.md` (with the Unicode
+License v3 text for the `@3sln/snug/unicode` tables, O6) and `SECURITY.md`;
+the crate has no dependencies; neither npm package has `dependencies`;
+nothing under `corpus/`, `bench/` or `tools/` ships. The package tests and
+`bb docs-test` hold these on every land run, so the release commit carries
+them already.
 
-   Then the owner gives (or withholds) the go. Publishing, tagging and
-   pushing are done by the owner or on the owner's instruction, never by
-   an engineer on their own initiative. The tags (proposed in §9, D346):
-   `src/vX.Y.Z` on the release commit, and `vX.Y.Z` on the generated
-   `dist` commit.
-8. **After the release:** open a new `[Unreleased]` section, and record
-   the release (version, commit, artefact checksums) in DEVLOG.
+**After the release:** an ordinary commit opens a new `[Unreleased]`
+section and records the release (version, commit, artefact checksums from
+the run's `build.json` or the GitHub release) in DEVLOG. It does not touch
+`version.edn`, so it starts no release.
 
-### 4.1 Hosted CI (P9.20, D356)
+**When a release fails part-way.** The guard makes every step resumable:
+
+- **Re-run the workflow** (re-run the failed jobs, or dispatch it on `main`
+  with `dry_run` off). It finds what exists and does only the rest.
+- **Before anything is published** (a tag or the GitHub release exists, no
+  registry has the version): the owner may delete the GitHub release and
+  both tags (`gh release delete vX.Y.Z --cleanup-tag`,
+  `git push --delete origin src/vX.Y.Z`) and, if it moved, reset `dist` to
+  its previous commit; then fix `main` and merge again. The version can be
+  reused, since no registry has seen it.
+- **After a publish**, a version is permanent. npm allows `npm unpublish`
+  only within 72 hours and only without dependents, and never reuses the
+  version number; crates.io has no delete: `cargo yank --version X.Y.Z`
+  stops new resolutions but keeps the version. Prefer `npm deprecate` and
+  `cargo yank` with a fixed patch release (a new bump) over removal. The
+  GitHub release may then be edited to point to the fix.
+
+### 4.1 Hosted CI (P9.20, D356; D368)
 
 `.github/workflows/ci.yml` runs the gate sets of `ci/gate-map.edn` on
 GitHub Actions, with `bb gates`. Each gate runs under the watchdog with its
-caps, and a SKIP fails the job, as locally. CI only reads: it has no
-secrets, and it never publishes, deploys, tags or uploads anything. It does
-not replace step 4. The release record names the commit whose gates ran,
-locally or in CI.
+caps, and a NOT RUN line fails the job, as locally. `ci.yml` only reads: it
+has no secrets and never publishes, deploys, tags or uploads anything.
+Publishing is `release.yml`'s alone (§4.2), which calls `ci.yml` to test a
+release commit.
 
 | Trigger | What runs |
 | --- | --- |
-| a pull request, a push to `main` | `bb gates land`, the compat matrix and the Linux matrix |
-| a `v*` or `src/v*` tag, a manual run | the `release` set, the compat matrix and the Linux matrix |
+| a pull request, a push to `main` | `land`, `compat` and `linux` |
+| a `v*` or `src/v*` tag, a manual run, `release.yml`'s call | `release`, `compat` and `linux` |
+
+**One job per kind (D368).** The free plan runs at most five macOS jobs at
+once, and one job per shard and per cell lost cells as "not acquired". A run
+now needs at most two macOS jobs at a time:
+
+- **land** (macOS): `bb gates land`.
+- **release** (macOS): the five shards of `:partitions :release`
+  (`release-core`, `-vm`, `-rust`, `-wasm`, `-long`) as steps of one job,
+  in order. Every shard runs and reports even after one failed, and the
+  job fails if any did. The shards' wall caps add up to about 23 hours,
+  more than a job may run, so each step's `timeout-minutes` clears its
+  shard's largest gate cap: a stuck gate is stopped and named by its
+  watchdog. The job has GitHub's 360 minutes; on hosted `macos-15` it
+  takes about an hour (the vm shard about 26 minutes, the others 3–9).
+- **compat** (macOS): `npm-test` on the latest Node 20, 22 and 24
+  (`actions/setup-node` per version), and `rust-api-test` on Rust 1.87
+  (`rust-version`, without Clippy as in `msrv`) and on the latest stable,
+  each under `rustup run`. The release set's `node-oldest` and `msrv` test
+  the declared floors on the primary toolchain.
+- **linux** (`ubuntu-24.04`, x86_64): the same five cells through
+  `ci/run-gate.sh`, which runs a gate's command under the watchdog with
+  its caps and fails on a non-zero exit or a NOT RUN line, as `bb gates`
+  does. The rust-version cells set `SNUG_CLIPPY_OPTIONAL=1` (D344). The
+  full gate sets run only on macOS, because the gate scripts use macOS
+  tools.
+- **ci** (required): fails unless compat and linux passed, and `land`
+  passed (or, on a release run, `release` did).
+
+`bb gates --check` reads `ci.yml` against the gate map: the release
+job's steps are exactly `:partitions :release` in order, each running after
+a failure and with a timeout above its shard's largest cap; `land`,
+`compat` and `linux` have timeouts above their gates' caps and at most 360;
+the compat and linux cells are exactly `:ci-compat`; `ci` needs every job.
+It also requires every action to be pinned by a full commit SHA (or local)
+in both workflows and the setup action, `release.yml` to use `ci.yml`'s
+`KIN_REF`, and every job of `release.yml` that may write to be gated on the
+guard's `write` output (D368).
 
 - **Primary toolchain:** macOS arm64 (`macos-15`), Node 24.6.0 (the Node
-  that the Unicode tables pin) and Rust 1.92.0 (pinned). Every gate of both sets
-  runs on it once. That includes the identity, fuzz and proptest gates.
-  `proptest` must run on Node ≥ 23.9 (its slow-compile check reads the
-  worker thread's CPU clock), so it runs on this toolchain.
-- **Compat matrix:** `npm-test` on the latest Node 20, 22 and 24, and
-  `rust-api-test` on Rust 1.87 (without Clippy, as in `msrv`) and on the
-  latest stable Rust. The release
-  set's `node-oldest` and `msrv` gates test the declared floors.
-- **Linux matrix:** the same five cells on Linux x86_64 (`ubuntu-24.04`):
-  `npm-test` on Node 20, 22 and 24, and `rust-api-test` on Rust 1.87 and
-  stable. These two gates are plain POSIX `sh` and Node, so each cell runs
-  the gate's command under the watchdog with its caps, as `bb gates` does,
-  and fails on a non-zero exit or a NOT RUN line (stdout or stderr), as
-  `bb gates` does. The rust-version cells set `SNUG_CLIPPY_OPTIONAL=1`:
-  that toolchain has no Clippy (D344). The full gate sets run only
-  on macOS, because the gate scripts use macOS tools.
-- **Required:** one `ci` job sums up the run. It fails unless every compat
-  and Linux cell passed, and `land` passed (or, on a release run, every
-  release shard passed). The latest-stable Rust cells are required too
-  (D357 made them pass on Rust 1.98.1).
-- **Release shards:** the release set's wall caps add up to about 23
-  hours, and a hosted job stops at 6. CI runs the set as five parallel
-  shards, the sets `release-core`, `-vm`, `-rust`, `-wasm` and `-long`.
-  `:partitions` in `ci/gate-map.edn` names them. `bb gates --check` fails
-  unless the shards hold exactly the release set's gates, each once, and
-  each fits one job, and unless ci.yml's release matrix runs exactly those
-  shards with a `timeout-minutes` above each one's caps (D365). Every job's `timeout-minutes` is above the sum of its
-  gates' wall caps.
-- **Tools:** each job installs only what its gates need. All of it is
-  pinned or read from the repository:
-  - kin at a pinned commit (`KIN_REF`), checked out as `../kin`;
-  - Babashka 1.3.190 (checksum-verified). The Clojure CLI is not needed:
-    no gate runs a JVM;
-  - Node through `actions/setup-node`;
-  - Rust through rustup: 1.92.0, stable, `rust-version`, and the pinned wasm
-    nightly with `rust-src`;
-  - `npm ci` in `bench/compare` (esbuild, `wasm-opt`, TypeScript for
-    `types-test`) and in `ci/tools`
-    (workerd);
-  - the runner's Chrome.
+  that the Unicode tables pin) and Rust 1.92.0 (pinned). Every gate of both
+  sets runs on it once. `proptest` must run on Node ≥ 23.9 (its slow-compile
+  check reads the worker thread's CPU clock), so it runs on this toolchain.
+- **Tools:** each job installs only what its gates need, pinned or read from
+  the repository: kin at `KIN_REF`, checked out as `../kin`; Babashka
+  1.3.190 (checksum-verified; no gate runs a JVM); Node through
+  `actions/setup-node`; Rust through rustup (1.92.0, stable,
+  `rust-version`, and the pinned wasm nightly with `rust-src`); `npm ci`
+  in `bench/compare` (esbuild, `wasm-opt`, TypeScript) and `ci/tools`
+  (workerd); the runner's Chrome. A tool a job needs and lacks fails its
+  setup.
+- **Actions** are pinned by commit SHA. `ci.yml`'s permissions are
+  `contents: read`, and neither workflow has a `pull_request_target`
+  trigger.
+- **The `vX.Y.Z` tag** marks the generated `dist` commit (§9), which has no
+  workflow. Tags that `release.yml` pushes with the workflow token start no
+  run (GitHub's rule); the release's gates ran before its tags existed.
 
-  A tool that a job needs and that is missing fails the job's setup.
-- **Actions** are pinned by commit SHA. The workflow's permissions are
-  `contents: read`, and it has no `pull_request_target` trigger.
-- **The `vX.Y.Z` tag** marks the generated `dist` commit (§9). That commit
-  has no workflow, so the tag starts no run. The gates run for
-  `src/vX.Y.Z`, the release commit.
+### 4.2 The release workflow (D368)
+
+`.github/workflows/release.yml` runs on a push to `main` that changes
+`version.edn`, and by hand (`workflow_dispatch`, `dry_run` on by default).
+`concurrency: release` runs one release at a time and never cancels one.
+
+| Job | Runner | Permissions | Does |
+| --- | --- | --- | --- |
+| `guard` | Ubuntu | read | `release-guard.mjs --self-test`, then the plan; `write` is true only on `main`, for a push or a non-dry-run dispatch; `run_build` also on every run that cannot write; the GitHub release lookup uses the run's own token (`GH_TOKEN`) for the API's rate limit |
+| `tests` | (ci.yml) | read | `ci.yml` with `mode: release`; skipped when resuming a tagged commit |
+| `build` | macOS | read | `release-build.mjs`; checks npm is 11.5.1, the version, and bytes already on a registry; uploads the artefacts, the assembled crate, `build.json`, the notes and `dist.bundle` |
+| `tag-release` | Ubuntu | `contents: write` | `src/vX.Y.Z`; `dist` and `vX.Y.Z` from the bundle (a fast-forward of the remote `dist`); `gh release create vX.Y.Z --verify-tag` (`--prerelease` for 0.x) |
+| `publish-crate` | macOS | `id-token: write` | cargo must pack the built `.crate`'s bytes; `rust-lang/crates-io-auth-action`; `cargo publish`; the index checksum must be the `.crate`'s |
+| `publish-npm` | Ubuntu | `id-token: write` | Node 24.6.0, npm ≥ 11.5.1 (trusted publishing's minimum); `npm publish <tarball> --access public --provenance` for each missing package; npm's `dist.integrity` must be each tarball's |
+
+The registries' trusted publishers name the repository `3sln/snug` and
+the workflow file `release.yml`, with no GitHub environment (the owner's
+choice), so the publish jobs live in `release.yml` itself, not in a
+reusable workflow. No token secret is used or needed. Every query of npm,
+crates.io and GitHub that the scripts make sends `User-Agent:
+snug-release-check`; npm and crates.io are asked unauthenticated, and the
+GitHub release lookup alone carries the workflow run's own short-lived token
+(`GH_TOKEN`, read-only in the guard job) when it is set, for
+api.github.com's rate limit. Locally it runs unauthenticated, or with
+`GH_TOKEN` if set.
 
 ## 5. Deprecation and security fixes
 
@@ -735,7 +748,7 @@ holds stamped versions, and nothing else in the repository does (O2: main
 and every working branch hold the placeholder).
 
 **One commit per release.** `kin/scripts/dist.mjs` builds the commit from
-the release artefacts of §4 step 5, which are built from a stamped tree. The
+the release artefacts of §4 (step 3, the build), which are built from a stamped tree. The
 commit is those artefacts unpacked, so a git consumer gets exactly the files
 the registries ship:
 
@@ -755,11 +768,11 @@ the registries ship:
   source commit. The same artefacts on the same parent give the same
   commit and tag hashes.
 - **Refusals.** The script refuses the placeholder version, a source
-  commit whose READMEs still carry the pre-release block (§4 step 3),
+  commit whose READMEs still carry the pre-release block (§4, the bump),
   artefacts that disagree on the version, an existing tag, and a version the branch
   already ends at. It writes refs only in the `--repo` it is given, and it
-  never pushes. Pushing the branch and its tags is part of the owner's go
-  (§4 step 7).
+  never pushes. The release workflow pushes the branch and its tags after
+  the release's gates pass (§4.2, `tag-release`).
 
 **Tags.** These are never moved or deleted once pushed: the Go module proxy,
 `Cargo.lock` and `package-lock.json` pin the commit.

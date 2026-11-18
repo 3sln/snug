@@ -4,7 +4,7 @@
 ;; `land` on pull requests and pushes to main, `release` (as its :partitions
 ;; shards, below) on version tags and on a manual run.
 ;;
-;;     bb gates release          the release gate set (policy §4 step 4), in order
+;;     bb gates release          the release gate set (policy §4 step 2), in order
 ;;     bb gates land             what an engineer runs before landing
 ;;     bb identity               = bb gates identity (SPEC §7's cross-host identity)
 ;;     bb gates vm-test drift    named gates, in the order given
@@ -32,12 +32,13 @@
 ;; (tools/runtime/README.md); node-oldest needs the engines Node via nvm and msrv
 ;; the rust-version toolchain via rustup (P9.18).
 ;;
-;; :partitions splits a set into shard sets that CI runs as parallel jobs: a
-;; hosted job is capped at 6 hours, and the release set's wall caps sum to
-;; about 23 hours. `bb gates --check` refuses a partition whose shards do not
-;; hold exactly the set's gates, each once, and one whose shard's wall caps sum
-;; past 330 minutes (each CI job's timeout-minutes sits above its shard's sum
-;; and at most 360).
+;; :partitions splits a set into shard sets that CI's release job runs one after
+;; another, a step each (D368; they were parallel jobs, D356): the release set's
+;; wall caps sum to about 23 hours, and a hosted job stops at 6. `bb gates --check`
+;; refuses a partition whose shards do not hold exactly the set's gates, each
+;; once, and one whose shard's wall caps sum past 330 minutes (so a shard can
+;; still run as a job of its own); it also checks ci.yml's release, land, compat
+;; and linux jobs against this map (kin/scripts/gates, ci-matrix-problems).
 {:gates
  {check            {:cmd ["bb" "check"] :caps [900 1800]
                     :doc "generate, run JS and Rust, require identical output"}
@@ -101,7 +102,7 @@
  :not-gates [gen emit bench-scan gates identity wasm-release stamp dist dist-test]
 
  :sets
- {;; docs/release-policy.md §4 step 4, in that order. A SKIP or a :blocked gate fails it.
+ {;; docs/release-policy.md §4 step 2, in that order. A SKIP or a :blocked gate fails it.
   :release  [versions check drift stamp-test
              scan-test rscan-test vm-test vmsession-test sequence-test valid-test
              compile-test compile-fuzz
@@ -132,4 +133,9 @@
   :release-long [valid-test proptest]}
 
  :partitions
- {:release [release-core release-vm release-rust release-wasm release-long]}}
+ {:release [release-core release-vm release-rust release-wasm release-long]}
+
+ ;; D368: the cells hosted CI's compat (macOS) and linux jobs each run, one after another
+ ;; in one job: npm-test on these Node majors, rust-api-test on these Rust toolchains
+ ;; (rust-version: host/rust/Cargo.toml's). `bb gates --check` reads ci.yml against it.
+ :ci-compat {:node ["20" "22" "24"] :rust ["rust-version" "stable"]}}

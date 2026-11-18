@@ -9028,6 +9028,196 @@ engineer).
     `validateHandleSync` and `pushValidator`, with the same verdict, in under 5 s. It takes 4 ms here
     and about 97 s each on eee5824. The kin fix is shared by every host.
 
+### D368 — Releases are automated: a merged `version.edn` bump on main is the owner's go, and `release.yml` tests, tags, releases and publishes it by trusted publishing; CI runs one job per kind (at most two macOS jobs at once)
+**Decision** (D368 engineer; the work package from the manager, approved by the owner; the
+registries' trusted publishers were set by the owner: repository 3sln/snug, workflow `release.yml`,
+no GitHub environment). docs/release-policy.md §4, §4.1 and the new §4.2 describe the flow.
+
+**A. `.github/workflows/release.yml`.**
+* **Triggers:** a push to main that changes `version.edn`, and `workflow_dispatch` with `dry_run`
+  (default true). Only a run on `refs/heads/main` that is a push, or a dispatch with `dry_run`
+  off, may write. Everything else builds, checks and uploads only. `concurrency: release`, never
+  cancelled.
+* **guard** (`kin/scripts/release-guard.mjs`, Ubuntu). It reads version.edn's `:version` and
+  asks `kin/scripts/release-registry.mjs` what exists:
+  - the source tag `src/v<ver>` and the dist tag `v<ver>` (`git ls-remote`);
+  - the GitHub release;
+  - npm `@3sln/snug` and `@3sln/snug-wasm`;
+  - crates.io `snug-cbor` (the sparse index).
+
+  Every HTTP request is unauthenticated and sends only `User-Agent: snug-release-check`. The
+  outcome is one of three:
+  - everything exists: `noop`;
+  - no source tag: `release` of HEAD;
+  - a source tag but parts missing: `resume`, which builds the TAGGED commit and does only the
+    missing steps.
+
+  The guard also emits `need_*` flags, and `write` (from the ref and event). `--self-test` checks
+  the decision on five fixed states, including "published by hand, never tagged".
+  - **Dry runs always build** (manager's review). A run that cannot write (a dry run, or any ref
+    but main) gets `run_build` even when the guard says `noop`, with `need_tests` true. On main
+    it rebuilds the source tag's commit and the build job's `release-registry.mjs verify` holds
+    its bytes to the registries'; on another ref it builds HEAD. A dispatch dry run of 0.1.0 on
+    main is therefore a hosted reproduction of bcfd46d's published bytes. Without a dist to push
+    (`need_dist` false: a resume, or a rebuild of a released version) the build makes its dist
+    commit in an empty scratch repository, as a check only. A no-op push stays a no-op, and
+    every writing job still needs `write == 'true'`.
+  - **The GitHub API's rate limit** (coordinator). The api.github.com release lookup alone sends
+    `Authorization: Bearer $GH_TOKEN` when GH_TOKEN is set. release.yml passes the run's own
+    token to the plan step only; the job keeps `contents: read`. npm and crates.io stay
+    unauthenticated. A 403 or any other non-404 answer still throws.
+* **tests:** `ci.yml` as a reusable workflow (`workflow_call`, `mode: release`). It runs the whole
+  release job, compat and linux on the commit. It is skipped when resuming: the commit was tested
+  before it was tagged.
+* **build** (`kin/scripts/release-build.mjs`, macOS). In a detached worktree of the commit
+  (`<out>/kin` links to ../kin), it does what the manual 0.1.0 release did:
+  - `bb stamp`;
+  - `host/js/src/package-build.mjs`, then `npm pack`;
+  - `bb wasm-release`, then `host/wasm-sdk/package-build.mjs`, then `npm pack`;
+  - `kin/scripts/rust-crate`, then `cargo package --offline --allow-dirty` (verified);
+  - `SHA256SUMS`;
+  - release notes from CHANGELOG `[<ver>]` (the build fails without that section);
+  - the dist commit and tags (`kin/scripts/dist.mjs`) in a scratch repository, on top of the
+    remote's dist branch (`--dist-from`), bundled as `dist.bundle`.
+
+  Every step is the tree's own script, so an old commit builds with its own tools. The job then:
+  - checks that npm is 11.5.1 and that the built version is the guard's;
+  - checks that any artefact a registry already holds is byte-identical to the build
+    (`release-registry.mjs verify`);
+  - uploads the artefacts, the assembled crate, `build.json`, the notes and the bundle.
+* **tag-release** (`contents: write`). It creates an annotated `src/v<ver>` on the commit, then
+  fetches `dist` and `v<ver>` (and any `*/v<ver>`) from the bundle and pushes them (a
+  fast-forward), each only if missing. Then `gh release create v<ver> --verify-tag` with the
+  three artefacts and `SHA256SUMS`, `--prerelease` while the major version is 0.
+* **publish-crate** (macOS, `id-token: write`):
+  - cargo, the build's (Rust 1.92.0), must repackage the uploaded crate dir to the built
+    `.crate`'s exact SHA-256;
+  - then `rust-lang/crates-io-auth-action`, `cargo publish`;
+  - then the crates.io index cksum must equal it (polled up to 15 min).
+* **publish-npm** (Ubuntu, `id-token: write`):
+  - Node 24.6.0 with its npm 11.5.1. Trusted publishing needs npm ≥ 11.5.1 and Node ≥ 22.14.0
+    (docs.npmjs.com/trusted-publishers, read 2026-11-17); the job checks both.
+  - `npm publish <exact tgz> --access public --provenance` for each package not yet on npm.
+  - Then npm's `dist.integrity` must be each tarball's sha512.
+
+  The publish jobs are jobs of `release.yml` itself, not of a reusable workflow, because the
+  trusted publishers name `release.yml`.
+* **Pins:**
+  - `rust-lang/crates-io-auth-action` `3268eb413133e2960fa4ae0e963ca76380c54cd9` (v1.0.6);
+  - `actions/upload-artifact` `cf430e030ddbb5b0abf93d22962f4752f3646cd9` (v7.0.2);
+  - `actions/download-artifact` `9000827ccba6bdab643e8b6fd33ac0654aef8333` (v8.0.2);
+  - checkout and setup-node as in D356.
+
+  All are commits: lightweight tags, read with `git ls-remote`.
+* **Order:** test, then tag and release, then publish. The publish jobs need `tag-release` to
+  succeed, or to have been skipped because nothing was missing.
+
+**B. ci.yml: one job per kind.** The free plan runs five macOS jobs at once, and the 0.1.0 tag
+run lost cells as "not acquired". A run now uses at most two macOS jobs at a time:
+* **land** and **release** (macOS). release runs the five shards as steps in `:partitions` order,
+  each `if: success() || failure()`, so every shard runs and reports and the job fails at the
+  end if any failed.
+* **compat** (macOS): setup-node per Node major for npm-test, and `rustup run` for rust-api-test
+  on rust-version and stable. The setup action now exports `SNUG_RUST_VERSION`.
+* **linux** (Ubuntu): the same cells through the new `ci/run-gate.sh`, the old inline step made a
+  script.
+* **Timeouts:** land 305, above its 298 min of caps; compat and linux 150, above their 130.
+  release has GitHub's 360. Its shards' caps sum to about 23 hours, so each shard step's timeout
+  clears that shard's largest single gate cap (60/150/90/120/200 min against 40/120/60/90/180):
+  a stuck gate is named by its watchdog. Hosted measurements: vm about 26 min, the others 3–9.
+* **Checks.** `kin/scripts/gates`' `ci-matrix-problems` was rewritten for this shape. The new
+  `workflow-problems` adds three checks:
+  - every action is local or SHA-pinned, in both workflows and the setup action;
+  - release.yml's KIN_REF is ci.yml's;
+  - every release.yml job with `contents: write` or `id-token: write` has an `if` that requires
+    `needs.guard.outputs.write == 'true'`.
+
+  `ci/gate-map.edn` gains `:ci-compat`.
+
+**C.** docs/release-policy.md §4 is rewritten:
+* the go is the merged bump, and the only manual step is that bump;
+* the workflow's steps;
+* the 0.x pre-release rule;
+* the partial-failure procedure: re-run to resume; before a publish, delete the GitHub release
+  and tags; after one, npm unpublish's 72-hour limit, `cargo yank`, and a new patch release.
+
+§4.1 is rewritten for one job per kind, and §4.2 is new: the job table, OIDC, no environment,
+no token. References to the old step numbers are updated: gate map, package-build, the package
+test, dist.mjs and prerelease.mjs.
+
+**Reproducibility** (what fixes the bytes, checked here):
+* **The 0.1.0 rebuild.** `release-build.mjs --commit bcfd46d` on this machine reproduces the
+  published SHA-256s exactly, and the dist commit `a8b2102a2375cb32e271251d0893e4a3175d3d91`:
+  - `3sln-snug-0.1.0.tgz` 624605fc…a4987e;
+  - `3sln-snug-wasm-0.1.0.tgz` 62cb7e2c…7fa3c2;
+  - `snug-cbor-0.1.0.crate` bed3798e…f13a95.
+
+  The tools were Node 24.6.0, npm 11.5.1, cargo 1.92.0 (Homebrew), nightly-2026-09-16 and
+  wasm-opt 132. `SHA256SUMS` is identical to `.cache/release-out/SHA256SUMS`.
+* **cargo changes the .crate:** the same assembled crate packs to `d1a22c65…` with cargo 1.87.0
+  and to `6b5d4046…` with 1.98.1. The build and publish jobs therefore both use the pinned
+  1.92.0, and publish refuses a repack with other bytes.
+* **npm does not, as far as checked:** npm 10.9.9 packs the same 624605fc… tarball. The build
+  still requires 11.5.1, the version every release has used.
+* **Neither do the rest:** mtimes and file order (npm pack and cargo package normalise both),
+  TZ and locale (pinned to UTC and C, and stamp-test shifts them, D365), and the wasm modules
+  (pinned nightly and wasm-opt; rebuilt here, byte-identical).
+* **Not checked:** the same build on a hosted macos-15 runner. The first dispatch dry run will
+  show it.
+
+**Validation** (local; no network writes):
+* **The guard on main e9137ba:** "0.1.0 already released (src/v0.1.0 on bcfd46d01074, dist
+  v0.1.0, GitHub release, @3sln/snug, @3sln/snug-wasm, snug-cbor) -> no-op". With
+  `--version 0.1.1`: `release` with all seven parts missing.
+* **The guard's self-test:** 8/8: the five states with writes allowed, plus a noop dry run on
+  main (tests, a build of the tagged commit), a noop dry run off main (HEAD) and a fresh release
+  dry run. The `tag: false` mutation fails 2 cases, exit 1; making `run_build` ignore `write`
+  (`action !== 'noop'` alone) fails the two noop dry-run cases, exit 1.
+* **`release-registry.mjs verify`** on the rebuilt 0.1.0: npm dist.integrity matches both
+  tarballs, and the crates.io cksum matches the .crate. Mutation: one byte of the .crate flipped
+  → FAIL, exit 1.
+* **The release-notes rule:** a scratch commit of bcfd46d whose CHANGELOG has no `[0.1.0]` →
+  the build stops at step 6 with "CHANGELOG.md has no [0.1.0] section: a release needs its notes", exit 1 (no notes, no dist, nothing uploaded).
+* **The CI checks** (`bb gates --check`). Each mutation was caught (FAIL), and the unmutated
+  file is ok. Mutations of ci.yml:
+  - the release-long step deleted;
+  - release-core and release-vm swapped;
+  - release-wasm's `if` removed;
+  - release-vm's timeout 150 → 100;
+  - compat's Node 22 cell removed;
+  - linux's stable rust cell removed;
+  - compat's Node 20 → 18;
+  - `ci` not needing linux;
+  - land's timeout 305 → 200;
+  - compat's timeout 150 → 100.
+
+  Mutations of release.yml:
+  - crates-io-auth-action at `@v1`;
+  - KIN_REF changed;
+  - publish-crate's and tag-release's write guard removed.
+* **`bb gates land`:** all 11 ok, exit 0 (docs-test included); `bb gates --check` ok.
+* **actionlint was not run.** Downloading the pinned v1.7.12 release into .cache (checksum
+  verified) was refused by the permission system. It was not retried, as with D356. The
+  workflows were checked by YAML parsing and by `bb gates --check` only. The first dispatch dry
+  run validates `release.yml`.
+
+**Alternatives:**
+* **A GitHub environment with required reviewers.** The owner chose none; the go is the merged
+  bump.
+* **Token secrets.** Rejected: trusted publishing needs none.
+* **Duplicating ci.yml's jobs in release.yml.** Rejected for `workflow_call`.
+* **One macOS job per shard,** as before. Rejected: the plan's five-job limit.
+* **Building on Ubuntu.** Rejected: the gate scripts and the wasm build are macOS's, and the bytes
+  were recorded there.
+* **Publishing from a reusable workflow.** Not possible: the trusted publisher names
+  `release.yml`.
+
+**Open:**
+* the first hosted run's own reproduction of 0.1.0 (a dispatch dry run on main);
+* whether `dist` is branch-protected (tag-release pushes it with the workflow token);
+* actionlint.
+- [ ] **Signed off** (manager)
+
 ## Findings
 
 - 2026-11-11 (manager): **the 6½-day `scan-test.mjs 300 1` process
