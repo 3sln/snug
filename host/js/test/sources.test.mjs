@@ -301,6 +301,37 @@ test('D371: a handle of 2^31 bytes or more is too_large at offset 0, unread; ope
     assert.throws(() => validateHandleSync(s, unread(size), 'nope'), TypeError);
     assert.throws(() => scanHandleSync(unread(size), { maxDepth: 257 }), TypeError);
     assert.throws(() => openSession(s, 'r', size), TypeError);
-    assert.throws(() => pushScanner(size), TypeError);
   }
+});
+
+// D371a: a push source of a declared length of 2^31 or more answers as one of 2^31-1 bytes over the limit:
+// its first step is too_large at offset 0 (the validator's verdict; the scanner's SnugFault), and finalize
+// still wants every declared byte. Before, pushScanner and pushValidator threw a TypeError for the length.
+test('D371a: a push source of a declared length of 2^31 or more is too_large at offset 0, as one of 2^31-1 bytes', async () => {
+  const s = await compileSchema('r = bstr');
+  const outcome = f => { try { return { ok: f() }; } catch (e) { return { err: e.name, code: e.code, message: e.message }; } };
+  const script = (make, n) => {
+    const p = make(n), b = Uint8Array.of(0x41, 0x00);
+    return [outcome(() => p.feed(new Uint8Array(0))), outcome(() => p.feed(b)), outcome(() => p.resume()),
+      outcome(() => p.finalize()).err];
+  };
+  const want = { ok: false, reason: 'cbor/too_large', path: [], offset: 0 };
+  for (const o of [{}, { maxBytes: 2 ** 31 - 1 }, { wire: 'valid' }]) {
+    const validator = n => pushValidator(s, n, 'r', o), scanner = n => pushScanner(n, o);
+    const ref = script(validator, 2 ** 31 - 1);
+    assert.deepEqual(ref.slice(0, 2), [{ ok: { state: 'need' } }, { ok: { state: 'done', result: want } }]);
+    for (const size of [2 ** 31, 2 ** 53 - 1]) {
+      assert.deepEqual(script(validator, size).slice(0, 3), ref.slice(0, 3), `validator ${size}`);
+      assert.equal(script(validator, size)[3], 'SourceError', 'finalize still wants every declared byte');
+      const sc = script(scanner, size);
+      assert.deepEqual([sc[1].err, sc[1].code], ['SnugFault', 'too_large'], `scanner ${size}`);
+      // a fresh validator answers resume() at once, as one of 2^31-1 bytes does
+      assert.deepEqual(pushValidator(s, size, 'r', o).resume(), { state: 'done', result: want });
+    }
+  }
+  // the argument checks come first; a length that is no safe integer is still a TypeError
+  assert.throws(() => pushValidator(s, 2 ** 31, 'nope'), TypeError);
+  assert.throws(() => pushScanner(2 ** 31, { maxDepth: 257 }), TypeError);
+  assert.throws(() => pushScanner(2 ** 60), TypeError);
+  assert.throws(() => pushScanner(Infinity), TypeError);
 });

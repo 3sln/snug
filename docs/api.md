@@ -546,7 +546,10 @@ with top defaulting to any and limits only lowering the compiled values.
 A handle whose `size` is 2³¹ or more is larger than every limit allows, and
 is never read: `validateHandle` and `validateHandleSync` answer
 `cbor/too_large` at offset 0, and `scanHandle` and `scanHandleSync` throw
-`SnugFault` `too_large`, as for a smaller handle over the limit.
+`SnugFault` `too_large`, as for a smaller handle over the limit. A push
+source with a declared length of 2³¹ or more (`pushValidator`,
+`pushScanner`) answers the same way at its first step, as one of 2³¹−1
+bytes over the limit does; `finalize()` still counts the declared bytes.
 `openSession` and `ScanSession` take lengths up to 2³¹−1 only (more is a
 TypeError).
 
