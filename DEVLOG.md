@@ -13551,6 +13551,25 @@ can run alongside them; its build work is post-RC unless it is cheap.
     4. The P9.13 post-RC nits listed under P9.13.
   - **Status, 2026-11-18 (manager).** Items 1–3 are done: D368, then D369. Item 4 was triaged
     by the coordinator; D370, D371, D371a and D372 landed it.
+  - **Validation of the D370–D372 batch (manager, 2026-11-18).**
+    - It was validated by targeted per-WP runs, each recorded in its D-entry with its mutation
+      proofs, plus hosted CI on the pushes. It was not validated by a local full run.
+    - A local `bb gates release` plus `bb identity` was started on exact KIN_REF (an extracted
+      archive of 21e8ab9). It was stopped early under the new testing policy and recorded no
+      results.
+    - **Kin used by the per-WP runs:**
+      - engineers' worktrees under snug/.cache/ resolved `../kin` to `.cache/kin` at 312beab;
+      - checks in the main checkout used `../kin` at 312beab with 2 locally modified src files;
+      - 312beab is 3 commits ahead of KIN_REF 21e8ab9: Go-backend changes in src/kin.cljc and
+        src/kin/lang.cljc;
+      - hosted CI builds with KIN_REF, and its drift gate (plus the release dry run
+        44211502199) shows the committed JS and Rust output matches KIN_REF.
+  - **Testing policy (owner, 2026-11-18).**
+    - No full gate runs on the development machine: no `bb gates release`, no `bb identity`,
+      no full land sweeps.
+    - A change runs the tests it affects, plus its mutation proof.
+    - Hosted CI covers the rest: push CI runs land, linux and compat, and the release workflow
+      runs the full set before any publish.
   - **The next batch:**
     - [ ] **RELEASE-BLOCKING (coordinator, 2026-11-18):** an AND of arrays as a `.cborseq`
       controller (e.g. `[* uint] .and [2*2 any]`) must be refused with `control_value`, as it
