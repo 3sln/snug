@@ -462,8 +462,10 @@ pub(crate) fn lex_number(h: &mut [i32], s: i32, p: i32, negative: i32) -> i32 {
         push_tok(h, TK_INT, s, k, negative, off4, len4);
         return k;
     }
-    // Decimal float: at most 17 significant digits (D020), converted by the host.
-    if (first_nz >= 0) && (((last_nz - first_nz) + 1) > 17) {
+    // Decimal float: at most 20 significant digits (D020, D372: ECMA-262
+    // StringToNumber rounds correctly up to 20 and Rust's parse always does),
+    // converted by the host.
+    if (first_nz >= 0) && (((last_nz - first_nz) + 1) > 20) {
         return fail(h, ERR_FLOAT, s);
     }
     let idx: i32 = hg(h, H_N_FLOATS);

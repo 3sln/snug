@@ -29,7 +29,7 @@
                                         INF ERR_INTERNAL ERR_UNDEFINED ERR_KIND ERR_GENERIC
                                         ERR_NONPRODUCTIVE ERR_GROUP_RECURSION ERR_UNWRAP ERR_ENUM
                                         ERR_RANGE ERR_CONTROL_VALUE ERR_UNSUPPORTED_CONTROL ERR_NEED_ABNF
-                                        ERR_UNKNOWN_CONTROL ERR_MAP_KEY ERR_SYNTAX ERR_TAG ERR_MAJOR
+                                        ERR_UNKNOWN_CONTROL ERR_MAP_KEY ERR_TAG ERR_MAJOR
                                         ERR_PROFILE ERR_LIM_INST ERR_LIM_NESTING
                                         H_R0 H_R1 H_R2 H_R3 H_DEPTH H_DEPTH_MAX H_CUR_RULE H_LIM_INST
                                         H_N_INST H_PROFILE H_WORK_AT H_PMODE H_DEFAULT
@@ -49,12 +49,12 @@
                                        ts-n ts-leaf leaf-mask mk-any mk-major mk-simple-range mk-lit mk-text
                                        mk-bytes mk-int-range mk-int-span point-of fkey-hi fkey-lo mk-float-from bound-pred u64-cmp
                                        stage stage-d stage-intern mk-and
-                                       K_INT K_FLOAT K_LIT K_TAG K_TAGSET K_EMBED K_ARRAY K_MAP
+                                       K_ANY K_INT K_FLOAT K_LIT K_TAG K_TAGSET K_EMBED K_ARRAY K_MAP
                                        K_SIMPLE K_EXT
                                        R_NEG_INF R_NEG_BIG R_NEG R_POS R_POS_BIG R_POS_INF]]
             [snug.compile.ctl :refer [ctl-size ctl-bits ctl-compare ctl-eq ctl-and ctl-regexp ctl-cbor
                                       ctl-cat ctl-det ctl-plus int-point float-point single-leaf]]
-            [snug.compile.peg :refer [peg-init peg-begin peg-finish pb-node pb-list pb-add pb-rep pm-new
+            [snug.compile.peg :refer [warn peg-init peg-begin peg-finish pb-node pb-list pb-add pb-rep pm-new
                                       pgs-find pgs-push pgs-pop P_FAIL P_ENTRY P_MEMBER P_SEQ P_CHOICE P_CALL]]
             [snug.compile.ext :refer [builtin-ctl ext-lookup ext-max]]))
 
@@ -485,12 +485,18 @@
       (if (or (== code 12) (== code 13))
         (do (if (and (== code 13) (> (hg h H_PROFILE) 0)) (return (fail h ERR_PROFILE pos)))
             (comment "RFC 8610 §3.8.4: a .cborseq controller is an array type describing"
-                     "the sequence (the VM matches it as a virtual array, D040).")
+                     "the sequence (the VM matches it as a virtual array, D040). D372: its"
+                     "array leaves are kept, `any` (which matches every array) stands for"
+                     "`[* any]` and every other leaf is dropped (seq-content); with none left"
+                     "the control matches nothing.")
             (if (== code 13)
-              (do (let [^I32 cts (lower-type h (nb h node) env)]
+              (do (let [^I32 cts (lower-type h (nb h node) env)
+                        ^:mut arrays 0]
                     (if (< cts 0) (return (neg 1)))
                     (for [^I32 i 0 (ts-n h cts)]
-                      (if (!= (lk h (ts-leaf h cts i)) K_ARRAY) (return (fail h ERR_CONTROL_VALUE pos)))))))
+                      (let [k (lk h (ts-leaf h cts i))]
+                        (if (or (== k K_ARRAY) (== k K_ANY)) (set arrays (+ arrays 1)))))
+                    (if (== arrays 0) (return (ts-of1 h (neg 2)))))))
             (let [cn (nb h node)
                   ^:mut flags 0]
               (if (== code 13) (set flags 1))
@@ -1013,7 +1019,8 @@
   (comment "One group entry: ENTRY (arrays: member keys are labels) or MEMBER (maps),"
            "a parenthesised group, a group rule, an unwrap, or an unplugged `$$`"
            "socket (FAIL, R14 / D251); the occurrence applied by pb-rep. `n*m` with"
-           "m < n is refused (D293).")
+           "m < n is valid syntax that matches nothing (RFC 8610 §3.2, D372): the"
+           "entry is lowered (its errors stand) and replaced by FAIL, with warning W9.")
   (let [pos (npos h ent)
         k (nk h ent)
         lo (ent-lo h ent)
@@ -1021,7 +1028,6 @@
         mode (hg h H_PMODE)]
     (if (not (enter h pos)) (return (neg 1)))
     (if (< hi 0) (set hi INF))
-    (if (< hi lo) (return (fail h ERR_SYNTAX pos)))
     (let [^:mut child (neg 1)]
       (if (== k N_MEMBER)
         (if (== mode 0)
@@ -1043,6 +1049,9 @@
               (if (>= gr 0) (set child (p-grouprule h gr (env-of h) pos))))))
       (leave h)
       (if (< child 0) (return (neg 1)))
+      (if (< hi lo)
+        (do (warn h 9 pos)
+            (return (pb-node h P_FAIL (neg 1) 0 0 pos))))
       (return (pb-rep h child lo hi pos)))))
 
 (defn ^I32 p-group [^Ints h ^I32 g ^I32 env]
@@ -1069,12 +1078,55 @@
   (let [g (lw h l 12)
         env (lw h l 13)]
     (peg-begin h mode)
+    (if (< g 0)
+      (do (comment "`.cborseq any`'s `[* any]` (seq-any-array): no AST; word 13 is its place.")
+          (let [al (mk-any h)
+                any (ts-of1 h al)
+                ent (pb-node h P_ENTRY any 0 0 env)
+                rep (pb-rep h ent 0 INF env)
+                sq (pb-list h P_SEQ env)
+                alt (pb-list h P_CHOICE env)]
+            (if (or (< rep 0) (or (< sq 0) (< alt 0))) (return (neg 1)))
+            (pb-add h sq rep)
+            (pb-add h alt sq)
+            (let [id0 (peg-finish h alt env)]
+              (if (< id0 0) (return (neg 1)))
+              (lsetd h l 0 id0)
+              (return 0)))))
     (let [^I32 root (p-group h g env)]
       (if (< root 0) (return (neg 1)))
       (let [id (peg-finish h root (npos h g))]
         (if (< id 0) (return (neg 1)))
         (lsetd h l 0 id)
         (return 0)))))
+
+(defn ^I32 seq-any-array [^Ints h ^I32 pos]
+  (comment "A fresh ARRAY leaf `[* any]` for `.cborseq any` (D372), filled by the"
+           "worklist: word 12 -1 (no group node), word 13 the control's place.")
+  (let [l (leaf-new h K_ARRAY 0)]
+    (if (< l 0) (return (neg 1)))
+    (lset h l 12 (neg 1))
+    (lset h l 13 pos)
+    (lset h l 14 (hg h H_CUR_RULE))
+    (lsetd h l 0 (neg 1))
+    (vpush1 h T_WORK l)
+    (return l)))
+
+(defn ^I32 seq-content [^Ints h ^I32 cts ^I32 pos]
+  (comment "A .cborseq controller's arrays (D372): ARRAY leaves kept, ANY as `[* any]`,"
+           "the rest dropped (lower-ctl has made sure one is left).")
+  (if (not (charge h (+ 1 (ts-n h cts)))) (return (neg 1)))
+  (let [from (vlen h T_STK)]
+    (for [^I32 i 0 (ts-n h cts)]
+      (let [l (ts-leaf h cts i)
+            k (lk h l)]
+        (if (== k K_ARRAY) (vpush1 h T_STK l))
+        (if (== k K_ANY)
+          (do (let [a (seq-any-array h pos)]
+                (if (< a 0) (return (neg 1)))
+                (vpush1 h T_STK a))))))
+    (if (erred h) (return (neg 1)))
+    (return (ts-make h from))))
 
 ;; ------------------------------------------------------------ enumerations
 
@@ -1160,7 +1212,11 @@
                (if (< cts 0) (return (neg 1)))
                (if (== k K_TAG) (lsetd h l 2 cts))
                (if (== k K_TAGSET) (lsetd h l 4 cts))
-               (if (== k K_EMBED) (lsetd h l 0 cts)))))
+               (if (and (== k K_EMBED) (== (bit-and (lflags h l) 1) 0)) (lsetd h l 0 cts))
+               (if (and (== k K_EMBED) (!= (bit-and (lflags h l) 1) 0))
+                 (do (let [sts (seq-content h cts (npos h (lw h l 12)))]
+                       (if (< sts 0) (return (neg 1)))
+                       (lsetd h l 0 sts)))))))
        (if (== k K_ARRAY)
          (if (< (process-group h l 0) 0) (return (neg 1))))
        (if (== k K_MAP)

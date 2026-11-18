@@ -164,7 +164,18 @@
           (if (< r2 0)
             (do (let [r3 (rule-add h off2 len2 1 (neg 1))]
                   (if (< r3 0) (return (neg 1)))
-                  (if (not (add-def h r3 p)) (return (neg 1)))))))
+                  (if (not (add-def h r3 p)) (return (neg 1))))))
+          (comment "D372: a schema name with only `/=` / `//=` definitions extends the"
+                   "prelude rule (RFC 8610 Appendix D: the prelude is automatically"
+                   "added), so the prelude definition joins its chain. Every prelude rule"
+                   "is a plain type, so a `//=` or generic extension is refused at the"
+                   "schema's first definition.")
+          (if (and (>= r2 0) (and (== (rw h r2 7) 0) (== (rw h r2 12) 0)))
+            (do (if (== (rw h r2 4) RK_GROUP)
+                  (do (fail h ERR_KIND (npos h (rw h r2 2))) (return (neg 1))))
+                (if (!= (rw h r2 5) 0)
+                  (do (fail h ERR_GENERIC (npos h (rw h r2 2))) (return (neg 1))))
+                (if (not (add-def h r2 p)) (return (neg 1))))))
         (set p (nnext h p))))
     (if (erred h) (return (neg 1)))
     (return order)))

@@ -5,17 +5,17 @@
 //     node kin/scripts/compile2-test.mjs <rust-compile2-test-binary> [corruptions per program] [seed]
 //
 // Gates (each prints ok/FAIL; exit 1 on any FAIL):
-//   1. every schema of corpus/conformance/{study,adversarial,audit-2026-11-04}.json and
-//      corpus/cddl-study/contracts/*.cddl compiles on BOTH hosts in BOTH cut modes, except
-//      the study suites that expect a refusal (`schemaError`), which must fail with that
-//      code family; the adversarial `snugSchemaError` suites name withdrawn refusals
+//   1. every schema of corpus/conformance/{study,adversarial,audit-2026-11-04,regressions}.json
+//      and corpus/cddl-study/contracts/*.cddl compiles on BOTH hosts in BOTH cut modes, except
+//      the study suites that expect a refusal (`schemaError`) and the audit and regression
+//      suites that expect one (`snugSchemaError`), which must fail with that code family; the adversarial `snugSchemaError` suites name withdrawn refusals
 //      (map_overlap, map_group_occurrence, map_cut: D275) and must now compile; `phase:
 //      "later"` suites are not held to an expectation;
 //   2. the RFC corpus (corpus/conformance/rfc/rfc*.json): no withdrawn refusal remains;
 //      the outcomes against each suite's recorded compileObservation are listed;
 //   3. architecture §20.15's probe schemas (read from docs/architecture.md) compile, and
-//      the remaining refusals hold (left recursion, `n*m` with m < n, keyless map entries,
-//      the PEG node limit), with the withdrawn ones compiling;
+//      the remaining refusals hold (left recursion, keyless map entries, the PEG node
+//      limit), with the withdrawn ones compiling (`n*m` with m < n among them, D372);
 //   4. JS == Rust: Program words, pool bytes and warnings (code, line, column, rule), or
 //      the same error (code, line, column, rule);
 //   5. vm-verify (format 2.0) accepts every compiled Program on both hosts, refuses 1.x
@@ -34,7 +34,8 @@
 //      corpus case it can decide, in both cut modes;
 //  10. warning W8 (D301): a map choice whose alternatives start with the same literal cut
 //      key warns under the default RFC cut, never under `cuts: 'branch'`, and not for the
-//      documented working forms (a type choice of maps, `=>` discriminators).
+//      documented working forms (a type choice of maps, `=>` discriminators);
+//  11. warning W9 (D372): an occurrence n*m with m < n warns at the entry, in both cut modes.
 //
 // Cut modes are numbered as kin's option word 20: 0 'rfc' (the default), 1 'branch'.
 import { readFileSync, readdirSync, writeFileSync } from 'node:fs';
@@ -63,6 +64,8 @@ for (const s of adv.suites)
   cases.push({ label: `adversarial ${s.name}`, text: s.cddl, withdrawn: s.snugSchemaError });
 for (const s of JSON.parse(read('corpus/conformance/audit-2026-11-04.json')).suites)
   cases.push({ label: `audit ${s.name}`, text: s.cddl, want: s.snugSchemaError });
+for (const s of JSON.parse(read('corpus/conformance/regressions.json')).suites)
+  cases.push({ label: `regression ${s.name}`, text: s.cddl, want: s.snugSchemaError });
 for (const f of readdirSync(new URL('corpus/cddl-study/contracts/', root)).sort())
   cases.push({ label: `contract ${f}`, text: read('corpus/cddl-study/contracts/' + f) });
 const rfcFiles = readdirSync(new URL('corpus/conformance/rfc/', root)).filter(f => /^rfc\d+\.json$/.test(f)).sort();
@@ -84,7 +87,6 @@ const REFUSALS = [
   ['r = [g]\ng = (g // int)', 'group_recursion'],
   ['r = [g]\ng = (* (? int), h)\nh = (int, g // g)', 'group_recursion'],
   ['r = [* g0]\ng0 = (g0, 0*0 g0)', 'group_recursion'],
-  ['r = [3*2 int]', 'syntax'],
   ['r = {tstr}', 'map_key'],
   ['r = {~t}\nt = #6.1(int)', 'map_key'],
   ['r = [' + Array.from({ length: 1100 }, () => 'int').join(', ') + ']', 'limit_peg_nodes'],
@@ -98,6 +100,8 @@ const NOW_COMPILE = [
   // D349: a dead self-reference after a member in a map group (its Program must verify)
   'r = { ? g }\ng = ("k" => true, 0*0 g)', 'r = { * g }\ng = ("k" => true, 0*0 g)', 'r = { ? g }\ng = (* "k" => true, 0*0 g)',
   'r = { ? g }\ng = ("k" => true, 0*0 (1 => int, g))',
+  // D372: n*m with m < n matches nothing (RFC 8610 §3.2), in arrays, maps and group rules
+  'r = [3*2 int]', 'r = {3*2 a: int}', 'r = [g]\ng = (int, 1*0 g)', 'r = {? g}\ng = (2*1 a: int, b: int)',
 ];
 
 // ---------------------------------------------------------------- JS and Rust runners
@@ -250,8 +254,8 @@ console.log(`  ${tally.refused === tally.expectRefuse ? 'ok  ' : 'FAIL'} ${tally
     if (it.kind === 'now') { if (j.ok) ngood++; else fail(`withdrawn ${JSON.stringify(it.text.slice(0, 60))}: ${j.code} ${j.line}:${j.column}`); }
   });
   console.log(`  ${pgood === 2 * probes.length ? 'ok  ' : 'FAIL'} ${pgood}/${2 * probes.length} architecture §20.15 probe schemas compile (both cut modes)`);
-  console.log(`  ${rgood === REFUSALS.length ? 'ok  ' : 'FAIL'} ${rgood}/${REFUSALS.length} remaining refusals (left recursion, n*m with m < n, keyless map entries, PEG node and position limits)`);
-  console.log(`  ${ngood === NOW_COMPILE.length ? 'ok  ' : 'FAIL'} ${ngood}/${NOW_COMPILE.length} formerly refused schemas compile and verify on both hosts (overlap, cuts on typesets and non-text keys, group occurrence, centre recursion, recursive unwrap, dead self-references D349)`);
+  console.log(`  ${rgood === REFUSALS.length ? 'ok  ' : 'FAIL'} ${rgood}/${REFUSALS.length} remaining refusals (left recursion, keyless map entries, PEG node and position limits)`);
+  console.log(`  ${ngood === NOW_COMPILE.length ? 'ok  ' : 'FAIL'} ${ngood}/${NOW_COMPILE.length} formerly refused schemas compile and verify on both hosts (overlap, cuts on typesets and non-text keys, group occurrence, centre recursion, recursive unwrap, dead self-references D349, n*m with m < n D372)`);
 }
 console.log(`  ${identical === total ? 'ok  ' : 'FAIL'} ${identical}/${total} identical across hosts (Programs, pools and warnings byte for byte; errors field for field)`);
 console.log(`  ${verified === nverify ? 'ok  ' : 'FAIL'} ${verified}/${nverify} Programs accepted by vm-verify (format 2.0) on JS and Rust`);
@@ -599,6 +603,30 @@ for (const { label, P, B } of programs) {
     else fail(`W8 ${JSON.stringify(it.text)} [${it.cuts ? 'branch' : 'rfc'}]: warned at ${got.join(', ') || 'nothing'}, want ${want.join(', ') || 'nothing'}`);
   });
   console.log(`  ${good === items.length ? 'ok  ' : 'FAIL'} ${good}/${items.length} W8 cases (D301: same leading cut key across map alternatives warns under 'rfc' only; JS == Rust)`);
+}
+
+// ---------------------------------------------------------------- 11: warning W9 (D372)
+{
+  const W9 = [
+    // [schema, W9 positions (line:column of the entry)] -- in both cut modes
+    ['r = [3*2 int]', ['1:6']],
+    ['r = {3*2 a: int, ? b: int}', ['1:6']],
+    ['r = [g, g]\ng = (int, 1*0 tstr)', ['2:11']],
+    ['r = [2*2 int, 0*0 int, 1*1 int]', []],
+  ];
+  const items = [];
+  for (const [t] of W9) for (const cuts of [0, 1]) items.push({ text: t, cuts, gw: -1 });
+  const res = both(items);
+  let good = 0;
+  res.forEach(({ j, same, why }, i) => {
+    const it = items[i], want = W9[i >> 1][1];
+    if (!same) { fail(`W9 ${JSON.stringify(it.text)} [cuts ${it.cuts}]: ${why}`); return; }
+    if (!j.ok) { fail(`W9 ${JSON.stringify(it.text)}: does not compile (${j.code})`); return; }
+    const got = j.warnings.filter(w => w.code === 'W9').map(w => `${w.line}:${w.column}`);
+    if (JSON.stringify(got) === JSON.stringify(want)) good++;
+    else fail(`W9 ${JSON.stringify(it.text)} [cuts ${it.cuts}]: warned at ${got.join(', ') || 'nothing'}, want ${want.join(', ') || 'nothing'}`);
+  });
+  console.log(`  ${good === items.length ? 'ok  ' : 'FAIL'} ${good}/${items.length} W9 cases (D372: n*m with m < n matches nothing and warns once at the entry; JS == Rust)`);
 }
 
 if (fails) { console.log(`  FAIL ${fails} failure(s)`); process.exit(1); }

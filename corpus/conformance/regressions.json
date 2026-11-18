@@ -3,7 +3,8 @@
   "source": "P9.9 regressions (2026-11-12): shapes the fixed property campaign found. Expectations are hand-reasoned; vm-test also checks each against corpus/tools/peg-oracle.mjs.",
   "notes": [
     "D349: a dead self-reference (`0*0 g`) after a member in a map group; the compiler's Program must verify and mean the group without it.",
-    "D350: an embedded refusal after a byte string whose content is a malformed head, under the valid preset; its offset is where the inner walk stopped (program.md §9.2 rule 7), on every route (vm-test's buffer route here; vmsession-test's shapes 14-16 for sessions)."
+    "D350: an embedded refusal after a byte string whose content is a malformed head, under the valid preset; its offset is where the inner walk stopped (program.md §9.2 rule 7), on every route (vm-test's buffer route here; vmsession-test's shapes 14-16 for sessions).",
+    "D372: `/=` and `//=` on a prelude name extend the prelude rule (RFC 8610 Appendix D); `.cborseq any` is `.cborseq [* any]` (RFC 8610 §3.8.4); an occurrence n*m with m < n matches nothing (RFC 8610 §3.2, warning W9); decimal float literals of up to 20 significant digits, hard rounding cases pinned by their encodings (compile2-test also compiles this file on both hosts)."
   ],
   "suites": [
     {
@@ -240,6 +241,154 @@
         {"rule": "a", "hex": "d81843820102", "expect": false, "note": "tag, byte string, then the payload's three items: five"},
         {"rule": "a", "hex": "d8184101", "expect": true}
       ]
+    },
+    {
+      "category": "regression", "name": "D372: /= on a prelude name extends the prelude rule",
+      "cddl": "uint /= tstr\nr = uint\n",
+      "cases": [
+        {"rule": "r", "hex": "01", "expect": true, "note": "0.1.0 replaced uint by tstr and refused this"},
+        {"rule": "r", "hex": "6161", "expect": true},
+        {"rule": "r", "hex": "40", "expect": false},
+        {"rule": "r", "hex": "20", "expect": false}
+      ]
+    },
+    {
+      "category": "regression", "name": "D372: /= on a prelude alias extends it; the base type is unchanged",
+      "cddl": "text /= bstr\nr = text\nu = tstr\n",
+      "cases": [
+        {"rule": "r", "hex": "6161", "expect": true, "note": "0.1.0 replaced text by bstr and refused this"},
+        {"rule": "r", "hex": "41ff", "expect": true},
+        {"rule": "r", "hex": "01", "expect": false},
+        {"rule": "u", "hex": "41ff", "expect": false}
+      ]
+    },
+    {
+      "category": "regression", "name": "D372: an extended prelude rule changes the prelude rules built on it",
+      "cddl": "int /= bool\nr = [int]\n",
+      "cases": [
+        {"rule": "r", "hex": "8101", "expect": true, "note": "0.1.0 replaced int by bool and refused this"},
+        {"rule": "r", "hex": "8120", "expect": true},
+        {"rule": "r", "hex": "81f5", "expect": true},
+        {"rule": "r", "hex": "816161", "expect": false}
+      ]
+    },
+    {
+      "category": "regression", "name": "D372: //= on a prelude name is a group choice added to a type",
+      "cddl": "uint //= (a: 1)\nr = {uint}\n", "snugSchemaError": "type_group_mismatch", "cases": []
+    },
+    {
+      "category": "regression", "name": "D372: = shadows a prelude name, and the prelude rules built on it follow",
+      "cddl": "uint = tstr\nr = uint\nn = int\ntstr = bstr\nt = text\n",
+      "cases": [
+        {"rule": "r", "hex": "01", "expect": false},
+        {"rule": "r", "hex": "41ff", "expect": true, "note": "uint = tstr and tstr = bstr"},
+        {"rule": "n", "hex": "01", "expect": false},
+        {"rule": "n", "hex": "20", "expect": true},
+        {"rule": "t", "hex": "41ff", "expect": true},
+        {"rule": "t", "hex": "6161", "expect": false}
+      ]
+    },
+    {
+      "category": "regression", "name": "D372: an identical second = stays duplicate_rule",
+      "cddl": "r = uint\nr = uint\n", "snugSchemaError": "duplicate_rule", "cases": []
+    },
+    {
+      "category": "regression", "name": "D372: .cborseq any is .cborseq [* any]; non-array controller leaves match nothing",
+      "cddl": "r = bstr .cborseq any\ns = bstr .cborseq uint\nt = bstr .cborseq ([uint] / tstr)\nu = [bstr .cborseq any, uint]\n",
+      "cases": [
+        {"rule": "r", "hex": "40", "expect": true, "note": "0.1.0 refused the schema (control_value)"},
+        {"rule": "r", "hex": "420102", "expect": true},
+        {"rule": "r", "hex": "4401026161", "expect": true},
+        {"rule": "r", "hex": "41ff", "expect": false},
+        {"rule": "r", "hex": "4118", "expect": false},
+        {"rule": "r", "hex": "6161", "expect": false},
+        {"rule": "s", "hex": "40", "expect": false},
+        {"rule": "s", "hex": "4101", "expect": false},
+        {"rule": "t", "hex": "4101", "expect": true},
+        {"rule": "t", "hex": "40", "expect": false},
+        {"rule": "t", "hex": "420101", "expect": false},
+        {"rule": "t", "hex": "4161", "expect": false},
+        {"rule": "u", "hex": "8242010203", "expect": true},
+        {"rule": "u", "hex": "8241ff03", "expect": false}
+      ]
+    },
+    {
+      "category": "regression", "name": "D372: an occurrence n*m with m < n matches nothing",
+      "cddl": "r = [3*2 uint]\ns = [? int, 3*2 uint]\nt = {3*2 a: uint, ? b: int}\nu = [* (3*2 uint), tstr]\nv = [1*0 uint]\n",
+      "cases": [
+        {"rule": "r", "hex": "80", "expect": false, "note": "0.1.0 refused the schema (syntax)"},
+        {"rule": "r", "hex": "8101", "expect": false},
+        {"rule": "r", "hex": "8201", "expect": false},
+        {"rule": "r", "hex": "83010203", "expect": false},
+        {"rule": "s", "hex": "80", "expect": false},
+        {"rule": "s", "hex": "8101", "expect": false},
+        {"rule": "t", "hex": "a0", "expect": false},
+        {"rule": "t", "hex": "a1616201", "expect": false},
+        {"rule": "u", "hex": "816161", "expect": true},
+        {"rule": "u", "hex": "80", "expect": false},
+        {"rule": "v", "hex": "80", "expect": false}
+      ]
+    },
+    {
+      "category": "regression", "name": "D372: an entry that matches nothing still has its names checked",
+      "cddl": "r = [3*2 nosuchrule]\n", "snugSchemaError": "undefined_name", "cases": []
+    },
+    {
+      "category": "regression", "name": "D372: decimal float literals of 18, 19 and 20 significant digits round correctly on every host", "options": {"wire": "valid"},
+      "cddl": "a18 = 1.00000000000000011\nb18 = 1.00000000000000012\na19 = 1.000000000000000111\nb19 = 1.000000000000000112\na20 = 1.0000000000000001109\nb20 = 1.0000000000000001111\nc18 = 9007199254740992.99\nd18 = 9007199254740993.01\nc19 = 9007199254740992.999\nd19 = 9007199254740993.001\nc20 = 9007199254740992.9999\nd20 = 9007199254740993.0001\ne20 = 0.30000000000000001665\nf20 = 0.30000000000000001666\ng20 = -1.0000000000000001111\nh19 = 123456789012345678.9\nm20 = 2.4703282292062327209e-324\nx20 = 1.7976931348623158079e308\ny20 = 4.9406564584124654418e-324\nz19 = 2.2250738585072011360e-308\n",
+      "cases": [
+        {"rule": "a18", "hex": "f93c00", "expect": true, "note": "below the halfway point 1 + 2^-53: 1.0 (0.1.0 refused every literal here: float_literal)"},
+        {"rule": "a18", "hex": "fb3ff0000000000001", "expect": false},
+        {"rule": "b18", "hex": "fb3ff0000000000001", "expect": true, "note": "above the halfway point: 1 + 2^-52"},
+        {"rule": "b18", "hex": "f93c00", "expect": false},
+        {"rule": "a19", "hex": "f93c00", "expect": true},
+        {"rule": "a19", "hex": "fb3ff0000000000001", "expect": false},
+        {"rule": "b19", "hex": "fb3ff0000000000001", "expect": true},
+        {"rule": "b19", "hex": "f93c00", "expect": false},
+        {"rule": "a20", "hex": "f93c00", "expect": true, "note": "1.0000000000000001109 < 1 + 2^-53 = 1.00000000000000011102..."},
+        {"rule": "a20", "hex": "fb3ff0000000000001", "expect": false},
+        {"rule": "b20", "hex": "fb3ff0000000000001", "expect": true},
+        {"rule": "b20", "hex": "f93c00", "expect": false},
+        {"rule": "c18", "hex": "fa5a000000", "expect": true, "note": "just below 2^53 + 1, the halfway point: 2^53"},
+        {"rule": "c18", "hex": "fb4340000000000001", "expect": false},
+        {"rule": "d18", "hex": "fb4340000000000001", "expect": true, "note": "just above 2^53 + 1: 2^53 + 2"},
+        {"rule": "d18", "hex": "fa5a000000", "expect": false},
+        {"rule": "c19", "hex": "fa5a000000", "expect": true},
+        {"rule": "c19", "hex": "fb4340000000000001", "expect": false},
+        {"rule": "d19", "hex": "fb4340000000000001", "expect": true},
+        {"rule": "d19", "hex": "fa5a000000", "expect": false},
+        {"rule": "c20", "hex": "fa5a000000", "expect": true},
+        {"rule": "c20", "hex": "fb4340000000000001", "expect": false},
+        {"rule": "d20", "hex": "fb4340000000000001", "expect": true},
+        {"rule": "d20", "hex": "fa5a000000", "expect": false},
+        {"rule": "e20", "hex": "fb3fd3333333333333", "expect": true, "note": "the halfway point above 0.3 is 0.300000000000000016653..."},
+        {"rule": "e20", "hex": "fb3fd3333333333334", "expect": false},
+        {"rule": "f20", "hex": "fb3fd3333333333334", "expect": true},
+        {"rule": "f20", "hex": "fb3fd3333333333333", "expect": false},
+        {"rule": "g20", "hex": "fbbff0000000000001", "expect": true},
+        {"rule": "g20", "hex": "f9bc00", "expect": false},
+        {"rule": "h19", "hex": "fb437b69b4ba630f35", "expect": true},
+        {"rule": "h19", "hex": "fb437b69b4ba630f34", "expect": false},
+        {"rule": "m20", "hex": "fb0000000000000001", "expect": true, "note": "just above half the least subnormal: the least subnormal"},
+        {"rule": "m20", "hex": "f90000", "expect": false},
+        {"rule": "x20", "hex": "fb7fefffffffffffff", "expect": true, "note": "just below the halfway point to 2^1024: the greatest finite double"},
+        {"rule": "x20", "hex": "fb7feffffffffffffe", "expect": false},
+        {"rule": "y20", "hex": "fb0000000000000001", "expect": true},
+        {"rule": "z19", "hex": "fb000fffffffffffff", "expect": true, "note": "the greatest subnormal"},
+        {"rule": "z19", "hex": "fb0010000000000000", "expect": false}
+      ]
+    },
+    {
+      "category": "regression", "name": "D372: a decimal float literal of 21 significant digits is refused",
+      "cddl": "r = 1.00000000000000011102\n", "snugSchemaError": "float_literal", "cases": []
+    },
+    {
+      "category": "regression", "name": "D372: a 20-digit literal below half the least subnormal rounds to zero and is refused",
+      "cddl": "r = 2.4703282292062327208e-324\n", "snugSchemaError": "float_literal", "cases": []
+    },
+    {
+      "category": "regression", "name": "D372: a 20-digit literal above the halfway point to 2^1024 rounds to infinity and is refused",
+      "cddl": "r = 1.7976931348623158080e308\n", "snugSchemaError": "float_literal", "cases": []
     }
   ]
 }

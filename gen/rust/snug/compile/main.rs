@@ -630,6 +630,7 @@ pub fn warning_name(code: i32) -> &'static str {
         6 => "W6",
         7 => "W7",
         8 => "W8",
+        9 => "W9",
         _ => "W0",
     };
 }
@@ -644,6 +645,7 @@ pub fn warning_message(code: i32) -> &'static str {
         6 => "order-sensitive member overlaps another member (RFC 8610 section 3.5.3)",
         7 => "worst-case group arena at the compiled limits can exceed the arena cap",
         8 => "choice alternative starts with the same cut key as an earlier one: under the default RFC cuts the earlier alternative's cut fails the whole map (see the guide, Discriminated unions under the RFC cut)",
+        9 => "occurrence maximum is below its minimum, so the entry matches nothing",
         _ => "",
     };
 }
