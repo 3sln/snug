@@ -9255,6 +9255,77 @@ test, dist.mjs and prerelease.mjs.
     - The first live release will be the next `version.edn` bump. actionlint remains not
       run (the permission refusal above).
 
+### D369 — The README's Design links return in a repo-only block: `<!-- repo-only -->` … `<!-- /repo-only -->` is permanent GitHub-only text, stripped from every shipped README
+**Decision** (D369 engineer; the work package from the manager, the follow-up approved by the
+owner). The line the 0.1.0 release commit dropped with the pre-release block (9f21cd0's
+README.md) is back in README.md, after the Documentation list:
+"Design: [specification](…/SPEC.md), [architecture](…/docs/architecture.md), [Program
+format](…/docs/program.md)", absolute `https://github.com/3sln/snug/blob/main/` links.
+
+* **One strip, two kinds** (`kin/scripts/prerelease.mjs`; the file name and its CLI are kept,
+  so `kin/scripts/rust-crate` changes by a comment only). `readmeBlocks(text)` parses both kinds:
+  - `<!-- prerelease -->`: at most one, removed at release; `bb dist` still refuses it;
+  - `<!-- repo-only -->`: any number, permanent.
+
+  Every marker is alone on its line. A misspelled or inline marker of either kind, a stray or
+  unclosed one, a closer of the other kind, and any nesting (repo-only in repo-only, either kind
+  in the other) are problems. Siblings of both kinds may sit in one README. `stripShipped`
+  removes every block (and one following blank line), and throws on any problem.
+  `prereleaseBlocks` (dist.mjs's view) lists pre-release blocks only, with all problems.
+  `stripPrerelease` is gone; its callers (both package builds, both package tests) use
+  `stripShipped`. `repoOnlyLines` gives a block's content lines, for the shipped-side checks.
+* **`bb dist` needs nothing new.** Its inputs are the stripped npm, SDK and crate artefacts.
+  Its source-README check refuses a pre-release block as before; repo-only blocks pass, and a
+  malformed marker now gets its own message rather than "still has its block" (README.md at
+  this commit: no pre-release blocks, no problems). dist-test was not run (it needs a stamped
+  build).
+* **docs-test**, rule 5:
+  - repo side: markers well-formed. The block's own lines get the stale-wording and
+    internal-reference rules, with no pre-release exemption. The one exemption: a Markdown link
+    target `https://github.com/3sln/snug/blob/main/…` is blanked before the rules run, inside
+    repo-only blocks only. So "SPEC.md", "architecture.md" and "program.md" in those targets
+    pass; the same words in prose, in a relative link, in another repository's link, or
+    outside a block still fail;
+  - shipped side: no marker of either kind (`MARKER_LIKE`), and none of the blocks' lines, in
+    `stripShipped`'s output;
+  - self-tests for each case above, including that each malformed form makes the strip throw.
+* **Package tests.** The packed npm README, the SDK README and the assembled crate README hold
+  no marker of either kind and none of the source's repo-only lines, and equal
+  `stripShipped(source)`. The npm test also checks that "Design: [specification]" is absent.
+* **Mutation proofs** (in a scratch worktree at be3fc4e, the first one re-run at ea9744a for
+  docs-test's final wording; each restored afterwards):
+  - stray `<!-- /repo-only -->` above the block:
+    `README.md:182: README block markers: <!-- /repo-only --> without an opener` (docs-test,
+    exit 1), and the npm package build throws
+    `Error: README.md:182: <!-- /repo-only --> without an opener`;
+  - closer deleted: `README.md:183: … <!-- repo-only --> is never closed` (both, as above);
+  - a pre-release block inside the repo-only block:
+    `README.md:185: … a nested <!-- prerelease --> (the repo-only block opened at line 183 is
+    not closed; blocks do not nest)`, `README.md:187: … <!-- /prerelease --> inside the
+    repo-only block opened at line 183`;
+  - a repo-only block inside it: `README.md:185: … a nested <!-- repo-only --> …`,
+    `README.md:188: … <!-- /repo-only --> without an opener`;
+  - npm package build without the strip: package.test (npm-test's) fails with
+    `AssertionError [ERR_ASSERTION]: the packed README carries a pre-release or repo-only
+    marker`. Stripping only the marker lines fails with `the packed README carries repo-only
+    text: Design: [specification](…`;
+  - SDK build without the strip: the SDK package test fails with `the packed README carries a
+    pre-release or repo-only marker`;
+  - rust-crate without the strip (`put host/rust/README.md`): the crate README test fails with
+    `the crate README carries a pre-release or repo-only marker`.
+
+  host/rust/README.md and host/wasm-sdk/README.md carry no repo-only block, so for the last two
+  a probe block was added to that README. With the strip intact, the same tests passed
+  (control: crate test ok, SDK package test 6/6).
+* **Docs:** release-policy §4 (the bump) and §9 (dist's refusals) say repo-only blocks stay and
+  ship stripped. No CHANGELOG entry: nothing user-facing changes.
+* **Gates** (worktree p-d369, at be3fc4e): `bb gates land` 11/11 ok (versions, check, drift,
+  size, types-test, docs-test, npm-test, rust-api-test, wasm-sdk-test, vm-test, compile-test);
+  `bb wasm-package-test` ok (package test, consumer smoke: Node loaders, workerd, wrangler
+  dry run, Chrome); `bb stamp-test` ok. At ea9744a (the docs-test label change only):
+  `bb docs-test` ok (0 pre-release blocks, 1 repo-only block) and `bb gates --check` ok.
+- [ ] **Signed off** (manager)
+
 ## Findings
 
 - 2026-11-11 (manager): **the 6½-day `scan-test.mjs 300 1` process
