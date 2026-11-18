@@ -9472,6 +9472,17 @@ restored afterwards.
   - The new N8 check shows that this machine's `../kin` differs from KIN_REF in 2 src files.
     Hosted CI builds with KIN_REF, and the hosted drift gate has passed, so the generated code
     is unaffected. `../kin` is read-only to snug.
+- **Follow-up (coordinator, 2026-11-18): a Linux CI failure from N5's pipefail.**
+  - D370 added `set -o pipefail` to kin/scripts/rust-crate. On Linux, `sh` is Debian's dash,
+    which rejects it ("Illegal option -o pipefail"). That broke npm-test's assembled-crate test
+    and rust-api-test in push CI run 44408392052 on ec940e2.
+  - macOS's `sh` is bash, so the targeted local runs could not show it.
+  - **Fix, abd76e6:** the script re-runs itself under bash when `$BASH_VERSION` is empty.
+  - Checked under /bin/dash, sh and bash. A missing host dir still fails under dash, and the
+    package test passes.
+  - CI run 44409924904 was started on abd76e6.
+  - **Lesson:** a script started with `sh` must stay POSIX, or be checked against dash
+    (/bin/dash on this machine) before landing. Engineer briefs now say so.
 
 ### D371 — Host fixes after 0.1.0: the Rust sequence reader gets a `quantum` and answers `ended` after its end; a blob or handle of 2³¹ bytes or more is `too_large`; the wasm SDK defers a close inside a step and reaches its state through one borrow; a view's schema must be a snug Schema; the budget docs say what a call can spend (post-release triage N4, N5, N6, N8, S4, SEC-F6, SEC-F7)
 **Decision** (D371 engineer; work package WP-H from the manager; every decision below is the
