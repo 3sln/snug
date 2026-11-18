@@ -9237,10 +9237,23 @@ test, dist.mjs and prerelease.mjs.
   - **Open:**
     - **actionlint was NOT run:** the permission system refused its download. It was not
       worked around, and the coordinator reported it to the owner.
-    - **Hosted reproduction of 0.1.0:** the coordinator's dispatch dry run on main.
     - **A dry run's tests run on the checked-out commit**, ci.yml's own `github.sha`. For a
       released version that is HEAD, while the build rebuilds the tagged commit. That is
       acceptable for a check-only run.
+  - **Hosted proof (coordinator, 2026-11-18): green.**
+    - **Release dry run 44211502199** (workflow_dispatch on main, dry_run=true, 00:53–01:49
+      UTC):
+      - guard, tests and build all succeeded;
+      - the tests ran on macOS (the release shards in sequence, and compat) and on Linux;
+      - the hosted rebuild of bcfd46d produced exactly the published bytes (624605fc…,
+        62cb7e2c…, bed3798e…) and the dist commit a8b2102;
+      - `release-registry.mjs verify` passed: npm integrity for both tarballs and the
+        crates.io cksum;
+      - tag-release and both publish jobs were skipped, as designed.
+    - **CI push run 44211484181** on 347eb4c: all success, with land, compat and linux as one
+      job each, plus `ci`.
+    - The first live release will be the next `version.edn` bump. actionlint remains not
+      run (the permission refusal above).
 
 ## Findings
 
