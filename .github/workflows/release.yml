@@ -1,0 +1,310 @@
+# snug's release workflow (D368; docs/release-policy.md §4). A release is a commit on main
+# that sets version.edn's :version and adds CHANGELOG's [<version>] section; merging it is the
+# owner's go. This workflow does the rest, in the owner's order: test, then tag and release,
+# then publish.
+#
+#   guard        kin/scripts/release-guard.mjs: what of <version>'s release already exists
+#                (the source tag src/v<version>, the dist tag v<version>, the GitHub release,
+#                npm @3sln/snug and @3sln/snug-wasm, crates.io snug-cbor). Nothing missing: a
+#                clean no-op. No source tag: a release of this commit. A source tag but
+#                something missing: resume, building the TAGGED commit and doing only the
+#                missing steps.
+#   tests        ci.yml (workflow_call, mode release): the release set, compat and linux on
+#                the commit; skipped when resuming (the commit was tested before it was tagged)
+#   build        kin/scripts/release-build.mjs on macOS: stamp, both npm tarballs, the .crate,
+#                the wasm modules, SHA256SUMS, release notes from CHANGELOG [<version>] (no
+#                section, no release), the dist commit and tags in a scratch repository
+#                (dist.bundle). The same commit gives the same bytes as a local build (D368).
+#                Any artefact a registry already holds must be byte-identical to it.
+#   tag-release  annotated src/v<version> on the commit; dist and v<version> from the bundle;
+#                `gh release create v<version> --verify-tag` with the artefacts and SHA256SUMS,
+#                a pre-release while the major version is 0
+#   publish-*    crates.io (rust-lang/crates-io-auth-action) and npm (`npm publish
+#                --provenance`), by trusted publishing (OIDC): no token secret exists. These
+#                jobs are in this file because the registries trust `release.yml` itself.
+#
+# Every step that writes is skipped unless the run is on refs/heads/main and is a push or a
+# workflow_dispatch with dry_run false; a dispatch (or any run on another ref) builds and
+# uploads the artefacts only. Each write first checks that its target is missing, so a re-run
+# resumes a partial release without duplicating anything.
+name: Release
+
+on:
+  push:
+    branches: [main]
+    paths: [version.edn]
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: 'Build and check only: no tag, no GitHub release, no publish'
+        type: boolean
+        default: true
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+env:
+  # the kin commit snug's gates and builds run against; the same as ci.yml's (`bb gates --check`)
+  KIN_REF: 21e8ab9c3d14d438c31916a7e052cf5929b75ca3
+  npm_config_update_notifier: 'false'
+
+defaults:
+  run:
+    working-directory: snug
+
+jobs:
+  guard:
+    name: guard (what is missing)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    outputs:
+      version: ${{ steps.plan.outputs.version }}
+      action: ${{ steps.plan.outputs.action }}
+      commit: ${{ steps.plan.outputs.commit }}
+      need_tests: ${{ steps.plan.outputs.need_tests }}
+      need_tag: ${{ steps.plan.outputs.need_tag }}
+      need_dist: ${{ steps.plan.outputs.need_dist }}
+      need_release: ${{ steps.plan.outputs.need_release }}
+      need_npm_snug: ${{ steps.plan.outputs.need_npm_snug }}
+      need_npm_wasm: ${{ steps.plan.outputs.need_npm_wasm }}
+      need_crate: ${{ steps.plan.outputs.need_crate }}
+      write: ${{ steps.mode.outputs.write }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          path: snug
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: '24.6.0'
+      - run: node kin/scripts/release-guard.mjs --self-test
+      - id: plan
+        run: node kin/scripts/release-guard.mjs --repo "$GITHUB_REPOSITORY" --remote "https://github.com/$GITHUB_REPOSITORY.git" --github-output "$GITHUB_OUTPUT"
+      - id: mode
+        env:
+          ON_MAIN: ${{ github.ref == 'refs/heads/main' }}
+          EVENT: ${{ github.event_name }}
+          DRY_RUN: ${{ inputs.dry_run }}
+        run: |
+          # writes (tags, the GitHub release, publishes) only from main, by a push or by a
+          # dispatch that is not a dry run; anything else builds and checks only
+          write=false
+          if [ "$ON_MAIN" = true ] && { [ "$EVENT" = push ] || { [ "$EVENT" = workflow_dispatch ] && [ "$DRY_RUN" = false ]; }; }; then write=true; fi
+          echo "write=$write" >> "$GITHUB_OUTPUT"
+          echo "release run on $GITHUB_REF by $EVENT (dry_run: ${DRY_RUN:-n/a}): write=$write"
+
+  tests:
+    name: tests (ci.yml, release set)
+    needs: guard
+    if: needs.guard.outputs.action != 'noop' && needs.guard.outputs.need_tests == 'true'
+    uses: ./.github/workflows/ci.yml
+    with:
+      mode: release
+    permissions:
+      contents: read
+
+  build:
+    name: build (kin/scripts/release-build.mjs)
+    needs: [guard, tests]
+    if: >-
+      always() && needs.guard.result == 'success' && needs.guard.outputs.action != 'noop' &&
+      (needs.tests.result == 'success' || needs.tests.result == 'skipped')
+    runs-on: macos-15
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          path: snug
+          fetch-depth: 0   # a resumed release builds the tagged commit, not this one
+          persist-credentials: false
+      # the tools that fix the bytes: Rust 1.92.0 (cargo package), Node 24.6.0 with its npm
+      # 11.5.1 (npm pack), the pinned wasm nightly and wasm-opt from bench/compare
+      - uses: ./snug/.github/actions/setup
+        with:
+          wasm: 'true'
+          compare: 'true'
+      - name: the npm that packed every release so far
+        run: |
+          v=$(npm --version)
+          [ "$v" = 11.5.1 ] || { echo "::error::npm $v; the release tarballs are packed with npm 11.5.1 (D368: npm pack's bytes depend on it)"; exit 1; }
+      - name: build
+        env:
+          COMMIT: ${{ needs.guard.outputs.commit }}
+        run: node kin/scripts/release-build.mjs --commit "$COMMIT" --dist-from "https://github.com/$GITHUB_REPOSITORY.git"
+      - name: the version built is the version released
+        env:
+          VERSION: ${{ needs.guard.outputs.version }}
+        run: |
+          got=$(node -p "require('./.cache/release-build/build.json').version")
+          [ "$got" = "$VERSION" ] || { echo "::error::built $got, the guard said $VERSION"; exit 1; }
+      - name: what a registry already holds is these bytes
+        run: node kin/scripts/release-registry.mjs verify .cache/release-build
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: release-${{ needs.guard.outputs.version }}
+          path: |
+            snug/.cache/release-build/artefacts
+            snug/.cache/release-build/crate
+            snug/.cache/release-build/release-notes.md
+            snug/.cache/release-build/build.json
+            snug/.cache/release-build/dist.bundle
+          if-no-files-found: error
+          retention-days: 90
+
+  tag-release:
+    name: tag and GitHub release
+    needs: [guard, build]
+    if: >-
+      needs.build.result == 'success' && needs.guard.outputs.write == 'true' &&
+      (needs.guard.outputs.need_tag == 'true' || needs.guard.outputs.need_dist == 'true' || needs.guard.outputs.need_release == 'true')
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          path: snug
+          fetch-depth: 0
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: release-${{ needs.guard.outputs.version }}
+          path: ${{ runner.temp }}/release
+      - name: src/v<version>, dist and v<version>
+        env:
+          VERSION: ${{ needs.guard.outputs.version }}
+          COMMIT: ${{ needs.guard.outputs.commit }}
+          NEED_TAG: ${{ needs.guard.outputs.need_tag }}
+          NEED_DIST: ${{ needs.guard.outputs.need_dist }}
+          REL: ${{ runner.temp }}/release
+        run: |
+          set -euo pipefail
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          if [ "$NEED_TAG" = true ]; then
+            git ls-remote --exit-code origin "refs/tags/src/v$VERSION" >/dev/null && { echo "src/v$VERSION exists now; not re-tagging"; } || {
+              git tag -a "src/v$VERSION" "$COMMIT" -m "snug $VERSION (release-policy §4, D368)"
+              git push origin "refs/tags/src/v$VERSION"
+            }
+          fi
+          if [ "$NEED_DIST" = true ]; then
+            git fetch -q "$REL/dist.bundle" "refs/heads/dist:refs/remotes/bundle/dist" "+refs/tags/*:refs/tags/*"
+            # dist was built on top of the remote's dist (release-build --dist-from): a fast-forward
+            git push origin "refs/remotes/bundle/dist:refs/heads/dist"
+            for t in $(git tag -l "v$VERSION" "*/v$VERSION"); do
+              git ls-remote --exit-code origin "refs/tags/$t" >/dev/null || git push origin "refs/tags/$t"
+            done
+          fi
+      - name: GitHub release v<version>
+        if: needs.guard.outputs.need_release == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ needs.guard.outputs.version }}
+          REL: ${{ runner.temp }}/release
+        run: |
+          set -euo pipefail
+          gh release view "v$VERSION" >/dev/null 2>&1 && { echo "the release v$VERSION exists now"; exit 0; }
+          pre=; case "$VERSION" in 0.*) pre=--prerelease ;; esac   # release-policy §4: 0.x is a pre-release
+          gh release create "v$VERSION" --verify-tag $pre --title "snug $VERSION" --notes-file "$REL/release-notes.md" \
+            "$REL"/artefacts/*.tgz "$REL"/artefacts/*.crate "$REL/artefacts/SHA256SUMS"
+
+  publish-crate:
+    name: publish crates.io (snug-cbor)
+    needs: [guard, build, tag-release]
+    if: >-
+      always() && needs.build.result == 'success' && needs.guard.outputs.write == 'true' &&
+      (needs.tag-release.result == 'success' || needs.tag-release.result == 'skipped') &&
+      needs.guard.outputs.need_crate == 'true'
+    runs-on: macos-15
+    timeout-minutes: 30
+    permissions:
+      id-token: write
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          path: snug
+          persist-credentials: false
+      - uses: ./snug/.github/actions/setup   # Rust 1.92.0, the cargo that built the .crate
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: release-${{ needs.guard.outputs.version }}
+          path: ${{ runner.temp }}/release
+      - name: cargo publish packs the built .crate's bytes
+        env:
+          VERSION: ${{ needs.guard.outputs.version }}
+          REL: ${{ runner.temp }}/release
+        run: |
+          set -euo pipefail
+          (cd "$REL/crate" && CARGO_TARGET_DIR="$RUNNER_TEMP/repack" cargo package --offline --allow-dirty --quiet)
+          a=$(shasum -a 256 "$RUNNER_TEMP/repack/package/snug-cbor-$VERSION.crate" | cut -d' ' -f1)
+          b=$(shasum -a 256 "$REL/artefacts/snug-cbor-$VERSION.crate" | cut -d' ' -f1)
+          [ "$a" = "$b" ] || { echo "::error::cargo packs $a here, the release built $b"; exit 1; }
+          echo "the crate cargo publishes is the built one: $a"
+      - id: auth
+        uses: rust-lang/crates-io-auth-action@3268eb413133e2960fa4ae0e963ca76380c54cd9 # v1.0.6
+      - name: cargo publish
+        env:
+          CARGO_REGISTRY_TOKEN: ${{ steps.auth.outputs.token }}
+          REL: ${{ runner.temp }}/release
+        run: (cd "$REL/crate" && CARGO_TARGET_DIR="$RUNNER_TEMP/publish" cargo publish --allow-dirty)
+      - name: the crates.io index holds the built bytes
+        env:
+          VERSION: ${{ needs.guard.outputs.version }}
+          REL: ${{ runner.temp }}/release
+        run: node kin/scripts/release-registry.mjs verify "$REL" --only "snug-cbor-$VERSION.crate" --wait 900
+
+  publish-npm:
+    name: publish npm (@3sln/snug, @3sln/snug-wasm)
+    needs: [guard, build, tag-release]
+    if: >-
+      always() && needs.build.result == 'success' && needs.guard.outputs.write == 'true' &&
+      (needs.tag-release.result == 'success' || needs.tag-release.result == 'skipped') &&
+      (needs.guard.outputs.need_npm_snug == 'true' || needs.guard.outputs.need_npm_wasm == 'true')
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    permissions:
+      id-token: write
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          path: snug
+          persist-credentials: false
+      # trusted publishing needs npm >= 11.5.1 and Node >= 22.14.0 (docs.npmjs.com/trusted-publishers)
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: '24.6.0'
+          registry-url: 'https://registry.npmjs.org'
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: release-${{ needs.guard.outputs.version }}
+          path: ${{ runner.temp }}/release
+      - name: npm publish
+        env:
+          VERSION: ${{ needs.guard.outputs.version }}
+          NEED_SNUG: ${{ needs.guard.outputs.need_npm_snug }}
+          NEED_WASM: ${{ needs.guard.outputs.need_npm_wasm }}
+          REL: ${{ runner.temp }}/release
+        run: |
+          set -euo pipefail
+          node -e "const [a,b]=process.versions.node.split('.').map(Number); if (a<22||(a===22&&b<14)) process.exit(1)" || { echo "::error::Node $(node --version) < 22.14.0"; exit 1; }
+          v=$(npm --version); node -e "const v='$v'.split('.').map(Number); if (v[0]<11||(v[0]===11&&(v[1]<5||(v[1]===5&&v[2]<1)))) process.exit(1)" || { echo "::error::npm $v < 11.5.1"; exit 1; }
+          publish() {   # name file: skip when npm has this version already
+            if npm view "$1@$VERSION" version >/dev/null 2>&1; then echo "$1@$VERSION is on npm already"; return; fi
+            npm publish "$REL/artefacts/$2" --access public --provenance
+          }
+          [ "$NEED_SNUG" != true ] || publish @3sln/snug "3sln-snug-$VERSION.tgz"
+          [ "$NEED_WASM" != true ] || publish @3sln/snug-wasm "3sln-snug-wasm-$VERSION.tgz"
+      - name: npm's dist.integrity is the built tarballs'
+        env:
+          VERSION: ${{ needs.guard.outputs.version }}
+          REL: ${{ runner.temp }}/release
+        run: |
+          set -euo pipefail
+          node kin/scripts/release-registry.mjs verify "$REL" --only "3sln-snug-$VERSION.tgz" --wait 600
+          node kin/scripts/release-registry.mjs verify "$REL" --only "3sln-snug-wasm-$VERSION.tgz" --wait 600

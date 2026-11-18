@@ -9,7 +9,7 @@
 //
 // that no shipped copy carries: the npm package builds, kin/scripts/rust-crate and
 // therefore `bb dist` take their READMEs through stripPrerelease. The release commit
-// removes the block (docs/release-policy.md §4 step 3), and `bb dist` refuses a
+// removes the block (docs/release-policy.md §4, the bump), and `bb dist` refuses a
 // release whose source commit still has one. bb docs-test checks both sides.
 //
 //     node kin/scripts/prerelease.mjs strip IN OUT     write IN without its block

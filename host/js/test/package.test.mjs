@@ -102,7 +102,7 @@ test('self-contained staged package works away from the repository through all e
   const temp = await mkdtemp(join(tmpdir(), 'snug-package-test-'));
   try {
     const target = await buildPackage(join(temp, 'package'));
-    // release-policy §3 / §4 step 6: the licence, notices, security policy and changelog ship
+    // release-policy §3 / §4 (the licence and notice check): the licence, notices, security policy and changelog ship
     for (const name of ['LICENSE', 'THIRD_PARTY_NOTICES.md', 'SECURITY.md', 'README.md', 'CHANGELOG.md'])
       assert.ok(existsSync(join(target, name)), name);
     // P9.15: nothing outside PACKAGE_FILES ships (no DEVLOG, SPEC, reviews, bench

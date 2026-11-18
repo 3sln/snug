@@ -8,7 +8,7 @@ import { dirname, join, posix, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { stripPrerelease } from '../../../kin/scripts/prerelease.mjs';
 
-// What the package contains (release-policy §4 step 6, P9.15): the code, its
+// What the package contains (release-policy §4, the licence and notice check, P9.15): the code, its
 // types, the licence and notices, the security policy, the README, the
 // changelog and the user docs. Nothing else: no DEVLOG, SPEC, design or review
 // documents, maintainer records (conformance.md and release-policy.md are linked
