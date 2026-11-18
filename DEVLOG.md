@@ -9216,7 +9216,31 @@ test, dist.mjs and prerelease.mjs.
 * the first hosted run's own reproduction of 0.1.0 (a dispatch dry run on main);
 * whether `dist` is branch-protected (tag-release pushes it with the workflow token);
 * actionlint.
-- [ ] **Signed off** (manager)
+- [x] **Signed off** (manager, 2026-11-17). Merged at d77d06e. On the merged main:
+  `bb gates land`, 11/11 ok; the guard's self-test, 8/8 ok. The live guard reports "0.1.0
+  already released -> no-op", and a run that cannot write rebuilds bcfd46d.
+  - **Manager review:**
+    - every tag, release and id-token job is gated on `guard.outputs.write == 'true'`, which is
+      true only on `refs/heads/main` for a push or a non-dry-run dispatch;
+    - a resume builds the source tag's commit;
+    - publishing refuses on any byte mismatch (the registry pre-check, the crate repack SHA, the
+      post-publish integrity/cksum check), and a registry error other than 404 throws;
+    - ci.yml's push and pull-request runs are unaffected by `mode`;
+    - the aggregate `ci` still fails on any failed job.
+  - **Coordinator decisions (2026-11-17):**
+    - the per-step timeout rule, with the job at 360;
+    - `dist` is unprotected (checked: no protection, no rulesets);
+    - compat runs on the latest Node 24;
+    - brief macOS use on a no-op is fine;
+    - a write=false run always tests and builds;
+    - GH_TOKEN, the run's own token, is used for the api.github.com rate limit only.
+  - **Open:**
+    - **actionlint was NOT run:** the permission system refused its download. It was not
+      worked around, and the coordinator reported it to the owner.
+    - **Hosted reproduction of 0.1.0:** the coordinator's dispatch dry run on main.
+    - **A dry run's tests run on the checked-out commit**, ci.yml's own `github.sha`. For a
+      released version that is HEAD, while the build rebuilds the tagged commit. That is
+      acceptable for a check-only run.
 
 ## Findings
 
