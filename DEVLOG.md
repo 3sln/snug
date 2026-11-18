@@ -9471,6 +9471,187 @@ restored afterwards.
     Hosted CI builds with KIN_REF, and the hosted drift gate has passed, so the generated code
     is unaffected. `../kin` is read-only to snug.
 
+### D371 — Host fixes after 0.1.0: the Rust sequence reader gets a `quantum` and answers `ended` after its end; a blob or handle of 2³¹ bytes or more is `too_large`; the wasm SDK defers a close inside a step and reaches its state through one borrow; a view's schema must be a snug Schema; the budget docs say what a call can spend (post-release triage N4, N5, N6, N8, S4, SEC-F6, SEC-F7)
+**Decision** (D371 engineer; work package WP-H from the manager; every decision below is the
+coordinator's, 2026-11-18, in the post-RC triage, `.cache/p913-triage/post-rc-triage.md`).
+Entries in CHANGELOG `[Unreleased]` (Breaking, Budget and limits, Fixed, Security).
+
+**N4 `[rust]` — the sequence reader after its end, and its quantum** (Breaking).
+* **Fix.** `Sequence::feed` and `Sequence::finish` after the end (`finish`, or a refusal that
+  stops the sequence) answer one `Err(Error::Usage("ended"))`, as the poisoned case answers
+  `poisoned`; JS and the SDK throw `TypeError('snug: the sequence has ended')` there. An empty
+  chunk after the end is `ended` too (JS checks the state before the chunk).
+  `Display` is "snug: the sequence has ended (ended)".
+* **`SequenceOptions` is `#[non_exhaustive]`** and has `quantum: u32` (default 0). Only
+  `read_sequence_async` and `Schema::read_sequence_async` use it: it goes to `vms-init-seq`; at a
+  session yield with the bytes in hand the run stops (`STEP`, as `sequence-core.mjs`), the pump
+  holds the chunk (`SeqPump::paused`), `poll_next` wakes itself and answers `Pending` once, and
+  the next poll resumes over the same chunk. A yield inside `finish` resumes the same way. The
+  sync readers (`Sequence::new`, `Schema::sequence`, `read_sequence`, `Schema::read_sequence`)
+  refuse a nonzero quantum with `Error::Usage("options")`, as JS's `sequenceReader` refuses the
+  option; the async ones refuse one above 2³¹ − 1. `feed`/`finish` resume a yielded run in place,
+  so the push API never yields.
+* **Callers updated**: the test host `bin/sequence.rs`, `tests/sequence.rs` and
+  `tests/async_sources.rs` (a `seq_opts` helper), and docs/rust.md (example and text).
+* **Regressions.**
+  - `tests/sequence.rs` `a_sequence_after_its_end_answers_ended` (after finish, after a stopping
+    refusal, after a refusal settled by finish; empty chunk; Display) and
+    `a_nonzero_quantum_is_refused_by_the_sync_readers`.
+  - `tests/async_sources.rs` `a_sequence_quantum_yields_pending_mid_message`: one 2,000-entry
+    array read in one read, quantum 16: more than 10 `Pending` polls before the first message,
+    each with a wake-up, the items equal to the sync reader's; profile-only too; quantum 0 never
+    `Pending`.
+  - The async differential (`async_sequence_reader_equals_the_sync_reader`) adds a quantum arm
+    (1, 7 or 64, over a source that is never `Pending`): items equal to the sync reader's, and at
+    least one quantum run must yield (default slice: 2,543 runs yielded).
+  - `bb sequence-test`'s Rust host (`bin/sequence.rs` `run_async`): every host run is also read
+    by `read_sequence_async` with a quantum (1, 7, 64 or 1000 by seed) over the same chunks; its
+    verdict lines (borrowing aside) must equal the push run's, else `ASYNCDIFF`.
+* **Fails without the fix** (proof worktree at this branch, the fix undone by hand):
+  `refused()` answering nothing after the end: `a_sequence_after_its_end_answers_ended` FAILED
+  ("feed after finish"); the yield disabled (`&& false`): the quantum test FAILED ("Some(0)
+  Pending polls before the first message").
+
+**N5 — a blob or handle of 2³¹ bytes or more** (Breaking `[rust]`).
+* **Fix.** Its session is opened for 0 bytes, so the schema, rule and options are checked as for
+  any blob and nothing sized by the length is allocated; it is closed unread, and the answer is
+  the verdict `cbor/too_large` at offset 0 (code 20, empty path), what an over-limit blob of
+  2³¹ − 1 bytes gets. Rust `validate_blob`/`validate_blob_async` (`BlobCore`), JS and SDK
+  `validateHandle`/`validateHandleSync` answer it; `scanHandle`/`scanHandleSync` throw
+  `SnugFault('too_large')`. The low-level `openSession(schema, rule, length)` and `ScanSession`
+  keep their `TypeError`, as decided; `pushScanner`/`pushValidator` with a declared length do too
+  (not in the decision; see Open). `SourceError::TooLarge` and `Error::Source("too_large")` are
+  removed; docs/rust.md and docs/api.md say so.
+* **Why the verdict is constructed, not the session's.** Opening the session for 2³¹ − 1 bytes
+  and stepping an empty window gives too_large under the VM, but the resumable scanner under
+  `maxBytes: 2^31-1` asks to read (a 2³¹ − 1-byte message is within that limit), and it would
+  allocate scratch for that length. No limit admits 2³¹ bytes, so the verdict is fixed.
+* **Regressions** (a fake `size`, a `read` that fails the test): `tests/async_sources.rs` (sync
+  and async, sizes 2³¹, 2³¹ + 1, `usize::MAX`, equal to the 2³¹ − 1 verdict; unknown rule and
+  bad chunk still `Usage`); `host/js/test/sources.test.mjs` (four option sets, sizes to
+  2⁵³ − 1, the argument checks first, `openSession` and `pushScanner` still `TypeError`); the SDK
+  parity test `D371: a handle of 2^31 bytes or more ...` (55/55 wasm == native; live sessions
+  back at baseline).
+* **Fails without the fix:** main's `schema.rs`/`error.rs`: `public_async_forms_match_the_sync_ones`
+  FAILED (`Err(Source("too_large"))`); main's `sources.mjs`: the JS test FAILED (`TypeError:
+  snug: length must be an integer in 0..2^31-1`); main's SDK sources: the parity test FAILED.
+* **Size:** the first form put `snug/sources` at 184,033 min bytes, over its 183,997 cap (main:
+  183,879). Folding the length into `checkHandle` and the scan answer into `scanResult` brings
+  it to 183,974; no cap edited.
+
+**N6 `[wasm-sdk]` — a close inside a step** (Fixed).
+* **The leak.** A predicate calling `close()` on its own session or reader met the instance's
+  guard (`rt.x` is `GUARD` during the import) and threw. `SequenceCore.close()` had already set
+  `done`, so a predicate that caught the error left the session live and the reader "ended":
+  nothing freed it until the FinalizationRegistry ran.
+* **Fix (the native D347, ported).** `WasmSession.raw` and `SequenceSession.step` set `stepping`
+  around `withExt`; `free()`/`close()` while stepping only marks the close; after the step the
+  session is freed and the step throws `TypeError('snug: the session was closed during its step')`
+  (`... the sequence was closed ...` for a reader), as natively (a predicate's own error is
+  dropped with the step, as the native backend's `finally` drops it).
+  `SequenceCore.close()` (shared) sets `done` only after the backend's close returned, so a
+  close the guard refused (a predicate closing *another* reader) leaves that reader open and a
+  later close frees it. Natively the backend's close never throws, so JS behaviour is unchanged
+  (npm-test).
+* **Regressions** (`host/wasm-sdk/test/parity.test.mjs`): the two D347 regressions ported
+  (session; sequence reader, compared with native: `{ messages: 0, error: 'closed during its
+  step', done: true, closed: 'ok', after: 0, again: 'the sequence has ended' }`; the SDK cannot
+  reproduce the native "inner session gets the arrays" half, as opening a session inside the step
+  meets the guard, which the test asserts); and the leak: a predicate that closes its own reader
+  and swallows any error leaves `sessionLimits().live` at baseline after the step, and one that
+  closes another reader leaves it not done and freeable.
+* **Fails without the fix:** main's SDK files: all three FAILED (`after: 1`, `closed: Error ...
+  called back into snug`; "1 !== 0"); the SDK fix with main's `sequence-core.mjs`: the leak
+  test FAILED ("a close that threw does not mark the reader done", `true !== false`).
+
+**N8 `[wasm-sdk]` — the runtime's state access** (Fixed).
+* **The UB.** `sdk.rs`'s `st()` returned `&'static mut State`; `nav()` returned one borrow of
+  `State::nav` as `&'static mut`, and `sdk_nav_find`, `sdk_nav_find_any` and `sdk_nav_dir_find`
+  then called `st()` again for `kbuf`: two live `&mut State`, undefined behaviour whatever it
+  computed.
+* **Fix.** `st()` is gone, in `sdk.rs` and `cc.rs`. `with_state(f)` is the only place a
+  `&mut State` is made, for `f`'s duration; a `busy` flag makes a nested entry abort (a trap: the
+  SDK's `InstanceLost`) instead of aliasing. Only the import could nest an entry, and the SDK's
+  JS guard stops that first. The flag is cleared on return (the modules are panic=abort, so
+  nothing unwinds). The entry and the state's first-use construction are one non-generic
+  `#[inline(never)] fn enter()`: the first form (a drop guard and the construction inside the
+  generic `with_state`) copied them into every export and put the compiler module at 153,598
+  bytes, over its 153,564 cap (`bb wasm-size` FAIL); this form is 152,060. `nav(s, m, n)`
+  destructures one `&mut State` into the nav words and the key scratch (disjoint borrows); long
+  exports moved into inner fns taking `&mut State`.
+  `UNIQ` (the generic controls' meter, its own static, never nested) is unchanged.
+* **lib.rs reviewed, unchanged:** the legacy P1.4/P3.4 module has no imports, so nothing
+  re-enters; each export makes each static's reference once, for the call, and the statics are
+  disjoint. Sound as written.
+* **Regression** (host-side, `#[cfg(test)]` in sdk.rs, now run by `bb wasm-sdk-test` with one
+  thread): `nav_lookups_read_the_key_scratch_beside_the_nav_words` (nav-find, find-any and
+  dir-find over `{"a":1,"bb":2,"c":3}` with the key written through `sdk_kbuf`, and a miss) and
+  `a_nested_entry_is_refused`.
+* **Fails without the fix:** not demonstrable at runtime: the aliasing read the right bytes, so
+  the nav test passes on the old code (the nested-entry test does not compile there). A mutation
+  proof of the guard instead: `enter()` never refusing: `a_nested_entry_is_refused` FAILED ("a
+  second entry while an export runs").
+* **Sizes** (`bb wasm-size`, caps unchanged): sdk-runtime 327,443 B / 132,603 gzip (main
+  326,155 B; cap 331,770 / 134,468); compiler 152,060 B / 69,118 gzip (main 151,953 B; cap
+  153,564 / 69,851).
+* **Miri not run:** no local toolchain has the `miri` component (`rustup component list
+  --installed` on all 13); not downloaded, per the work package.
+
+**S4 `[js]` `[wasm-sdk]` — a view's schema** (Security).
+* **Fix.** `view()` and `View.validateAt` throw `TypeError('snug view: the schema option must
+  be a snug Schema')` unless `schemaPrograms.has(schema)` (native; the duck-typed `check` /
+  `validate` fallback is removed) or the SDK's own `isSchema` (a WeakSet the SDK `Schema`
+  constructor fills; before, a fake with a real `program` chose the rule through its
+  `ruleIndex`, and one without crashed with an internal TypeError). The options shape check in
+  `options.mjs` stays generic (it is shared by both hosts); each host checks its own registry.
+* **Regressions:** `host/js/test/view.test.mjs` (the probe: a fake `{validate, validateAt,
+  check, program, ruleIndex}` over non-CBOR bytes no longer mints a View, is never asked; real
+  internal and public Schemas still work); the SDK parity test (4/4 wasm == native, including a
+  Schema of the other package).
+* **Fails without the fix:** main's `view.mjs`: "Missing expected exception": the fake minted a
+  View of `ff 1c 5f`; main's SDK files: 3 of 4 differ (the SDK validated the junk against the
+  rule the fake chose: `cbor/malformed`).
+
+**SEC-F6, SEC-F7 — documentation** (Budget and limits).
+* docs/api.md (ValidationOptions, the `budget` reason row) and the guide's limits section:
+  under `wire: 'valid'` a call can do up to about twice the budget's work, plus linear passes
+  (the canonical path's second walk has its own budget, `vm-run-v`).
+* docs/api.md (CompileLimits, the `limit_compile_budget` row) and the guide: a compile can do up
+  to (restarts + 1) × `compileBudget`, at most 9×, usually under 2×. The arena starts at 65,536
+  words and doubles up to 16,777,216: at most 9 attempts. A float-literal restart
+  (`ERR_NEED_FLOATS`) is requested right after lexing, so it adds only a lex pass.
+* `lastBudgetUsed()` (host/js/src/compile.mjs) now says it covers the last attempt only.
+
+**Gates** (this machine, shared with other engineers' runs; main 7b808fa plus this change):
+* **On the final tree:** `bb gates land wasm-package-test wasm-size`: all 13 ok, exit 0
+  (npm-test 1520/1520; wasm-sdk-test 30/30 with the sdk.rs host tests 2/2; size, wasm-size,
+  docs-test, types-test ok). `bb gates --check`: ok (it warns that the local `../kin` differs
+  from KIN_REF in 2 files, as D370 recorded).
+* **On the tree before the wasm size fix** (only `with_state`/`enter` in sdk.rs and cc.rs
+  changed after; every wasm gate was rerun on the final tree above): `bb gates land sequence-test
+  vmsession-test rust-api-test-full wasm-package-test wasm-size msrv node-oldest`: 17 of 18 ok,
+  wasm-size FAIL (the compiler module, fixed above). sequence-test ok (Rust snug::Sequence ==
+  the oracle on 47,834/47,834 host runs, each also read by the async reader with a quantum, no
+  ASYNCDIFF); vmsession-test ok (pool 10,161/10,161); rust-api-test-full ok; msrv ok;
+  node-oldest ok. An earlier run on the first form failed `size` (snug/sources, above) and was
+  stopped after sequence-test (ok).
+
+**Alternatives:**
+* N4: a quantum on the push `Sequence` too (refused: the push API would need a resume call;
+  JS's push reader has none either). Ignoring a nonzero quantum in the sync readers (the
+  coordinator allowed it; refused to match JS, which refuses it).
+* N5: the session's own verdict for 2³¹ − 1 bytes (see above).
+* N8: a `RefCell` (a borrow flag per access, more code in a size-capped module) for the
+  single `busy` flag.
+
+**Open:**
+* `pushScanner(length)` / `pushValidator(schema, length, ...)` with a declared length of 2³¹ or
+  more still throw `TypeError` (the decision named validate* and scan*; these take a length,
+  like `openSession`).
+* Rust users of `SequenceOptions { .. }` literals must move to field assignment; a builder
+  (`SequenceOptions::default().with_...`) would be friendlier, if wanted.
+- [ ] **Signed off** (manager).
+
 ## Findings
 
 - 2026-11-11 (manager): **the 6½-day `scan-test.mjs 300 1` process

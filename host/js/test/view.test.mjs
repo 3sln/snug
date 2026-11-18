@@ -291,3 +291,22 @@ test('regression D351: schema views of valid, non-deterministic input read the c
   }
   await assert.rejects(async () => view(indef, { schema: await publicCompile('r = bstr'), rule: 'nope', wire: 'valid' }), TypeError);
 });
+
+// D371 (S4): view() and View.validateAt take only a snug Schema. An object with a Schema's methods passed the
+// options check, and view() trusted its `validate`: one answering ok minted a View of bytes nothing checked.
+test('D371: a fake schema object is a TypeError for view() and View.validateAt; it no longer mints a View', async () => {
+  const real = await publicCompile('r = uint');
+  let asked = 0;
+  const fake = { validate: () => { asked++; return { ok: true }; }, validateAt: () => { asked++; return { ok: true }; },
+    check: () => { asked++; return { ok: true }; }, program: real.program, ruleIndex: () => 0 };
+  const junk = Uint8Array.of(0xff, 0x1c, 0x5f);   // not CBOR
+  assert.throws(() => view(junk, { schema: fake, rule: 'r' }), { name: 'TypeError', message: 'snug view: the schema option must be a snug Schema' });
+  assert.throws(() => view(Uint8Array.of(0x01), { schema: fake, rule: 'r', borrow: true }), TypeError);
+  const v = view(Uint8Array.of(0x01), { schema: real, rule: 'r' });
+  assert.throws(() => v.validateAt('r', { schema: fake }), { name: 'TypeError', message: 'snug view: the schema option must be a snug Schema' });
+  assert.equal(asked, 0, 'the fake was never asked');
+  // a real one, internal or public, still works
+  assert.equal(v.validateAt('r').ok, true);
+  assert.equal(v.validateAt('r', { schema: await compile('r = uint') }).ok, true);
+  assert.equal(view(Uint8Array.of(0x01), { schema: await compile('r = uint'), rule: 'r' }).int(), 1);
+});

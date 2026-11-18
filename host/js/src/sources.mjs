@@ -169,23 +169,30 @@ function checkRead(chunk, offset, length) {
   return chunk;
 }
 
+/** The length a handle's session is opened for. D371: a handle of 2^31 bytes or more is larger than
+ *  every limit allows. Its session is opened for 0 bytes (so the schema, rule and options are checked
+ *  as for any handle, and nothing sized by the length is allocated), then closed unread, and the
+ *  answer is too_large at offset 0, what an over-limit handle of 2^31-1 bytes gets. */
 function checkHandle(handle) {
   if (!handle || !Number.isSafeInteger(handle.size) || handle.size < 0 || typeof handle.read !== 'function') throw new TypeError('a handle is {size, read(offset, length)}.');
+  return handle.size > I32_MAX ? 0 : handle.size;
 }
 
 function* drive(handle, options, opts = {}) {
   validateOptions(options, 'decode');
   validateOptions(opts, 'source');
   const { chunk = 65536, quantum = 0 } = opts;
-  checkHandle(handle);
-  return yield* driveSession(new ScanSession(handle.size, options, { quantum }), handle, chunk);
+  return yield* driveSession(new ScanSession(checkHandle(handle), options, { quantum }), handle, chunk, scanResult);
 }
 
-function* driveSession(session, handle, chunk) {
+/** settle: the answer of a validation result (scanResult for a scan; none: the result itself). */
+function* driveSession(session, handle, chunk, settle) {
   let base = 0, window = new Uint8Array(0);
   let want = { state: 'need', offset: 0, length: Math.min(chunk, handle.size) };
   // a read that fails ends the drive: the session's arrays are released (P9.7)
-  try { for (;;) {
+  try {
+  if (handle.size > I32_MAX) { const r = { ok: false, reason: 'cbor/too_large', path: [], offset: 0 }; return settle ? settle(r) : r; }
+  for (;;) {
     if (want.state !== 'done') {
       // The window to run over: the cached one if it holds what is asked, else one read.
       const at = want.state === 'need' ? want.offset : want.position;
@@ -248,8 +255,7 @@ export async function validateHandle(schema, handle, rule, options = {}, opts = 
   validateOptions(options, 'validation');
   validateOptions(opts, 'source');
   const { chunk = 65536, quantum = 0 } = opts;
-  checkHandle(handle);
-  return runAsync(driveSession(openSession(schema, rule, handle.size, options, { quantum }), handle, chunk));
+  return runAsync(driveSession(openSession(schema, rule, checkHandle(handle), options, { quantum }), handle, chunk));
 }
 
 /** The same through a handle whose read returns bytes synchronously. */
@@ -257,8 +263,7 @@ export function validateHandleSync(schema, handle, rule, options = {}, opts = {}
   validateOptions(options, 'validation');
   validateOptions(opts, 'source');
   const { chunk = 65536, quantum = 0 } = opts;
-  checkHandle(handle);
-  return runSync(driveSession(openSession(schema, rule, handle.size, options, { quantum }), handle, chunk), 'validateHandleSync');
+  return runSync(driveSession(openSession(schema, rule, checkHandle(handle), options, { quantum }), handle, chunk), 'validateHandleSync');
 }
 
 /** Bytes pushed in order, for a message of a DECLARED length. feed(chunk) answers

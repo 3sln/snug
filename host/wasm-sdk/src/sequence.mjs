@@ -43,14 +43,19 @@ class SequenceSession {
     if (h < 0) throw new Error(`snug wasm: sequence session refused (${h})`);
     this.h = h; this.gen = rt.generation; this.token = {};
     sessions.register(this, { h, gen: this.gen }, this.token);
-    this.inner = inner; this.ext = inner.ext; this.quantum = quantum;
+    this.inner = inner; this.ext = inner.ext; this.quantum = quantum; this.stepping = false; this.closing = false;
     this.total = rt.i32[rt.INFO];              // the provisional end P (maxMessageBytes)
     this.wp = 0; this.wcap = 0;                // the window buffer in linear memory
     this.src = null; this.lo = 0; this.hi = 0; // the JS bytes it holds a copy of: buffer, [lo, hi) in it
     this.info = new Int32Array(6); this.out = null;
   }
   live() { if (this.h < 0 || this.gen !== rt.generation) throw new Error('snug wasm: the sequence session is finished or its instance was reset'); }
-  close() { if (this.h >= 0) { if (this.gen === rt.generation && rt.x) rt.x.sdk_ses_free(this.h); sessions.unregister(this.token); this.h = -1; } }
+  // D371 (the native D347): closed from inside its own step (an extension predicate), the session keeps
+  // its state until the step has left the instance; the step then frees it and throws
+  close() {
+    if (this.stepping) { this.closing = true; return; }
+    if (this.h >= 0) { if (this.gen === rt.generation && rt.x) rt.x.sdk_ses_free(this.h); sessions.unregister(this.token); this.h = -1; }
+  }
   chunk() { this.src = null; }
   begin() {
     this.live();
@@ -86,9 +91,17 @@ class SequenceSession {
       }
     }
     let r;
+    this.stepping = true;
     try { r = rt.withExt(this.ext ?? null, () => rt.x.sdk_ses_step_at(this.h, off, n, base)); }
     catch (e) { this.h = -1; rt.lost(e); }
+    finally { this.stepping = false; }
     rt.refresh();   // a step may grow memory: re-derive the views first
+    if (this.closing) {
+      // as natively, the close is the answer (a predicate's own error, if any, is dropped with the step)
+      this.closing = false; this.close();
+      try { rethrow(this.ext); } catch { /* superseded by the close */ }
+      throw new TypeError('snug: the sequence was closed during its step');
+    }
     rethrow(this.ext);
     this.keep(r);
     return r;

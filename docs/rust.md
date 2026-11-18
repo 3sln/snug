@@ -483,7 +483,8 @@ let schema = Schema::compile("event = { type: tstr }", &CompileOptions::default(
 let body: &[u8] = &[0xa1, 0x64, b't', b'y', b'p', b'e', 0x61, b'a',
                     0xa1, 0x64, b't', b'y', b'p', b'e', 0x05,
                     0xa1, 0x64, b't', b'y', b'p', b'e', 0x61, b'c'];
-let skip = SequenceOptions { on_invalid: OnInvalid::Skip, ..SequenceOptions::default() };
+let mut skip = SequenceOptions::default();   // non-exhaustive: set fields on the default
+skip.on_invalid = OnInvalid::Skip;
 let mut types = Vec::new();
 for item in schema.read_sequence(body, "event", &skip)? {   // any std::io::Read
     match item {
@@ -507,7 +508,9 @@ assert!(seq.is_done());
 `SequenceOptions` carries the per-message limits (`max_message_bytes`, depth,
 entries, items, bignum bytes, budget), the wire profile (`wire`), `top`, `cose`,
 `on_invalid` (`Stop` by default; `Skip` skips only schema refusals of complete
-messages), `fail_fast` and the read `chunk`. A refusal is
+messages), `fail_fast`, the read `chunk` and the async reader's `quantum`.
+`SequenceOptions` is non-exhaustive, so it is built from
+`SequenceOptions::default()` with its fields set, as above. A refusal is
 `Error::Sequence(MessageFailure { index, message_offset, offset, failure,
 skippable })` with absolute offsets; EOF inside a message is
 `cbor/truncated`, a message not ending within `max_message_bytes` is
@@ -516,8 +519,12 @@ only; they return `Err(Error::SessionLimit)` at the live-session bound
 ([Live sessions and pooling](#live-sessions-and-pooling)). The `Read` iterator copies each message out of its read buffer; the push
 API borrows the caller's chunk instead. If an extension predicate panics
 inside `feed` or `finish` and the caller catches the panic, the `Sequence`
-is poisoned: every later call answers `Error::Usage("poisoned")`. The read
-`chunk` must be positive (`chunk: 0` is `Error::Usage("options")`).
+is poisoned: every later call answers `Error::Usage("poisoned")`. Once a
+sequence has ended (`finish`, or a refusal that stops it), `feed` and `finish`
+answer one `Error::Usage("ended")`. The read `chunk` must be positive (`chunk: 0`
+is `Error::Usage("options")`). `quantum` is for `read_sequence_async` and
+`Schema::read_sequence_async` only: the sync readers never yield, so a nonzero
+quantum there is `Error::Usage("options")`.
 
 ## Async sources
 
@@ -573,7 +580,12 @@ block_on(async {
 inside) and `Option<Result<Message<'static>, Error>>` per sequence item, with
 the same argument checks (`chunk` 0 or above 2³¹ − 1, or a quantum above
 2³¹ − 1, is `Error::Usage("options")`) and source errors (`short_read`,
-`too_large`, and `Error::Io` for a transport error).
+`read`, and `Error::Io` for a transport error). A blob of 2³¹ bytes or more is
+never read: its verdict is `cbor/too_large` at offset 0, as for a smaller blob
+over the input limit. `SequenceOptions::quantum` paces the async sequence reader
+as `SourceOptions::quantum` paces the other async drivers: a positive quantum
+makes `next()` answer `Pending` (after waking itself) once per session yield,
+inside a long message too.
 
 **Sources.** `AsyncSource` is a forward-only stream with the signature of
 `futures_io::AsyncRead::poll_read` (`Ready(Ok(0))` is the end; `Interrupted`

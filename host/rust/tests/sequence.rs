@@ -2,6 +2,13 @@
 //! differential is `bb sequence-test`; these pin the public contract.
 use snug::{read_sequence, CompileLimits, CompileOptions, Error, OnInvalid, Schema, Sequence, SequenceOptions};
 
+/// SequenceOptions is non-exhaustive (D371): the default with `f` applied.
+fn seq_opts(f: impl FnOnce(&mut SequenceOptions)) -> SequenceOptions {
+    let mut o = SequenceOptions::default();
+    f(&mut o);
+    o
+}
+
 fn event_schema() -> Schema {
     Schema::compile("event = { type: tstr, ? n: uint }", &CompileOptions::default()).unwrap()
 }
@@ -58,7 +65,7 @@ fn push_messages_borrow_inside_a_chunk_and_own_across_chunks() {
 fn read_sequence_yields_owned_messages_and_ends_cleanly() {
     let (bytes, offsets) = body();
     for chunk in [1usize, 4, 1000] {
-        let opts = SequenceOptions { chunk, ..SequenceOptions::default() };
+        let opts = seq_opts(|o| o.chunk = chunk);
         let got: Vec<_> = read_sequence(&bytes[..], &opts).unwrap().map(Result::unwrap).collect();
         assert_eq!(got.iter().map(|m| m.offset as usize).collect::<Vec<_>>(), offsets[..3].to_vec());
         assert_eq!(got[2].view().get("type").and_then(|v| v.text()), Some("c"));
@@ -80,7 +87,7 @@ fn refusals_carry_index_and_absolute_offsets() {
         other => panic!("{:?}", other),
     }
     // oversize
-    let small = SequenceOptions { max_message_bytes: Some(10), ..SequenceOptions::default() };
+    let small = seq_opts(|o| o.max_message_bytes = Some(10));
     let e = read_sequence(&bytes[..], &small).unwrap().find_map(Result::err).unwrap();
     assert_eq!(e.code(), "too_large");
     // a schema refusal: stop, or skip and go on
@@ -91,7 +98,7 @@ fn refusals_carry_index_and_absolute_offsets() {
     let Err(Error::Sequence(f)) = &stop[1] else { panic!("{:?}", stop[1]) };
     assert_eq!((f.index, f.failure.reason, f.skippable, f.offset), (1, "type", true, offsets[1] as u64 + 6));
     assert_eq!(stop[1].as_ref().unwrap_err().code(), "schema/type");
-    let skip = SequenceOptions { on_invalid: OnInvalid::Skip, ..SequenceOptions::default() };
+    let skip = seq_opts(|o| o.on_invalid = OnInvalid::Skip);
     let all: Vec<_> = schema.read_sequence(&bad[..], "event", &skip).unwrap().collect();
     assert_eq!(all.iter().filter(|r| r.is_ok()).count(), 3);
     assert_eq!(all.iter().filter(|r| r.is_err()).count(), 1);
@@ -103,7 +110,10 @@ fn refusals_carry_index_and_absolute_offsets() {
     assert_eq!(items.len(), 2);
     assert_eq!(items[1].as_ref().unwrap_err().code(), "malformed");  // a lone break (valid default)
     assert!(seq.is_done());
-    let det_skip = SequenceOptions { wire: snug::Profile::DETERMINISTIC, ..skip };
+    let det_skip = seq_opts(|o| {
+        o.on_invalid = OnInvalid::Skip;
+        o.wire = snug::Profile::DETERMINISTIC;
+    });
     let mut seq = Sequence::new(&det_skip).unwrap();
     assert_eq!(seq.feed(&broken)[1].as_ref().unwrap_err().code(), "indefinite");
     assert!(schema.sequence("nope", &skip).is_err());
@@ -148,7 +158,7 @@ fn valid_messages_with_indefinite_items_read_through_their_canonical_copy() {
     assert_eq!(got[1].0.view().get("b").and_then(|v| v.uint()), Some(2));
     assert_eq!(got[2].0.view().get("t").and_then(|v| v.text()), Some("abc"));
     // the deterministic preset refuses the first message
-    let mut det = Sequence::new(&SequenceOptions { wire: snug::Profile::DETERMINISTIC, ..SequenceOptions::default() }).unwrap();
+    let mut det = Sequence::new(&seq_opts(|o| o.wire = snug::Profile::DETERMINISTIC)).unwrap();
     assert_eq!(det.feed(&bytes)[0].as_ref().unwrap_err().code(), "indefinite");
 }
 
@@ -158,7 +168,10 @@ fn regression_complete_message_then_more_than_the_limit() {
     let mut big = vec![0u8; 1_500_001];
     big[..6].copy_from_slice(&[0xa1, 0x61, 0x61, 0x59, 0xff, 0xff]);
     big[1_500_000] = 0xa0;
-    let opts = SequenceOptions { top: snug::Top::Map, max_message_bytes: Some(1_500_000), ..SequenceOptions::default() };
+    let opts = seq_opts(|o| {
+        o.top = snug::Top::Map;
+        o.max_message_bytes = Some(1_500_000);
+    });
     for cuts in [vec![big.len()], vec![65536, big.len()], vec![6, 65541, big.len()]] {
         let mut seq = Sequence::new(&opts).unwrap();
         let mut got = Vec::new();
@@ -183,7 +196,7 @@ fn regression_d355_a_count_claim_inside_a_tag_4_outranks_a_later_key_type() {
     // past the input, then an integer key under text keys: truncated at the map's head (D211)
     let s = [0xa0u8, 0xc4, 0x82, 0x00, 0xb3, 0x18, 0x64, 0x1c];
     let profile = snug::Profile { keys: snug::Keys::Text, ..snug::Profile::DETERMINISTIC };
-    let opts = SequenceOptions { wire: profile, ..SequenceOptions::default() };
+    let opts = seq_opts(|o| o.wire = profile);
     for cuts in [vec![8], vec![1, 8], vec![3, 5, 8], (1..=8).collect::<Vec<usize>>()] {
         let mut seq = Sequence::new(&opts).unwrap();
         let mut items: Vec<Result<snug::Message<'static>, Error>> = Vec::new();
@@ -254,21 +267,75 @@ fn regression_schemaless_depth_over_256_is_an_options_error() {
         matches!(out.as_slice(), [Err(Error::Sequence(f))] if f.failure.reason == "cbor/depth")
     };
     for d in [257u32, 999] {
-        let o = SequenceOptions { max_depth: Some(d), ..SequenceOptions::default() };
+        let o = seq_opts(|o| o.max_depth = Some(d));
         assert_eq!(Sequence::new(&o).err(), Some(Error::Usage("options")), "max_depth {d}");
         assert_eq!(read_sequence(&deep[..], &o).err(), Some(Error::Usage("options")), "max_depth {d}");
         assert_eq!(snug::read_sequence_async(&deep[..], &o).err(), Some(Error::Usage("options")), "max_depth {d}");
     }
-    for count in [SequenceOptions { max_message_bytes: Some(i32::MAX as u32), ..SequenceOptions::default() },
-                  SequenceOptions { max_entries: Some(i32::MAX as u32), ..SequenceOptions::default() },
-                  SequenceOptions { max_items: Some(u32::MAX), ..SequenceOptions::default() }] {
+    for count in [seq_opts(|o| o.max_message_bytes = Some(i32::MAX as u32)),
+                  seq_opts(|o| o.max_entries = Some(i32::MAX as u32)),
+                  seq_opts(|o| o.max_items = Some(u32::MAX))] {
         assert_eq!(Sequence::new(&count).err(), Some(Error::Usage("options")));
     }
     // 256 schema-less: accepted, and 300-deep input is a depth refusal
-    let mut at = Sequence::new(&SequenceOptions { max_depth: Some(256), ..SequenceOptions::default() }).unwrap();
+    let mut at = Sequence::new(&seq_opts(|o| o.max_depth = Some(256))).unwrap();
     assert!(refused_for_depth(at.feed(&deep)));
     // under a schema a larger value only leaves the compiled depth in force
     let schema = Schema::compile("r = any", &CompileOptions::default()).unwrap();
-    let mut bound = schema.sequence("r", &SequenceOptions { max_depth: Some(999), ..SequenceOptions::default() }).unwrap();
+    let mut bound = schema.sequence("r", &seq_opts(|o| o.max_depth = Some(999))).unwrap();
     assert!(refused_for_depth(bound.feed(&deep)));
+}
+
+/// D371 (N4): after its end -- `finish`, or a stopping refusal -- a sequence answers one
+/// `Error::Usage("ended")` to `feed` (an empty chunk too) and to `finish`, as JS's reader
+/// throws "the sequence has ended". Before, both answered nothing, so a caller feeding
+/// after a refusal it had not looked at saw an empty, healthy-looking result.
+#[test]
+fn a_sequence_after_its_end_answers_ended() {
+    let schema = event_schema();
+    let (bytes, offsets) = body();
+    let ended = |items: &[Result<snug::Message<'_>, Error>]| matches!(items, [Err(Error::Usage("ended"))]);
+    // after finish
+    let mut seq = schema.sequence("event", &SequenceOptions::default()).unwrap();
+    assert_eq!(seq.feed(&bytes).len(), 3);
+    assert!(seq.finish().is_empty());
+    assert!(seq.is_done());
+    assert!(ended(&seq.feed(&bytes)), "feed after finish");
+    assert!(ended(&seq.feed(&[])), "an empty feed after finish");
+    assert!(ended(&seq.finish()), "finish after finish");
+    assert_eq!(Error::Usage("ended").to_string(), "snug: the sequence has ended (ended)");
+    // after a stopping refusal (OnInvalid::Stop), in feed
+    let mut bad = bytes.clone();
+    bad.splice(offsets[1]..offsets[1], [0xa1, 0x64, b't', b'y', b'p', b'e', 0x05]);
+    let mut seq = schema.sequence("event", &SequenceOptions::default()).unwrap();
+    let items = seq.feed(&bad[..offsets[1] + 7]);
+    assert!(matches!(items.as_slice(), [Ok(_), Err(Error::Sequence(_))]));
+    assert!(seq.is_done());
+    assert!(ended(&seq.feed(&bad[offsets[1] + 7..])), "feed after a stop");
+    assert!(ended(&seq.finish()), "finish after a stop");
+    // after a refusal settled by finish (EOF inside a message)
+    let mut seq = Sequence::new(&SequenceOptions::default()).unwrap();
+    assert!(seq.feed(&bytes[..offsets[1] + 2]).len() == 1);
+    assert!(matches!(seq.finish().as_slice(), [Err(Error::Sequence(f))] if f.failure.reason == "cbor/truncated"));
+    assert!(ended(&seq.feed(&bytes)));
+}
+
+/// D371 (N4): `quantum` is the async reader's; the sync readers never yield, so a
+/// nonzero quantum is `Error::Usage("options")` there (as JS's `sequenceReader` refuses
+/// it), and above 2^31 - 1 everywhere.
+#[test]
+fn a_nonzero_quantum_is_refused_by_the_sync_readers() {
+    let schema = event_schema();
+    let (bytes, _) = body();
+    let q = seq_opts(|o| o.quantum = 5);
+    assert_eq!(Sequence::new(&q).err(), Some(Error::Usage("options")));
+    assert_eq!(schema.sequence("event", &q).err(), Some(Error::Usage("options")));
+    assert_eq!(read_sequence(&bytes[..], &q).err(), Some(Error::Usage("options")));
+    assert_eq!(schema.read_sequence(&bytes[..], "event", &q).err(), Some(Error::Usage("options")));
+    assert!(snug::read_sequence_async(&bytes[..], &q).is_ok());
+    assert!(schema.read_sequence_async(&bytes[..], "event", &q).is_ok());
+    let huge = seq_opts(|o| o.quantum = i32::MAX as u32 + 1);
+    assert_eq!(snug::read_sequence_async(&bytes[..], &huge).err(), Some(Error::Usage("options")));
+    assert_eq!(schema.read_sequence_async(&bytes[..], "event", &huge).err(), Some(Error::Usage("options")));
+    assert!(snug::read_sequence_async(&bytes[..], &seq_opts(|o| o.quantum = i32::MAX as u32)).is_ok());
 }

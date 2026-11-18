@@ -282,3 +282,25 @@ test('P9.9 addendum P5/hang (seed 7001290, index 130): a session over the copy o
   const ms = Number(process.hrtime.bigint() - t0) / 1e6;
   assert.ok(ms < 5000, `the sessions took ${ms.toFixed(0)} ms`);   // 4 ms here; ~97 s each before
 });
+
+test('D371: a handle of 2^31 bytes or more is too_large at offset 0, unread; openSession(length) still refuses it', async () => {
+  // a fake size: nothing is allocated and a read fails the test. Before, every driver threw a TypeError.
+  const s = await compileSchema('r = bstr');
+  const unread = size => ({ size, read() { throw new Error('a handle past every limit was read'); } });
+  const want = { ok: false, reason: 'cbor/too_large', path: [], offset: 0 };
+  // what a 2^31-1-byte handle gets under the default limits
+  assert.deepEqual(validateHandleSync(s, { size: 2 ** 31 - 1, read: (_o, n) => new Uint8Array(n) }, 'r'), want);
+  for (const size of [2 ** 31, 2 ** 31 + 1, 2 ** 53 - 1]) {
+    for (const o of [{}, { maxBytes: 2 ** 31 - 1 }, { wire: 'valid' }, { wire: 'deterministic', top: 'map' }]) {
+      assert.deepEqual(validateHandleSync(s, unread(size), 'r', o), want);
+      assert.deepEqual(await validateHandle(s, unread(size), 'r', o), want);
+      assert.equal(verdict(() => scanHandleSync(unread(size), o)), 'too_large');
+      assert.equal(await averdict(scanHandle(unread(size), o)), 'too_large');
+    }
+    // the argument checks come first, as for any handle
+    assert.throws(() => validateHandleSync(s, unread(size), 'nope'), TypeError);
+    assert.throws(() => scanHandleSync(unread(size), { maxDepth: 257 }), TypeError);
+    assert.throws(() => openSession(s, 'r', size), TypeError);
+    assert.throws(() => pushScanner(size), TypeError);
+  }
+});

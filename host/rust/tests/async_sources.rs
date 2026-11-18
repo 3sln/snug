@@ -496,7 +496,12 @@ fn async_sequence_reader_equals_the_sync_reader() {
                       Split::Fixed(n.max(1))];
         for split in splits {
             let chunk = [1usize, 5, 64, 65536][rng.below(4) as usize];
-            let o = SequenceOptions { wire: profile, on_invalid, fail_fast, chunk, ..SequenceOptions::default() };
+            let o = seq_opts(|o| {
+                o.wire = profile;
+                o.on_invalid = on_invalid;
+                o.fail_fast = fail_fast;
+                o.chunk = chunk;
+            });
             // schema-validated, and profile-only (the VM against `any`)
             let sync: Vec<_> = schema.read_sequence(Trickle { data: &body, split: Splitter::new(split) }, &name, &o).unwrap().collect();
             let (got, pend) = drain(schema.read_sequence_async(AsyncTrickle::new(&body, split, rng.next(), 3), &name, &o).unwrap());
@@ -504,8 +509,17 @@ fn async_sequence_reader_equals_the_sync_reader() {
             let sync2: Vec<_> = read_sequence(Trickle { data: &body, split: Splitter::new(split) }, &o).unwrap().collect();
             let (got2, pend2) = drain(read_sequence_async(AsyncTrickle::new(&body, split, rng.next(), 3), &o).unwrap());
             assert_eq!(got2, sync2, "profile-only sequence of cases {i}..{j} {split:?} chunk {chunk}");
-            c.sequence_items += got.len() + got2.len();
-            c.sequence_runs += 2;
+            // D371: with a quantum, over a source that is never Pending: the same items, every
+            // Pending a quantum yield (block_on checks each arranged its wake-up)
+            let mut oq = o.clone();
+            oq.quantum = [1u32, 7, 64][rng.below(3) as usize];
+            let (got3, pend3) = drain(schema.read_sequence_async(AsyncTrickle::new(&body, split, 1, 0), &name, &oq).unwrap());
+            assert_eq!(got3, sync, "sequence of cases {i}..{j} {split:?} chunk {chunk} quantum {}", oq.quantum);
+            let (got4, pend4) = drain(read_sequence_async(AsyncTrickle::new(&body, split, 1, 0), &oq).unwrap());
+            assert_eq!(got4, sync2, "profile-only sequence of cases {i}..{j} {split:?} chunk {chunk} quantum {}", oq.quantum);
+            c.yields_cases += usize::from(pend3 > 0) + usize::from(pend4 > 0);
+            c.sequence_items += got.len() + got2.len() + got3.len() + got4.len();
+            c.sequence_runs += 4;
             c.pendings += pend + pend2;
         }
         c.sequences += 1;
@@ -513,9 +527,62 @@ fn async_sequence_reader_equals_the_sync_reader() {
     }
     report("sequence", format!(
         "sequences: {} bodies of consecutive cases ({} Programs), {} runs, {} items: async == sync (schema and \
-         profile-only; Stop/Skip, fail-fast, 1-byte to whole reads); {} Pending polls; {:.1} s",
-        c.sequences, progs.len(), c.sequence_runs, c.sequence_items, c.pendings, t.elapsed().as_secs_f64()));
-    assert!(c.pendings > 0 && c.sequence_items > 0);
+         profile-only; Stop/Skip, fail-fast, 1-byte to whole reads; and with a quantum); {} Pending polls; \
+         {} quantum runs that yielded; {:.1} s",
+        c.sequences, progs.len(), c.sequence_runs, c.sequence_items, c.pendings, c.yields_cases, t.elapsed().as_secs_f64()));
+    assert!(c.pendings > 0 && c.sequence_items > 0 && c.yields_cases > 0);
+}
+
+/// D371 (N4): a positive `SequenceOptions::quantum` makes the async reader answer
+/// `Pending` inside a message (after waking itself), and the items are those
+/// without it. Before, the sequence readers had no quantum: a long message was
+/// checked in one poll.
+#[test]
+fn a_sequence_quantum_yields_pending_mid_message() {
+    let schema = Schema::compile("m = [* uint]", &CompileOptions::default()).unwrap();
+    // one 2,000-entry array, then a second message
+    let mut body = vec![0x99, 0x07, 0xd0];
+    body.extend(std::iter::repeat_n(0x01u8, 2000));
+    body.extend_from_slice(&[0x81, 0x02]);
+    let want: Vec<_> = schema.read_sequence(&body[..], "m", &SequenceOptions::default()).unwrap().collect();
+    assert_eq!(want.len(), 2);
+    let q = seq_opts(|o| o.quantum = 16);
+    let flag = Arc::new(Flag(AtomicUsize::new(0)));
+    let waker = Waker::from(flag.clone());
+    let mut cx = Context::from_waker(&waker);
+    let mut r = schema.read_sequence_async(&body[..], "m", &q).unwrap();
+    let (mut got, mut before_first, mut pendings) = (Vec::new(), None, 0usize);
+    loop {
+        let wakes = flag.0.load(Ordering::Relaxed);
+        match r.poll_next(&mut cx) {
+            Poll::Pending => {
+                pendings += 1;
+                assert!(flag.0.load(Ordering::Relaxed) > wakes, "Pending without a wake-up");
+            }
+            Poll::Ready(Some(m)) => {
+                before_first.get_or_insert(pendings);
+                got.push(m);
+            }
+            Poll::Ready(None) => break,
+        }
+    }
+    assert_eq!(got, want);
+    // the 2,000 entries are read in one 65,536-byte read: every Pending before the first
+    // message is a yield inside it
+    assert!(before_first.unwrap() > 10, "{before_first:?} Pending polls before the first message");
+    // the profile-only reader too, and quantum 0 never yields
+    let (items, pend) = drain(read_sequence_async(&body[..], &q).unwrap());
+    assert_eq!(items.len(), 2);
+    assert!(pend > 10);
+    let (_, none) = drain(schema.read_sequence_async(&body[..], "m", &SequenceOptions::default()).unwrap());
+    assert_eq!(none, 0);
+}
+
+/// SequenceOptions is non-exhaustive (D371): the default with `f` applied.
+fn seq_opts(f: impl FnOnce(&mut SequenceOptions)) -> SequenceOptions {
+    let mut o = SequenceOptions::default();
+    f(&mut o);
+    o
 }
 
 // ---------------------------------------------------------------- the public contract
@@ -564,7 +631,7 @@ fn public_async_forms_match_the_sync_ones() {
     assert_eq!(e.unwrap_err(), Error::Usage("unknown_rule"));
     assert_eq!(schema.validate_blob(&BytesBlob(&[]), "nope", &v, &so(1, 0, false)).unwrap_err(), Error::Usage("unknown_rule"));
     assert!(matches!(schema.read_sequence_async(&[][..], "nope", &SequenceOptions::default()), Err(Error::Usage("unknown_rule"))));
-    let zero = SequenceOptions { chunk: 0, ..SequenceOptions::default() };
+    let zero = seq_opts(|o| o.chunk = 0);
     assert!(matches!(schema.read_sequence_async(&[][..], "m", &zero), Err(Error::Usage("options"))));
     // P9.13: the free readers refuse chunk 0 as the schema readers do
     assert!(matches!(snug::read_sequence(&[][..], &zero), Err(Error::Usage("options"))));
@@ -580,7 +647,7 @@ fn public_async_forms_match_the_sync_ones() {
         let mut empty: &[u8] = &[];
         assert_eq!(schema.validate_reader(&mut empty, "m", &v, &so(chunk, 0, false)).unwrap_err(), Error::Usage("options"));
         assert_eq!(schema.validate_blob(&BytesBlob(&[]), "m", &v, &so(chunk, 0, false)).unwrap_err(), Error::Usage("options"));
-        let big = SequenceOptions { chunk, ..SequenceOptions::default() };
+        let big = seq_opts(|o| o.chunk = chunk);
         assert!(matches!(schema.read_sequence_async(&[][..], "m", &big), Err(Error::Usage("options"))));
         assert!(matches!(snug::read_sequence_async(&[][..], &big), Err(Error::Usage("options"))));
         assert!(matches!(schema.read_sequence(&[][..], "m", &big), Err(Error::Usage("options"))));
@@ -598,17 +665,39 @@ fn public_async_forms_match_the_sync_ones() {
     }
     let (e, _) = block_on(schema.validate_blob_async(&Short, "m", &v, &so(4, 0, false)));
     assert_eq!(e.unwrap_err(), Error::Source("short_read"));
-    struct Huge;
+    // D371 (N5): a blob of 2^31 bytes or more is never read and its verdict is too_large at
+    // offset 0, what a 2^31 - 1-byte blob over the input limit gets (a fake size; nothing is
+    // allocated). Before, it was the source error `Error::Source("too_large")`.
+    struct Huge(usize);
     impl AsyncBlob for Huge {
         fn size(&self) -> usize {
-            1 << 31
+            self.0
         }
-        async fn read(&self, _offset: usize, _len: usize) -> Result<Vec<u8>, SourceError> {
-            unreachable!()
+        async fn read(&self, offset: usize, len: usize) -> Result<Vec<u8>, SourceError> {
+            assert!(self.0 < 1 << 31 && offset == 0 && len <= 4, "read {len} at {offset} of a {}-byte blob", self.0);
+            Ok(vec![0u8; len])
         }
     }
-    let (e, _) = block_on(schema.validate_blob_async(&Huge, "m", &v, &so(4, 0, false)));
-    assert_eq!(e.unwrap_err(), Error::Source("too_large"));
+    impl snug::Blob for Huge {
+        fn size(&self) -> usize {
+            self.0
+        }
+        fn read(&self, offset: usize, len: usize) -> Result<Vec<u8>, SourceError> {
+            assert!(self.0 < 1 << 31 && offset == 0 && len <= 4, "read {len} at {offset} of a {}-byte blob", self.0);
+            Ok(vec![0u8; len])
+        }
+    }
+    let (limit, _) = block_on(schema.validate_blob_async(&Huge(i32::MAX as usize), "m", &v, &so(4, 0, false)));
+    let limit = limit.unwrap().unwrap_err();
+    assert_eq!((limit.reason, limit.offset), ("cbor/too_large", 0));
+    for size in [1usize << 31, (1 << 31) + 1, usize::MAX] {
+        let (got, _) = block_on(schema.validate_blob_async(&Huge(size), "m", &v, &so(4, 0, false)));
+        assert_eq!(got.unwrap().unwrap_err(), limit, "async, size {size}");
+        assert_eq!(schema.validate_blob(&Huge(size), "m", &v, &so(4, 0, false)).unwrap().unwrap_err(), limit, "sync, size {size}");
+        // the argument checks still come first
+        assert_eq!(schema.validate_blob(&Huge(size), "nope", &v, &so(4, 0, false)).unwrap_err(), Error::Usage("unknown_rule"));
+        assert_eq!(schema.validate_blob(&Huge(size), "m", &v, &so(0, 0, false)).unwrap_err(), Error::Usage("options"));
+    }
 
     struct Broken(usize);
     impl AsyncSource for Broken {
@@ -683,7 +772,7 @@ fn async_sources_hold_bounded_bytes_and_stop_early() {
     // a sequence holds the message in progress only
     let msg = [0xa1u8, 0x64, b'b', b'l', b'o', b'b', 0x43, 1, 2, 3];
     let many: Vec<u8> = msg.iter().copied().cycle().take(msg.len() * 500).collect();
-    let mut r = schema.read_sequence_async(&many[..], "m", &SequenceOptions { chunk: 7, ..SequenceOptions::default() }).unwrap();
+    let mut r = schema.read_sequence_async(&many[..], "m", &seq_opts(|o| o.chunk = 7)).unwrap();
     let (n, _) = block_on(async {
         let mut n = 0;
         while let Some(m) = r.next().await {
@@ -721,9 +810,9 @@ fn dropped_futures_are_safe_and_next_is_cancel_safe() {
         assert!(got.unwrap().is_ok());
     }
     // next(): a future dropped while its read is Pending loses no message
-    let want: Vec<_> = schema.read_sequence(&body[..], "m", &SequenceOptions { chunk: 5, ..SequenceOptions::default() }).unwrap().collect();
+    let want: Vec<_> = schema.read_sequence(&body[..], "m", &seq_opts(|o| o.chunk = 5)).unwrap().collect();
     let mut r = schema
-        .read_sequence_async(AsyncTrickle::new(&body, Split::Random(5, 9), 11, 2), "m", &SequenceOptions { chunk: 5, ..SequenceOptions::default() })
+        .read_sequence_async(AsyncTrickle::new(&body, Split::Random(5, 9), 11, 2), "m", &seq_opts(|o| o.chunk = 5))
         .unwrap();
     let flag = Arc::new(Flag(AtomicUsize::new(0)));
     let waker = Waker::from(flag);
