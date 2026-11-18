@@ -9330,6 +9330,130 @@ format](…/docs/program.md)", absolute `https://github.com/3sln/snug/blob/main/
   - The strip, the docs-test rules and the package tests each failed under mutation.
   - The release set runs once for the whole follow-up batch.
 
+### D370 — The rest of the P9.13 gate nits: no environment knob narrows a gate run by `bb gates`; `../kin` is checked against `KIN_REF`; types-test holds every runtime export to a declaration; write-test counts its answers; rust-crate fails on a failed stage and keeps no stale file; wasm-opt is in wasm-build's stamp; the proptest gate tests the working tree and writes its findings under `.cache`; Chrome and workerd stay in the gate's process group (P9.13 gates N2, N3, N5, N7, N8, N9)
+**Decision** (D370 engineer; the work package from the manager, the follow-ups approved by
+the owner; the gates review in `.cache/p913-triage/gates-review.md`, the nits D365 left). Each
+fix is proven like D365's. A mutation was applied, then the gate was run twice: **before**
+from main a300574 (a scratch worktree, the old gate) and **after** from the branch at c7a8855
+(a scratch worktree; rebased onto e31828f, D369, as 548dfe3 without other change: only
+rust-crate conflicted, on D369's comment line, and both changes are kept). Each mutation was
+restored afterwards.
+
+* **N2: coverage knobs.** The gate map now classifies every environment variable gate code
+  reads (`ci/gate-map.edn :knobs`, where the list is documented):
+  - `:clear`, the knobs that narrow a gate or point it at another tree: `SEQ_SLOW`,
+    `SEQ_DRY`, `SEQ_HOSTONLY`, `SNUG_GEN`, `SNUG_RS_ONLY`, `SNUG_WASM_TOOLCHAIN`,
+    `SNUG_SCAN_WASM`, `SNUG_VM_WASM`, `SNUG_PARITY_MUTATIONS`/`_SEED`/`_SCHEMAS`/`_SEQ_MATCH`,
+    `SNUG_ASYNC_CASES`, `SNUG_ASYNC_FULL`, `SNUG_PROPTEST_SELFTEST`, `SNUG_WASM_RELEASE`,
+    `SNUG_STAMPED_VERSION`. The runner removes them from every gate's environment and prints
+    `env  removed …`, so a gate's ok is always at full coverage. A gate's own command still
+    sets one for its children (rust-api-test's `SNUG_ASYNC_FULL`, the sh gates'
+    `SNUG_RS_ONLY`, node-oldest's `SNUG_NODE_OLDEST`). Clearing was chosen over refusing: the
+    gate then runs as the map says, and the line says what was ignored.
+  - `:floor`: `SNUG_NODE_OLDEST` (npm-test) and `SNUG_CLIPPY_OPTIONAL` (rust-api-test) relax a
+    check only where a toolchain floor lacks a tool. The runner keeps them for that gate only
+    on that floor (Node at engines.node's major; `rustc` at rust-version) and removes them
+    elsewhere. CI's compat cells set them on exactly those cells.
+  - `:keep`: tool and oracle locators (`SNUG_TYPESCRIPT`, `SNUG_CHROME`, `SNUG_WORKERD`, …,
+    `RUBY_CDDL`, `CDDL_NATIVE`, …), the watchdog's caps (`SNUG_GATE_*`) and diagnostics
+    (`VMTEST_LOG`, `SNUG_SHOW`, …). They choose a tool or add output, and pass through.
+  - `bb gates --check` (run before every set) refuses: a `SNUG_`/`SEQ_`/`VMTEST_`/`RUBY_`/
+    `CDDL_`/`RFC_`/`PEG_` variable read by tracked gate code (`process.env.X`, `env.X`,
+    `env::var("X")`, `$X` in sh) that `:knobs` does not classify; a workflow or job env, or a
+    step, that sets a `:clear` knob; a `:floor` knob on a step that is not its gate on its
+    floor; the setup action writing either kind to `GITHUB_ENV`; and a `ci/run-gate.sh`
+    (the Linux job's runner, which now removes the same knobs) whose list is not `:clear`.
+    Checked by hand on probes: removing `VMTEST_LOG` from `:keep`, and `SNUG_NODE_OLDEST` and
+    `SEQ_DRY` on the Node 24 compat step, each fail `--check`.
+  - Mutation: `kin/vm-session.kin` `vms-message-length` answers one byte past a completed
+    message's end, with `SEQ_DRY=1` in the caller's environment. Before: sequence-test
+    re-emitted the mutated gen/, printed SEQ_DRY's tally and exited 0: `ok sequence-test 248 s`.
+    After: `env  removed SEQ_DRY`, the full run, FAIL (see the gate record).
+* **N3: types-test.** Every exports entry that is a module must have `types` and `default`
+  (a plain string entry must be a `.wasm` or `.json` asset). The consumer module now reads
+  every value each entry's runtime module exports (`void entry3.Writer;`): an undeclared
+  export, or one declared only as a type, fails tsc. The names come from TypeScript's own
+  reading of the JS module (`allowJs`, re-exports followed, nothing run), because the wasm
+  SDK's inline entry imports a module only a package build generates. Wherever Node can import
+  the module (20 of 21 entries), the two lists must agree. Today: 57 runtime exports in
+  @3sln/snug, 82 in @3sln/snug-wasm, all declared.
+  - Mutation 1: `export const MUTATION_UNDECLARED = 1` in `host/js/src/public-view.mjs`.
+    Before: ok, exit 0. After: `error TS2339: Property 'MUTATION_UNDECLARED' does not exist`
+    under both libs, exit 1.
+  - Mutation 2: an entry `"./extra": { "default": "./src/controls.mjs" }`. Before: ok (the
+    entry was filtered out). After: `FAIL @3sln/snug: exports "./extra" is … a module entry
+    without types and default conditions`, exit 1.
+* **N5.**
+  - **write-test** compared `rs[i] ?? ''` with `js[i] ?? ''`, so a missing line read as an
+    empty answer and extra Rust lines were never looked at. Now each section needs exactly one
+    non-empty answer per case on each side, and at least one case. Mutation: the Rust binary
+    prints one extra empty line at the end. Before: every section ok, exit 0. After: FAIL in
+    every section (`put-head: 3000/3000 identical …, (Rust 3001 lines, JS 3000)`), exit 1.
+  - **rust-crate** runs `set -o pipefail` (bash's sh and Ubuntu 24.04's dash 0.5.12 have it),
+    so a failing first stage is no longer hidden behind the `while` loop. Mutation:
+    `rust-crate DIR host/nonexistent`. Before: `cd: … No such file or directory`, exit 0, a
+    crate without host sources. After: the same message, exit 1.
+  - **rust-crate** removes what its sources no longer have: a file in `src/` outside kin's
+    modules with no host source, a file in `tests/` with none in host/rust/tests, `tests/` for
+    a non-default host, and `build.rs` for a non-default manifest. wasm-build's `cc` copies
+    compile.rs and sha256.rs back with `cp -p`, so cargo's build stays fresh. Mutation: a
+    module `d370_probe` declared in `host/rust/src/lib.rs`, the crate assembled, then the
+    source removed. Before: `bb gates rust-api-test` ok (172 s) on the stale copy. After:
+    `error[E0583]: file not found for module d370_probe`, FAIL.
+  - **wasm-build's stamp** (`snug.wasm.flags`, which decides whether wasm-opt reruns) held
+    `-O3` and the cargo output's checksum. It now holds every wasm-opt flag, wasm-opt's
+    `--version` and its binaryen package version. Mutation: after a build, a binaryen package
+    reporting version 999.0.0 (bench/compare/node_modules pointed at a scratch copy whose
+    wasm-opt is the real one). Before: wasm-build sdk did not rerun wasm-opt (snug.wasm
+    unchanged). After: it reran, and the stamp says `binaryen 999.0.0`. (wasm-release's
+    MANIFEST.json already recorded wasm-opt's version.)
+* **N7: proptest's tree.** The gate ran `--tree=head` by default: a `git archive` of HEAD, so
+  in a dirty checkout every other gate of a set tested the working tree and proptest tested
+  the last commit. Decided: the gate tests what the rest of the set tests. Its command in
+  the gate map is now `--tree=working`. The campaign logs and records (summary.json
+  `uncommitted`) each uncommitted path under kin, gen, host, corpus, bench/baseline and
+  tools/proptest, and the tree line names HEAD and the count. A direct `bb proptest` keeps
+  `--tree=head` as its default, for long campaigns run beside other work in a shared
+  checkout; the header says which is which. In CI and a release build the two are the same
+  tree. Mutation: an uncommitted Writer defect (`true` written as `false`). Before: the
+  snapshot of HEAD, 0 failure signatures, `ok proptest 158 s`. After: `uncommitted (under
+  test): M host/js/src/writer.mjs`, `P2/encode-mismatch`, FAIL.
+* **proptest's findings.** A run wrote, and first deleted, `tools/proptest/findings/P*.json`
+  and `summary.json` in the checkout. Now its findings go to `findings/` in its log directory
+  (`.cache/proptest/<start>/findings`, or `--out`), and the tracked `triage.json` is always
+  the classification it reads. `--refresh-findings` writes the tracked directory as before,
+  when a campaign is to be recorded. campaign.test.mjs gained a test: a run without `--out`
+  leaves the tracked findings untouched and writes its summary in its log directory. Before
+  (the N7 run above): 14 tracked findings deleted and summary.json modified. After: the
+  checkout unchanged.
+* **N8: `../kin`.** `bb gates --check`, and so every run, compares `../kin/src` (bb.edn's
+  classpath) with ci.yml's `KIN_REF`: tracked differences (`git diff KIN_REF -- src`) and
+  untracked files. A difference, a missing `../kin` or a KIN_REF commit the checkout lacks is
+  a warning locally and an error under GitHub Actions (`GITHUB_ACTIONS=true`), where
+  `../kin` is checked out at KIN_REF. This machine's `../kin` (312beab, 2 src files past
+  KIN_REF 21e8ab9) now warns. With `GITHUB_ACTIONS=true` the same check fails, so the old
+  check passed a tree the new one refuses in CI. Documented in the runner's header and
+  release-policy §4 (hosted CI), beside the knobs.
+* **N9: Chrome and workerd** were started with `detached: true`, in process groups of their
+  own, so the watchdog neither counted their CPU nor killed them with the gate. They now start
+  in the gate's group: tools/runtime/run.mjs (Chrome, both workerd arms) and
+  host/wasm-sdk/test/consumer.mjs (Chrome, workerd). A gate ends its helper with the
+  watchdog's new `killTree`: the process and its descendants, found by parent pid before any
+  is signalled (Chrome's helpers stay in the group; the npm workerd launcher's child too).
+  watchdog-test gained three checks: a stuck helper is gone after the gate's wall cap,
+  `killTree` ends a tree, and no tracked gate code but the watchdog's own spawn is detached.
+  - Mutation: the runtime browser page never posts its result, under
+    `SNUG_GATE_RUNTIME_WALL=150`. Before: `WATCHDOG runtime 150 s`, and the headless Chrome
+    and 6 helpers were still running in their own group afterwards (killed by pid by hand).
+    After: the same WATCHDOG, and no Chrome of the run left.
+  - Mutation: `detached: true` back on run.mjs's Chrome. Before: watchdog-test ok. After:
+    `FAIL no gate code starts a process outside the gate's group …: tools/runtime/run.mjs:237`.
+  - **`--skip`**: runtime prints a SKIP line for every arm or measurement skipped (`cold` and
+    `cpu` printed none before) and refuses an unknown name (exit 2). Before: `--skip cold,cpu`
+    printed no SKIP line. After: two SKIP lines, so the runner reports NOT RUN.
+* No user-facing change and no CHANGELOG entry.
+* **Gates:** GATES-RECORD
+
 ## Findings
 
 - 2026-11-11 (manager): **the 6½-day `scan-test.mjs 300 1` process

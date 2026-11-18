@@ -504,6 +504,16 @@ in both workflows and the setup action, `release.yml` to use `ci.yml`'s
 `KIN_REF`, and every job of `release.yml` that may write to be gated on the
 guard's `write` output (D368).
 
+The environment cannot narrow a gate (D370). `bb gates` (and
+`ci/run-gate.sh`) removes the coverage knobs of the gate map's `:knobs
+:clear` (`SEQ_DRY`, `SNUG_GEN`, `SNUG_WASM_TOOLCHAIN`, …) from every gate's
+environment and says so; a `:floor` knob (`SNUG_NODE_OLDEST`,
+`SNUG_CLIPPY_OPTIONAL`) reaches only its gate, on its toolchain floor.
+`bb gates --check` refuses a knob that gate code reads and `:knobs` does not
+classify, and a workflow step that sets a `:clear` knob or a `:floor` knob
+off its floor. It also compares `../kin/src` with `KIN_REF`: a difference
+is a warning locally and an error in GitHub Actions.
+
 - **Primary toolchain:** macOS arm64 (`macos-15`), Node 24.6.0 (the Node
   that the Unicode tables pin) and Rust 1.92.0 (pinned). Every gate of both
   sets runs on it once. `proptest` must run on Node ≥ 23.9 (its slow-compile
