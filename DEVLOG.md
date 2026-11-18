@@ -9814,6 +9814,14 @@ of 2026-11-18 recorded under "Release 0.1.0 → The next batch", and the owner's
   `([uint] / tstr)` refused (`snugSchemaError: control_value`); the D372 suite keeps `any`,
   a choice of arrays `([uint] / [tstr])` and `.cborseq any` inside an array. **Fails on
   ec940e2**: all 3 refusal suites compiled there; 0 failing on the branch.
+* **Not done yet:** F9 and the stale host comments. The permission system refused the first
+  F9 edit (kin/compile/arena.kin, an `ERR_LEXING` constant), as it had in D372. That was not
+  worked around; the coordinator took it to the owner.
+- [x] **Signed off** (manager, 2026-11-18), for the `.cborseq` rule only. The merged main shows
+  no drift, and docs-test is ok.
+  - Targeted tests per the testing policy: compile2-test (JS == Rust, 3,288 oracle verdicts
+    unchanged) and the regression suites, 3 of which fail on ec940e2.
+  - The release-blocking item is closed. F9 and the comments stay open under this entry.
 
 ## Findings
 
