@@ -9,8 +9,10 @@
 //         --wait polls until each named artefact is visible (after a publish).
 //     node kin/scripts/release-registry.mjs verify <build dir> --only <artefact file> [--wait <s>]
 //
-// Every HTTP request sends only `User-Agent: snug-release-check` and nothing else that names a
-// person; no request is authenticated.
+// Every HTTP request sends `User-Agent: snug-release-check` and nothing else that names a
+// person. npm and crates.io requests are unauthenticated. The api.github.com request alone
+// carries `Authorization: Bearer $GH_TOKEN` when GH_TOKEN is set (release.yml passes the run's
+// own short-lived token, for the API's rate limit); without it, it is unauthenticated too.
 import { spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { readFileSync, readdirSync } from 'node:fs';
@@ -23,10 +25,10 @@ export const PACKAGES = Object.freeze({
 });
 const UA = { 'User-Agent': 'snug-release-check' };
 
-async function get(url, { json = true } = {}) {
+async function get(url, { json = true, headers = {} } = {}) {
   for (let attempt = 0; ; attempt++) {
     let r;
-    try { r = await fetch(url, { headers: UA, redirect: 'follow' }); }
+    try { r = await fetch(url, { headers: { ...UA, ...headers }, redirect: 'follow' }); }
     catch (e) { if (attempt < 3) { await new Promise(s => setTimeout(s, 2000 * (attempt + 1))); continue; } throw new Error(`${url}: ${e.message}`); }
     if (r.status === 404) return null;
     if (r.ok) return json ? r.json() : r.text();
@@ -47,9 +49,11 @@ export async function crateVersion(name, version) {
   for (const line of text.split('\n').filter(Boolean)) { const e = JSON.parse(line); if (e.vers === version) return { cksum: e.cksum, yanked: e.yanked }; }
   return null;
 }
-/** The GitHub release for tag v<version> (unauthenticated): true or false. */
+/** The GitHub release for tag v<version>: true or false (GH_TOKEN, when set, for the rate limit). */
 export async function githubRelease(repo, version) {
-  return (await get(`https://api.github.com/repos/${repo}/releases/tags/v${encodeURIComponent(version)}`)) !== null;
+  // a 404 is "no release"; a 403 (rate limit) or any other error throws
+  const auth = process.env.GH_TOKEN ? { Authorization: `Bearer ${process.env.GH_TOKEN}` } : {};
+  return (await get(`https://api.github.com/repos/${repo}/releases/tags/v${encodeURIComponent(version)}`, { headers: auth })) !== null;
 }
 /** A remote's tag or branch: { object, commit } (commit: the peeled target) or null. */
 export function remoteRef(remote, ref) {

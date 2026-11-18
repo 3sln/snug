@@ -410,10 +410,15 @@ owner's order — test, then tag and release, then publish:
    `dist.integrity` must be each tarball's). A version already published is
    skipped.
 
-A manual run (`workflow_dispatch`) is a **dry run** by default: it builds
-and checks the bytes and uploads the artefacts, and writes nothing. Only a
-run on `main` — the push of a `version.edn` change, or a dispatch with
-`dry_run` off — may tag, release or publish.
+A manual run (`workflow_dispatch`) is a **dry run** by default: it tests,
+builds and checks the bytes and uploads the artefacts, and writes nothing.
+Every run that cannot write (a dry run, or a run on another ref) tests and
+builds even when the version is fully released: on `main` it then rebuilds
+the tagged commit and checks that the artefacts are byte-identical to what
+the registries hold, a proof that the release still reproduces (elsewhere
+it builds `HEAD`). Only a run on `main` — the push of a `version.edn`
+change, or a dispatch with `dry_run` off — may tag, release or publish, and
+such a run of a fully released version is a no-op.
 
 **Licence and notice check.** Every artefact contains `LICENSE` (MIT,
 "Copyright (c) 2026 3sln"), `THIRD_PARTY_NOTICES.md` (with the Unicode
@@ -523,7 +528,7 @@ guard's `write` output (D368).
 
 | Job | Runner | Permissions | Does |
 | --- | --- | --- | --- |
-| `guard` | Ubuntu | read | `release-guard.mjs --self-test`, then the plan; `write` is true only on `main`, for a push or a non-dry-run dispatch |
+| `guard` | Ubuntu | read | `release-guard.mjs --self-test`, then the plan; `write` is true only on `main`, for a push or a non-dry-run dispatch; `run_build` also on every run that cannot write; the GitHub release lookup uses the run's own token (`GH_TOKEN`) for the API's rate limit |
 | `tests` | (ci.yml) | read | `ci.yml` with `mode: release`; skipped when resuming a tagged commit |
 | `build` | macOS | read | `release-build.mjs`; checks npm is 11.5.1, the version, and bytes already on a registry; uploads the artefacts, the assembled crate, `build.json`, the notes and `dist.bundle` |
 | `tag-release` | Ubuntu | `contents: write` | `src/vX.Y.Z`; `dist` and `vX.Y.Z` from the bundle (a fast-forward of the remote `dist`); `gh release create vX.Y.Z --verify-tag` (`--prerelease` for 0.x) |
@@ -534,8 +539,12 @@ The registries' trusted publishers name the repository `3sln/snug` and
 the workflow file `release.yml`, with no GitHub environment (the owner's
 choice), so the publish jobs live in `release.yml` itself, not in a
 reusable workflow. No token secret is used or needed. Every query of npm,
-crates.io and GitHub that the scripts make is unauthenticated and sends only
-`User-Agent: snug-release-check`.
+crates.io and GitHub that the scripts make sends `User-Agent:
+snug-release-check`; npm and crates.io are asked unauthenticated, and the
+GitHub release lookup alone carries the workflow run's own short-lived token
+(`GH_TOKEN`, read-only in the guard job) when it is set, for
+api.github.com's rate limit. Locally it runs unauthenticated, or with
+`GH_TOKEN` if set.
 
 ## 5. Deprecation and security fixes
 

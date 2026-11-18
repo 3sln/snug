@@ -9054,6 +9054,18 @@ no GitHub environment). docs/release-policy.md §4, §4.1 and the new §4.2 desc
 
   The guard also emits `need_*` flags, and `write` (from the ref and event). `--self-test` checks
   the decision on five fixed states, including "published by hand, never tagged".
+  - **Dry runs always build** (manager's review). A run that cannot write (a dry run, or any ref
+    but main) gets `run_build` even when the guard says `noop`, with `need_tests` true. On main
+    it rebuilds the source tag's commit and the build job's `release-registry.mjs verify` holds
+    its bytes to the registries'; on another ref it builds HEAD. A dispatch dry run of 0.1.0 on
+    main is therefore a hosted reproduction of bcfd46d's published bytes. Without a dist to push
+    (`need_dist` false: a resume, or a rebuild of a released version) the build makes its dist
+    commit in an empty scratch repository, as a check only. A no-op push stays a no-op, and
+    every writing job still needs `write == 'true'`.
+  - **The GitHub API's rate limit** (coordinator). The api.github.com release lookup alone sends
+    `Authorization: Bearer $GH_TOKEN` when GH_TOKEN is set. release.yml passes the run's own
+    token to the plan step only; the job keeps `contents: read`. npm and crates.io stay
+    unauthenticated. A 403 or any other non-404 answer still throws.
 * **tests:** `ci.yml` as a reusable workflow (`workflow_call`, `mode: release`). It runs the whole
   release job, compat and linux on the commit. It is skipped when resuming: the commit was tested
   before it was tagged.
@@ -9157,8 +9169,10 @@ test, dist.mjs and prerelease.mjs.
 * **The guard on main e9137ba:** "0.1.0 already released (src/v0.1.0 on bcfd46d01074, dist
   v0.1.0, GitHub release, @3sln/snug, @3sln/snug-wasm, snug-cbor) -> no-op". With
   `--version 0.1.1`: `release` with all seven parts missing.
-* **The guard's self-test:** 5/5. Mutation `tag: !s.srcTag` → `tag: false`: FAIL on 2 cases,
-  exit 1.
+* **The guard's self-test:** 8/8: the five states with writes allowed, plus a noop dry run on
+  main (tests, a build of the tagged commit), a noop dry run off main (HEAD) and a fresh release
+  dry run. The `tag: false` mutation fails 2 cases, exit 1; making `run_build` ignore `write`
+  (`action !== 'noop'` alone) fails the two noop dry-run cases, exit 1.
 * **`release-registry.mjs verify`** on the rebuilt 0.1.0: npm dist.integrity matches both
   tarballs, and the crates.io cksum matches the .crate. Mutation: one byte of the .crate flipped
   → FAIL, exit 1.

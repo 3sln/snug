@@ -8,7 +8,9 @@
 #                npm @3sln/snug and @3sln/snug-wasm, crates.io snug-cbor). Nothing missing: a
 #                clean no-op. No source tag: a release of this commit. A source tag but
 #                something missing: resume, building the TAGGED commit and doing only the
-#                missing steps.
+#                missing steps. A run that cannot write (a dry run, another ref) always tests
+#                and builds: for a released version on main it rebuilds the tagged commit and
+#                checks its bytes against the registries (elsewhere: HEAD).
 #   tests        ci.yml (workflow_call, mode release): the release set, compat and linux on
 #                the commit; skipped when resuming (the commit was tested before it was tagged)
 #   build        kin/scripts/release-build.mjs on macOS: stamp, both npm tarballs, the .crate,
@@ -72,6 +74,7 @@ jobs:
       need_npm_snug: ${{ steps.plan.outputs.need_npm_snug }}
       need_npm_wasm: ${{ steps.plan.outputs.need_npm_wasm }}
       need_crate: ${{ steps.plan.outputs.need_crate }}
+      run_build: ${{ steps.plan.outputs.run_build }}
       write: ${{ steps.mode.outputs.write }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -82,8 +85,6 @@ jobs:
         with:
           node-version: '24.6.0'
       - run: node kin/scripts/release-guard.mjs --self-test
-      - id: plan
-        run: node kin/scripts/release-guard.mjs --repo "$GITHUB_REPOSITORY" --remote "https://github.com/$GITHUB_REPOSITORY.git" --github-output "$GITHUB_OUTPUT"
       - id: mode
         env:
           ON_MAIN: ${{ github.ref == 'refs/heads/main' }}
@@ -91,16 +92,27 @@ jobs:
           DRY_RUN: ${{ inputs.dry_run }}
         run: |
           # writes (tags, the GitHub release, publishes) only from main, by a push or by a
-          # dispatch that is not a dry run; anything else builds and checks only
+          # dispatch that is not a dry run; anything else tests, builds and checks only
           write=false
           if [ "$ON_MAIN" = true ] && { [ "$EVENT" = push ] || { [ "$EVENT" = workflow_dispatch ] && [ "$DRY_RUN" = false ]; }; }; then write=true; fi
           echo "write=$write" >> "$GITHUB_OUTPUT"
+          echo "on_main=$ON_MAIN" >> "$GITHUB_OUTPUT"
           echo "release run on $GITHUB_REF by $EVENT (dry_run: ${DRY_RUN:-n/a}): write=$write"
+      - id: plan
+        env:
+          # the run's own short-lived token, for api.github.com's rate limit (the GitHub release
+          # lookup only; npm and crates.io are asked unauthenticated); this job can only read
+          GH_TOKEN: ${{ github.token }}
+          WRITE: ${{ steps.mode.outputs.write }}
+          ON_MAIN: ${{ steps.mode.outputs.on_main }}
+        run: >-
+          node kin/scripts/release-guard.mjs --repo "$GITHUB_REPOSITORY" --remote "https://github.com/$GITHUB_REPOSITORY.git"
+          --write "$WRITE" --on-main "$ON_MAIN" --github-output "$GITHUB_OUTPUT"
 
   tests:
     name: tests (ci.yml, release set)
     needs: guard
-    if: needs.guard.outputs.action != 'noop' && needs.guard.outputs.need_tests == 'true'
+    if: needs.guard.outputs.run_build == 'true' && needs.guard.outputs.need_tests == 'true'
     uses: ./.github/workflows/ci.yml
     with:
       mode: release
@@ -111,7 +123,7 @@ jobs:
     name: build (kin/scripts/release-build.mjs)
     needs: [guard, tests]
     if: >-
-      always() && needs.guard.result == 'success' && needs.guard.outputs.action != 'noop' &&
+      always() && needs.guard.result == 'success' && needs.guard.outputs.run_build == 'true' &&
       (needs.tests.result == 'success' || needs.tests.result == 'skipped')
     runs-on: macos-15
     timeout-minutes: 120
@@ -134,7 +146,13 @@ jobs:
       - name: build
         env:
           COMMIT: ${{ needs.guard.outputs.commit }}
-        run: node kin/scripts/release-build.mjs --commit "$COMMIT" --dist-from "https://github.com/$GITHUB_REPOSITORY.git"
+          NEED_DIST: ${{ needs.guard.outputs.need_dist }}
+        run: |
+          # the dist commit goes on top of the remote's dist branch when this run may push it; a
+          # version whose dist exists already (a resume, a dry-run rebuild) builds dist in an empty
+          # scratch repository, a check only (dist.mjs refuses a version the branch ends at)
+          if [ "$NEED_DIST" = true ]; then from=(--dist-from "https://github.com/$GITHUB_REPOSITORY.git"); else from=(); fi
+          node kin/scripts/release-build.mjs --commit "$COMMIT" "${from[@]}"
       - name: the version built is the version released
         env:
           VERSION: ${{ needs.guard.outputs.version }}
