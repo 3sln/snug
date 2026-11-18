@@ -309,7 +309,7 @@ class Parser {
       if (old && op === '=') fault('duplicate_rule');
       if (old && old.params.join() !== params.join()) fault('generic_arity');
       if (old) body = choice(op === '//=' ? 'gchoice' : 'tchoice', [old.body, body]);
-      rules.set(name, { params, body });
+      rules.set(name, { params, body, assigned: op === '=' || !!old?.assigned });
     }
     return rules;
   }
@@ -367,7 +367,8 @@ class Parser {
     else if (this.peek('*') || this.peek('literal') && this.ts[this.p].value.kind === 'int' && this.ts[this.p + 1].text === '*' && this.ts[this.p].end === this.ts[this.p + 1].start) {
       lo = this.peek('*') ? 0 : Number(this.take().value.value); const star = this.take('*');
       hi = this.peek('literal') && this.ts[this.p].value.kind === 'int' && this.ts[this.p].start === star.start + 1 ? Number(this.take().value.value) : Infinity;
-      if (lo < 0 || hi < lo) fault('occurrence'); occurred = true;
+      // RFC 8610 §3.2: n*m with m < n is valid syntax; it matches nothing (group(), below)
+      if (lo < 0) fault('occurrence'); occurred = true;
     }
     lo = Math.min(lo, 2 ** 24); if (hi >= 2 ** 24) hi = Infinity;
     let node;
@@ -414,7 +415,15 @@ export function compile(text) {
   try {
     if (typeof text !== 'string' || text.length > 1_000_000) fault('compile_limit');
     const definitions = new Parser(PRELUDE).file(), user = new Parser(text).file();
-    for (const [name, d] of user) definitions.set(name, d);
+    // RFC 8610 Appendix D: the prelude is automatically added, so a name the schema only
+    // extends (`/=`, `//=`) extends the prelude rule; `=` replaces it. Prelude rules are types.
+    for (const [name, d] of user) {
+      const p = definitions.get(name);
+      if (!p || d.assigned) { definitions.set(name, d); continue; }
+      if (d.params.length) fault('generic_arity');
+      if (isGroup(d.body)) fault('type_group');
+      definitions.set(name, { params: [], body: choice('tchoice', [p.body, d.body]), assigned: true });
+    }
     let steps = 0; const instances = new Map();
     function signature(n) {
       return JSON.stringify(n, (_key, value) => {
@@ -457,7 +466,9 @@ export function compile(text) {
       else if (n.k === 'paren') out.body = group(n.g, context);
       else if (n.k === 'entry') out.body = group(n.t, context);
       else if (n.k === 'seq' || n.k === 'gchoice') out.body = { k: n.k, xs: n.xs.map(x => group(x, context)) };
+      else if (n.k === 'rep' && n.hi < n.lo) { group(n.g, context); out.body = { k: 'fail' }; }
       else if (n.k === 'rep') out.body = n.hi === 0 ? { k: 'empty' } : { ...n, g: group(n.g, context) };
+      else if (n.k === 'member' && n.hi < n.lo) out.body = { k: 'fail' };
       else if (n.k === 'member') out.body = context === 'map' ? n.hi === 0 ? { k: 'empty' } : n : { k: 'rep', lo: n.lo, hi: n.hi, g: { k: 'entry', t: n.t } };
       else if (n.k === 'fail' && n.group) out.body = { k: 'fail' };
       else if (n.k === 'unwrap') {

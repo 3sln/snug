@@ -270,9 +270,15 @@ test('step exhaustion and unsupported controller domains are unknown', () => {
   assert.equal(check(compile(''), 'uint', 1), true);
 });
 test('compile refusals and empty grammar', () => {
-  for (const [source, error] of [['r = {int}', 'map_key'], ['r = [g]\ng = (? g, int)', 'left_recursion'], ['r = r / int', 'left_recursion'], ['r = missing', 'undefined_rule'], ['r = bstr .abnf "x"', 'unsupported_control'], ['r = [3*2 int]', 'occurrence'], ['r = "\\u{110000}"', 'syntax'], ['r = "\\uD800"', 'syntax']])
+  for (const [source, error] of [['r = {int}', 'map_key'], ['r = [g]\ng = (? g, int)', 'left_recursion'], ['r = r / int', 'left_recursion'], ['r = missing', 'undefined_rule'], ['r = bstr .abnf "x"', 'unsupported_control'], ['r = "\\u{110000}"', 'syntax'], ['r = "\\uD800"', 'syntax'], ['uint //= (a: 1)\nr = {uint}', 'type_group'], ['uint<T> /= T\nr = uint<int>', 'generic_arity']])
     assert.equal(compile(source).error, error, source);
   assert.equal(compile('').error, undefined);
+});
+test('D372: n*m with m < n matches nothing; /= extends a prelude rule, = replaces it', () => {
+  for (const [source, json, want] of [['r = [3*2 int]', '[]', false], ['r = [3*2 int]', '[1, 2]', false], ['r = [* (3*2 int), tstr]', '["x"]', true],
+    ['r = {1*0 a: int}', '{}', false], ['uint /= tstr\nr = uint', '1', true], ['uint /= tstr\nr = uint', '"x"', true],
+    ['uint = tstr\nr = uint', '1', false], ['int /= bool\nr = int', '-1', true]])
+    assert.equal(check(compile(source), 'r', JSON.parse(json)), want, `${source} ${json}`);
 });
 
 // A balanced seeded sample, including the eight documented Ruby deviation mechanisms.

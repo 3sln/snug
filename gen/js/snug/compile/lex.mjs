@@ -514,8 +514,10 @@ export function lexNumber(h, s, p, negative) {
         pushTok(h, TK_INT, s, k, negative, off4, len4);
         return k;
     }
-    // Decimal float: at most 17 significant digits (D020), converted by the host.
-    if ((firstNz >= 0) && (((lastNz - firstNz) + 1) > 17)) {
+    // Decimal float: at most 20 significant digits (D020, D372: ECMA-262
+    // StringToNumber rounds correctly up to 20 and Rust's parse always does),
+    // converted by the host.
+    if ((firstNz >= 0) && (((lastNz - firstNz) + 1) > 20)) {
         return fail(h, ERR_FLOAT, s);
     }
     const idx = hg(h, H_N_FLOATS);

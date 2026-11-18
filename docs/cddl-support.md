@@ -29,10 +29,10 @@ current implementation.
 
 | Construct | Supported behaviour |
 | --- | --- |
-| Type/group rules, references, `/=`, `//=` | Supported; duplicate `=` definitions refused. User rules may shadow prelude names. |
+| Type/group rules, references, `/=`, `//=` | Supported. A second `=` for a name is `duplicate_rule`, even when it is identical to the first (RFC 8610 does not say; refusing it catches mistakes). `/=` on a prelude name extends the prelude rule, which RFC 8610 Appendix D says is automatically added: `uint /= tstr` accepts both `1` and `"a"`. Every prelude rule is a type, so `//=` on one is `type_group_mismatch`. `=` on a prelude name shadows the prelude rule, and the prelude rules built on that name follow it: `tstr = bstr` also makes `text` a byte string. |
 | Type choices `/`, group choices `//`, nested groups | Supported. A type choice over one item is a set test; a group choice `//` is prioritised and locks in its first successful alternative (RFC 8610 Appendix A; see [arrays](#arrays-and-repetition)). |
 | Maps `{}`, arrays `[]`, labelled members | Supported; array member names are labels, not matching constraints. |
-| Occurrence `?`, `*`, `+`, `n*m`, fixed counts | Supported within the exactness/size conditions below. |
+| Occurrence `?`, `*`, `+`, `n*m`, fixed counts | Supported within the exactness/size conditions below. `n*m` with m < n, such as `[3*2 uint]`, is valid syntax (RFC 8610 §3.2) that matches nothing; compile warning W9 flags it. |
 | Generic type/group rules and instantiation | Supported, memoised with limits; unresolved/wrong-arity uses refused. |
 | Sockets `$name`, `$$name` and extensions | Supported in `full`; an unplugged `$x` is the empty type choice and an unplugged `$$x` the empty group choice (RFC 8610 §3.9): nothing matches through them, so `{ a: int, $$x }` matches nothing until plugged, while `? $$x` matches by absence. |
 | Unwrap `~`, group enumeration `&` | Supported for applicable targets; map/enumeration recursive groups refused. |
@@ -59,10 +59,10 @@ ever-growing generic expansion is refused rather than exhausting resources.
 | `.and`, `.within` | Intersections, with operands evaluated as same-item dependencies; they do not create extra accepting alternatives. |
 | `.regexp` | Whole-string XSD Appendix F by default; `regexp: 'iregexp'` selects strict RFC 9485. Both compile to the same bounded code-point automata; details below. |
 | `.cbor T` | Byte content must be exactly one current-profile CBOR item matching T. |
-| `.cborseq [G]` | Byte content is a sequence matching the controller's array group, including positions/occurrences. Controller must be array types only. |
+| `.cborseq [G]` | Byte content is a sequence matching the controller's array group, including positions/occurrences. `any` matches every array, so `.cborseq any` is `.cborseq [* any]` (RFC 8610 §3.8.4). Controller types that are not arrays describe no sequence and are left out: `bstr .cborseq uint` matches nothing. |
 | `.default`, `.feature` | `.feature` is an annotation, no effect on matching. `.default` carries RFC 8610 §3.8.6's implied `.ne`: a value equal to the default is left out, so present it does not match (`uint .default 1` refuses `1`). A default `.ne` cannot compare (an array, a map, a range, or a target such as `any`) is refused as that `.ne` would be. The compile option `defaultControl: 'annotation'` (Rust `DefaultControl::Annotation`) makes `.default` an annotation with no effect, as RFC 8610 Erratum 9229 proposes; that erratum's status is Reported, not verified. |
 | `.cat`, `.det` | Compile-time concatenation of two text or byte string literals, of either kind; the result has the target's type and, as text, must be valid UTF-8 (RFC 9165 §2.2); `.det` dedents each literal first (RFC 9165 §2.3: lines end at LF or CR LF, so a line of spaces before CR LF is blank). |
-| `.plus` | Compile-time addition of two integer literals, any size; float operands refused. |
+| `.plus` | Compile-time addition of two integer literals, any size. A float operand is refused (`control_value`). RFC 9165 §2.1 also defines sums with a float, converted to the target's type; snug does not implement those. |
 | `.abnf`, `.abnfb` | RFC 9165 §3 ABNF (RFC 5234 with RFC 7405's `%s`/`%i` strings), with the **optional module** `@3sln/snug/abnf` / `Controls::with_abnf()`; without it `unsupported_control`, naming the module. Language membership over the string's Unicode scalars (`.abnf`) or bytes (`.abnfb`), targets of either string type; metered against the budget. See [ABNF](#abnf-abnf-abnfb) below. |
 | registered `.name` | An **extension control**: `target .name argument` with `.name` registered at compile time; the target AND a host predicate over the item's encoding. The argument must be a literal: integer, text, bytes, a named simple value (`true`), a range `lo..hi` (passed as `[lo, hi]`) or an array of those. Generic ones ship in `@3sln/snug/controls` / `snug::controls`: `.chars`, `.unique`, `.samelen`. Refused under the `bus` profile unless `controlsInBus`. See the guide's "Custom controls". |
 
@@ -74,8 +74,9 @@ binary64 holds it, the nearest binary64 inside the half-line. So `number .ge
 0`, `float .lt 1` and `int .eq 1.0` compile; `.eq` across the kinds matches
 only an exactly equal value.
 Decimal schema float literals have
-at most 17 significant digits, must be finite, and a nonzero value may not
-round to zero. Hex floats are rounded exactly, identically on every host. Unsupported
+at most 20 significant digits (trailing zeroes do not count), must be finite, and a nonzero
+value may not round to zero. Each one is rounded to the nearest binary64 exactly, identically on
+every host. A longer literal is refused (`float_literal`). Hex floats are rounded exactly, identically on every host. Unsupported
 control targets/controllers are errors rather than ignored controls.
 
 An unregistered `.name` is the schema error `unknown_control`, and the message

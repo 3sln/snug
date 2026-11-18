@@ -836,7 +836,9 @@ D290–D299, all unsigned):
   leaf (D295). `B` is stored only for A1. Positions and members are numbered
   in node order and nodes in preorder; the verifier checks the numbering and
   that no `REP` of a `MEMBER` the fold table rewrites remains (D291, D297).
-  An occurrence `n*m` with m < n is a schema error (`syntax`, D293).
+  An occurrence `n*m` with m < n matches nothing (RFC 8610 §3.2): the
+  compiler emits `FAIL` for the entry and warning W9, so every `REP` still
+  has min <= max (D372; D293 refused it as `syntax`).
 * **§3.1.** The verifier's working area follows the marks; `vm-verify-words(P,
   mark_cap)` gives the scratch length. The verify budget is raised before each
   fixed point by 4·(n_calls + 2)·n·(2W + 2) + 4·n·npos·W per array table and

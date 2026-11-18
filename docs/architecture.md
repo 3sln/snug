@@ -96,10 +96,11 @@ proves no overflow (A9).
   halves.
 * **Float literals in schema text** (`1.1`, `1e-3`) must become exact binary64
   patterns. The compiler asks the host for this one conversion through a kin
-  host port (`parse-f64`), and refuses literals with more than 17 significant
+  host port (`parse-f64`), and refuses literals with more than 20 significant
   digits or outside the binary64 range, so that JS `Number()` and Rust
-  `str::parse::<f64>`, both correctly rounded in that domain, agree bit for bit
-  (D020, A9b). This is compile time only; validation never touches a host
+  `str::parse::<f64>`, both correctly rounded in that domain (ECMA-262's
+  StringToNumber is exact up to 20 significant digits), agree bit for bit
+  (D020, A9b, D372). This is compile time only; validation never touches a host
   float.
 * **Text** is validated as UTF-8 while read; `.size` counts bytes; a regexp
   runs over code points decoded on the fly.
@@ -656,7 +657,7 @@ allocates nothing) with the hand-written JS host.
 | Fused single-pass decode | Deferred (D017). |
 | Compiler hand-written in JS, VM in kin | Rejected: limits and exactness rules must agree across hosts. |
 | Hash table for literal keys | Rejected in revision 2: probe clustering under untrusted schemas; sorted table + binary search instead (A7). |
-| Kin-side decimal→binary64 parsing | Rejected: a big-integer algorithm in kin for a compile-time-only conversion; a host port restricted to ≤ 17 significant digits is exact on both hosts (D020). |
+| Kin-side decimal→binary64 parsing | Rejected: a big-integer algorithm in kin for a compile-time-only conversion; a host port restricted to ≤ 20 significant digits is exact on both hosts (D020, D372). |
 
 ---
 
@@ -2430,6 +2431,7 @@ identical typesets, `any`, or a literal tested with the VM.
 | W6 | Order-sensitive overlapping members (§3.5.3's pathological case) | `{int => int, int => 6}` |
 | W7 | The worst-case group arena at the compiled limits can exceed the arena cap (§20.6) | the twenty-recursive-leaf family of N1 |
 | W8 | (D301; default `rfc` cuts only) A map choice alternative starts with a cut member on the same literal key as an earlier alternative's first member (through a `SEQ`'s first kid, a `REP`'s child and a `CALL`'s target), so the earlier alternative's cut fails the whole map before the later one is reached through that key | `{kind: "a", x: int // kind: "b", y: tstr}`, `{id: tstr, token: tstr // id: tstr}` |
+| W9 | (D372) An occurrence `n*m` with m < n: valid syntax (RFC 8610 §3.2) that matches nothing, lowered to `FAIL` | `[3*2 uint]`, `{2*1 a: int}` |
 
 **Fast paths** that survive and are PEG-equivalent (both reviewers agreed
 for verdicts):

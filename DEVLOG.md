@@ -4974,6 +4974,8 @@ error (`syntax`, at the entry).
 zero-length iteration sets the count to m), program-2 §3 requires
 min <= max, and the independent oracle refuses it too.
 **Alternatives**: lowering it to FAIL (a FAIL no source spells).
+**Superseded by D372** (2026-11-18): RFC 8610 §3.2 makes `n*m` with m < n
+valid syntax, so it now lowers to FAIL (D251's) with compile warning W9.
 - [ ] **Signed off** (owner)
 
 ### D294 — Byte-string, float and big-integer `:` keys are cut key typesets (withdraws D125's refusal) (P8.5)
@@ -9701,6 +9703,88 @@ package, approved by the coordinator; settles the first Open item above).
     after the final size-only change in sdk.rs/cc.rs. The batch release set covers them.
   - Open for the coordinator: `pushScanner`/`pushValidator` with a declared length of 2³¹ or
     more, and a `SequenceOptions` builder.
+
+### D372 — kin spec fixes after 0.1.0: `/=` on a prelude name extends it; `.cborseq any` is `[* any]`; `n*m` with m < n matches nothing (W9); decimal literals of up to 20 significant digits; refusal order documented (post-release triage F10, F11, F14)
+**Decision** (D372 engineer; work package WP-K from the manager; every decision below is the
+coordinator's, 2026-11-18, in the post-RC triage, `.cache/p913-triage/post-rc-triage.md`, under
+the owner's rule D230: spec conformance is the default and other behaviour is an option).
+Entries in CHANGELOG `[Unreleased]` (Breaking, Added, Fixed).
+
+**F10 — prelude names** (coordinator, 2026-11-18).
+* **Fix** (`kin/compile/rules.kin`, `build-rules`). RFC 8610 Appendix D: the prelude is
+  "automatically added" to every schema. A schema name with only `/=` or `//=` definitions now
+  gets the prelude definition of that name chained after its own, so `uint /= tstr` is
+  `uint = #0 / tstr`: `01` and `"a"` are both accepted (0.1.0 replaced `uint` and refused
+  `01`). The prelude rules built on the name follow it (`int /= bool` widens `int`,
+  `integer`, `number`). Every prelude rule is a non-generic type, so a `//=` on one is
+  `type_group_mismatch` and a generic one `generic_arity`, both at the schema's first
+  definition (0.1.0 accepted both as a replacement). **Breaking**: verdicts of such schemas
+  change.
+* **Documented** (`docs/cddl-support.md`, grammar table): an identical second `=` stays
+  `duplicate_rule` (the RFC is silent; refusing catches mistakes); `=` shadows a prelude name
+  (D031); shadowing a base type changes the prelude rules built on it (`tstr = bstr` makes
+  `text` a byte string).
+* **Independent oracle** (`corpus/tools/peg-oracle.mjs`): the same reading, written from the
+  RFC text (a name the schema only extends is the prelude body's type choice with the
+  schema's), so vm-test's oracle differential holds the change; its unit test gains the cases.
+* **Vectors** (`corpus/conformance/regressions.json`, "D372: ..." suites): `/=` on `uint`, on
+  the alias `text` (with `tstr` unchanged), on `int` through `[int]`; `//=` on a prelude name
+  refused; `=` shadowing `uint` and `tstr` (with `int` and `text` following); an identical
+  second `=` refused.
+
+**F11 — controls, occurrences, numbers** (coordinator, 2026-11-18).
+* **`.cborseq any`, fixed** (`kin/compile/lower.kin`, `lower-ctl`, `seq-content`,
+  `seq-any-array`, `process-group`). RFC 8610 §3.8.4: the controller is an array type
+  describing the sequence, and `any` matches every array. The controller's ARRAY leaves are
+  kept, an ANY leaf becomes a fresh ARRAY leaf `[* any]` (no AST: its group is built in
+  `process-group` as CHOICE[SEQ[REP(ENTRY(any), 0, ∞)]], word 12 −1, word 13 the control's
+  place), every other leaf is dropped; with no array or `any` left the control is the empty
+  typeset (matches nothing). 0.1.0 refused all of these with `control_value`. Note: a
+  controller leaf that is an AND of arrays (`[* uint] .and [2*2 any]`) is dropped too, as
+  decided ("drop non-array leaves").
+* **`n*m` with m < n, fixed** (`lower.kin`, `p-ent`). RFC 8610 §3.2 allows it; it matches
+  nothing. The entry is still lowered (an undefined name in it stays `undefined_name`), then
+  replaced by `P_FAIL` (D251's FAIL; `REP` keeps min ≤ max, so program-2 §3 and the verifier
+  are unchanged), and the compiler warns **W9** "occurrence maximum is below its minimum, so
+  the entry matches nothing" at the entry (the existing warning channel, `T_WARN`,
+  architecture §20.11; one per place, as for the others). D293 is superseded; program-2.md §3's
+  note, architecture §20.11's table and compile2-test (the refusal moved to the
+  formerly-refused list; new section 11 pins W9 on both hosts in both cut modes) are updated.
+  The oracle's `occurrence` refusal is now a FAIL too.
+* **Float `.plus`, documented only** (`docs/cddl-support.md`): a float operand stays
+  `control_value`; RFC 9165 §2.1's float sums are not implemented.
+* **Decimals: 20 significant digits** (`kin/compile/lex.kin`; was 17, D020/D032). ECMA-262
+  StringToNumber must round correctly for up to 20 significant digits and Rust's
+  `str::parse::<f64>` always does, so `Number()` and `parse` agree bit for bit. Proven by the
+  identity gates: compile2-test now also compiles `regressions.json` on both hosts (Programs
+  byte for byte), and vm-test runs its cases, which pin each literal's binary64 by its
+  encoding: 18, 19 and 20 digits on both sides of a halfway point (1 + 2⁻⁵³, 2⁵³ + 1, 0.3's
+  upper midpoint, a negative), half the least subnormal (above: the least subnormal; below:
+  rounds to zero, `float_literal`), the midpoint to 2¹⁰²⁴ (below: the greatest double; above:
+  infinity, `float_literal`), the greatest subnormal and a 21-digit refusal. Python's
+  correctly rounded `float()` gave the same bits for every vector.
+
+**F14 — refusal order, documented** (coordinator, 2026-11-18; `docs/scanner.md`,
+`docs/profiles.md`). RFC 8949 Appendix F's kinds are cited: `bf01020102` is kind 2 (too little
+data), which a well-formedness-first reading calls `truncated` at offset 5; `bf000000ff` is kind
+3, subkind 4 (a break in a value position), `malformed` at offset 4. snug's first refusal in
+stream order stands (`duplicate_key` at 3 for both under `valid`): one pass, no read-ahead, a
+verdict independent of later bytes, the same on every route and chunking.
+
+**F9 — strict lexing: not implemented here.** The owner's decision (strict by default,
+`lexing: 'lenient'` for 0.1.0's behaviour) reached this package mid-way; the permission system
+refused the first F9 edit (the kin error and header constants), so F9 is left for a follow-up
+with no F9 change on this branch. Found while reading the lexer for it: HT and a lone CR inside
+`h''` / `b64''` are already refused in 0.1.0 (the literal is first read as `bytes`, whose BCHAR
+has neither, RFC 9682 §2.1.2 and Appendix B.2), so the HT branch in `lex-bytes` is dead; and
+RFC 9682 Appendix B.2 applies the WS rules (comments included) to `b64''` content as well as
+`h''`, while snug skips comments in `h''` only.
+
+**Not updated (outside this package's files)**: the `W1`..`W8` ranges in `docs/api.md`,
+`host/js/types/schema.d.ts` and `host/rust/src/compile.rs`, and the "at most 17 significant
+digits" comments in `host/js/src/compile.mjs` and `host/rust/src/compile.rs`.
+
+- [ ] **Signed off** (manager)
 
 ## Findings
 

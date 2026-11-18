@@ -126,11 +126,19 @@ is a validity refusal and the input is, further on, not well-formed. Only
 **truncated** and **malformed** speak to RFC 8949 Appendix F; any other code
 says that the walk stopped before reaching a well-formedness error, not that
 the input has none. Two RFC 8949 Appendix F.1 examples show it:
-`bf 01 02 01 02` (an indefinite map not closed by a break) is **duplicate_key**
-at offset 3, the second key `01`, before the end of input; `bf 00 00 00 ff` (a
-break in a value position) is **duplicate_key** at offset 3, the second key
-`00`, before the break. Under `deterministic` / `bindle` the same holds with
-**indefinite** at offset 0. `bb sequence-test` holds these two to
+
+| Input | RFC 8949 Appendix F kind | A well-formedness-first reading | snug under `valid` |
+| --- | --- | --- | --- |
+| `bf 01 02 01 02` | kind 2, too little data: an indefinite-length map not closed by a break | **truncated** at offset 5, the end of input | **duplicate_key** at offset 3, the second key `01` |
+| `bf 00 00 00 ff` | kind 3, subkind 4: a break in a value position of a map | **malformed** at offset 4, the break | **duplicate_key** at offset 3, the second key `00` |
+
+Under `deterministic` / `bindle` both are **indefinite** at offset 0. The rule
+is kept because the walk is one pass in stream order, buffered or streamed: it
+answers at the first byte that settles the verdict, without reading ahead, so
+a refusal never depends on bytes after it, a stream can be refused before its
+end arrives, and the buffer and session routes give the same code and offset
+at every chunking. RFC 8949 orders no error classes; a well-formedness-first
+reading would need the whole item before any validity refusal. `bb sequence-test` holds these two to
 `duplicate_key` and the other 92 F.1 examples to exactly **truncated** or
 **malformed**, and the independent RFC 8742 framer (P9.5) accepts a refusal
 only where it lies no later than the framer's own stop.

@@ -741,6 +741,8 @@ export function warningName(code) {
             return "W7";
         case 8:
             return "W8";
+        case 9:
+            return "W9";
         default:
             return "W0";
     }
@@ -765,6 +767,8 @@ export function warningMessage(code) {
             return "worst-case group arena at the compiled limits can exceed the arena cap";
         case 8:
             return "choice alternative starts with the same cut key as an earlier one: under the default RFC cuts the earlier alternative's cut fails the whole map (see the guide, Discriminated unions under the RFC cut)";
+        case 9:
+            return "occurrence maximum is below its minimum, so the entry matches nothing";
         default:
             return "";
     }

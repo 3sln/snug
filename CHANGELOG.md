@@ -37,6 +37,20 @@ and neither contains those files.
   (a push source at its first step, as one of 2³¹ − 1 bytes over the limit);
   they threw `TypeError`. `openSession(schema, rule, length)` still refuses
   such a length with `TypeError` (D371, D371a).
+- `/=` on a prelude name extends the prelude rule instead of replacing it:
+  RFC 8610 Appendix D adds the prelude to every schema. `uint /= tstr` now
+  accepts `1` as well as `"a"`, and the prelude rules built on the name
+  follow (`int /= bool` widens `int` and `integer`). Every prelude rule is a
+  plain type, so `//=` on a prelude name is now `type_group_mismatch` and a
+  generic `/=` on one is `generic_arity`. To replace a prelude rule, define
+  it with `=` (D372).
+
+### Added
+
+- Decimal float literals in a schema may have up to 20 significant digits
+  (17 before), still rounded exactly and identically on every host, so
+  `1.0000000000000001111` is 1 + 2⁻⁵². A longer one is `float_literal`
+  (D372).
 
 ### Budget and limits
 
@@ -47,6 +61,13 @@ and neither contains those files.
 
 ### Fixed
 
+- `bstr .cborseq any` compiles: `any` matches every array, so the content
+  is any CBOR sequence, as `[* any]` (RFC 8610 §3.8.4). A controller type
+  that is not an array describes no sequence and matches nothing
+  (`bstr .cborseq uint`); both were `control_value` (D372).
+- An occurrence `n*m` with m < n, such as `[3*2 uint]`, compiles and
+  matches nothing (RFC 8610 §3.2); it was `syntax`. The new compile
+  warning W9 flags it (D372).
 - `[wasm-sdk]` A session or sequence reader closed by an extension
   predicate from inside its own step is freed when the step ends, and that
   step answers `TypeError` ("closed during its step"), as natively. Before,
