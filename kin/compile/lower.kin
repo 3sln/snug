@@ -485,18 +485,18 @@
       (if (or (== code 12) (== code 13))
         (do (if (and (== code 13) (> (hg h H_PROFILE) 0)) (return (fail h ERR_PROFILE pos)))
             (comment "RFC 8610 §3.8.4: a .cborseq controller is an array type describing"
-                     "the sequence (the VM matches it as a virtual array, D040). D372: its"
-                     "array leaves are kept, `any` (which matches every array) stands for"
-                     "`[* any]` and every other leaf is dropped (seq-content); with none left"
-                     "the control matches nothing.")
+                     "the sequence (the VM matches it as a virtual array, D040). D372/D373:"
+                     "every leaf must be an ARRAY or `any`, which matches every array and"
+                     "stands for `[* any]` (seq-content); any other leaf (a non-array type,"
+                     "an AND of arrays) is `control_value`, as in 0.1.0. An empty controller"
+                     "(an unplugged `$x`) matches nothing.")
             (if (== code 13)
-              (do (let [^I32 cts (lower-type h (nb h node) env)
-                        ^:mut arrays 0]
+              (do (let [^I32 cts (lower-type h (nb h node) env)]
                     (if (< cts 0) (return (neg 1)))
                     (for [^I32 i 0 (ts-n h cts)]
                       (let [k (lk h (ts-leaf h cts i))]
-                        (if (or (== k K_ARRAY) (== k K_ANY)) (set arrays (+ arrays 1)))))
-                    (if (== arrays 0) (return (ts-of1 h (neg 2)))))))
+                        (if (and (!= k K_ARRAY) (!= k K_ANY)) (return (fail h ERR_CONTROL_VALUE pos)))))
+                    (if (== (ts-n h cts) 0) (return (ts-of1 h (neg 2)))))))
             (let [cn (nb h node)
                   ^:mut flags 0]
               (if (== code 13) (set flags 1))
@@ -1113,8 +1113,8 @@
     (return l)))
 
 (defn ^I32 seq-content [^Ints h ^I32 cts ^I32 pos]
-  (comment "A .cborseq controller's arrays (D372): ARRAY leaves kept, ANY as `[* any]`,"
-           "the rest dropped (lower-ctl has made sure one is left).")
+  (comment "A .cborseq controller's arrays (D372, D373): ARRAY leaves kept, ANY as `[* any]`"
+           "(lower-ctl has refused every other leaf).")
   (if (not (charge h (+ 1 (ts-n h cts)))) (return (neg 1)))
   (let [from (vlen h T_STK)]
     (for [^I32 i 0 (ts-n h cts)]

@@ -646,23 +646,23 @@ pub(crate) fn lower_ctl(h: &mut [i32], node: i32, env: i32) -> i32 {
             return fail(h, ERR_PROFILE, pos);
         }
         // RFC 8610 §3.8.4: a .cborseq controller is an array type describing
-        // the sequence (the VM matches it as a virtual array, D040). D372: its
-        // array leaves are kept, `any` (which matches every array) stands for
-        // `[* any]` and every other leaf is dropped (seq-content); with none left
-        // the control matches nothing.
+        // the sequence (the VM matches it as a virtual array, D040). D372/D373:
+        // every leaf must be an ARRAY or `any`, which matches every array and
+        // stands for `[* any]` (seq-content); any other leaf (a non-array type,
+        // an AND of arrays) is `control_value`, as in 0.1.0. An empty controller
+        // (an unplugged `$x`) matches nothing.
         if code == 13 {
             let cts: i32 = lower_type(h, nb(h, node), env);
-            let mut arrays: i32 = 0;
             if cts < 0 {
                 return -1;
             }
             for i in 0..ts_n(h, cts) {
                 let k: i32 = lk(h, ts_leaf(h, cts, i));
-                if (k == K_ARRAY) || (k == K_ANY) {
-                    arrays += 1;
+                if (k != K_ARRAY) && (k != K_ANY) {
+                    return fail(h, ERR_CONTROL_VALUE, pos);
                 }
             }
-            if arrays == 0 {
+            if ts_n(h, cts) == 0 {
                 return ts_of1(h, -2);
             }
         }
@@ -1641,8 +1641,8 @@ pub(crate) fn seq_any_array(h: &mut [i32], pos: i32) -> i32 {
     return l;
 }
 pub(crate) fn seq_content(h: &mut [i32], cts: i32, pos: i32) -> i32 {
-    // A .cborseq controller's arrays (D372): ARRAY leaves kept, ANY as `[* any]`,
-    // the rest dropped (lower-ctl has made sure one is left).
+    // A .cborseq controller's arrays (D372, D373): ARRAY leaves kept, ANY as `[* any]`
+    // (lower-ctl has refused every other leaf).
     if !charge(h, 1 + ts_n(h, cts)) {
         return -1;
     }
