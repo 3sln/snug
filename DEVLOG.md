@@ -9683,7 +9683,12 @@ package, approved by the coordinator; settles the first Open item above).
   ok, exit 0 (npm-test 1521/1521; wasm-sdk-test 31/31; size snug/sources 183,984; wasm-size
   sdk-runtime 327,443, compiler 152,060, both unchanged); `bb gates --check` ok (the local
   `../kin` warning as before).
-* [ ] **D371a signed off** (manager).
+* [x] **D371a signed off** (manager, 2026-11-18; the coordinator's decision of 2026-11-18).
+  * Merged on 9b383d4.
+  * The tests failed on the old code; docs-test is ok on the merged main.
+  * Size: snug/sources 183,984 against the 183,997 cap, after behaviour-preserving
+    compaction. That leaves 13 bytes of headroom, which the next change there will likely
+    need to raise or cut.
 
 - [x] **Signed off** (manager, 2026-11-18). Merged on 7b808fa. docs-test is ok on the merged
   main.
