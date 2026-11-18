@@ -6,7 +6,7 @@ import { spawnSync } from 'node:child_process';
 import { tmpdir } from 'node:os';
 import { dirname, join, posix, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { stripPrerelease } from '../../../kin/scripts/prerelease.mjs';
+import { stripShipped } from '../../../kin/scripts/prerelease.mjs';
 
 // What the package contains (release-policy §4, the licence and notice check, P9.15): the code, its
 // types, the licence and notices, the security policy, the README, the
@@ -71,9 +71,9 @@ export async function buildPackage(destination) {
   await writeFile(join(target, 'package.json'), JSON.stringify(pkg, null, 2) + '\n');
   for (const name of PACKAGE_FILES.root)
     if (name !== 'package.json') await cp(join(repo, name), join(target, name));
-  // The repository README's pre-release block is for GitHub visitors only (kin/scripts/prerelease.mjs).
+  // The repository README's pre-release and repo-only blocks are for GitHub visitors only (kin/scripts/prerelease.mjs).
   const readme = join(target, 'README.md');
-  await writeFile(readme, stripPrerelease(await readFile(readme, 'utf8'), 'README.md'));
+  await writeFile(readme, stripShipped(await readFile(readme, 'utf8'), 'README.md'));
   for (const name of PACKAGE_FILES.docs) {
     await mkdir(dirname(join(target, 'docs', name)), { recursive: true });
     await cp(join(repo, 'docs', name), join(target, 'docs', name));

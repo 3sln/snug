@@ -20,12 +20,18 @@
 //    is fine (the release commit removes it, and `bb dist` refuses a release that kept it).
 //    The rules above read each README as it ships, without the block, and no shipped text
 //    may hold a marker; links are checked in the repository's copy, block included.
+// 5. the repository READMEs' repo-only blocks (D369; same module): any number, well-formed,
+//    never nested in each other or in the pre-release block (nor it in them). They are
+//    permanent repository text, so their content gets no pre-release exemption: rules 1 and 2
+//    apply to it, except that an absolute https://github.com/3sln/snug/blob/main/... link
+//    target may name a design document there (and only there). The shipped form of each
+//    README holds no repo-only marker and none of the blocks' lines.
 // Watchdog caps: 120 s wall / 240 s CPU.
 import { existsSync, readdirSync, readFileSync } from 'node:fs';
 import { dirname, join, posix, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { selfWatch } from './watchdog.mjs';
-import { READMES, prereleaseBlocks, stripPrerelease } from './prerelease.mjs';
+import { MARKER_LIKE, READMES, readmeBlocks, repoOnlyLines, stripShipped } from './prerelease.mjs';
 selfWatch('docs-test', import.meta.url);
 
 const repo = resolve(dirname(fileURLToPath(import.meta.url)), '../..');
@@ -141,17 +147,31 @@ function files() {
 const rustdoc = text => text.split('\n').map(l => (/^\s*\/\/[/!]/.test(l) ? l : '')).join('\n');
 const comments = text => text.split('\n').map(l => (/^\s*(\/\/|\/?\*)/.test(l) ? l : '')).join('\n');
 
-/** What a README as shipped (or any shipped text) violates: a pre-release marker, stale text,
- *  internal references. Repo-side, `prereleaseBlocks(text).problems` covers well-formedness. */
+/** What a README as shipped (or any shipped text) violates: a pre-release or repo-only marker,
+ *  stale text, internal references. Repo-side, `readmeBlocks(text).problems` covers well-formedness. */
 export function shippedProblems(text, { decisions = true, internal = true } = {}) {
-  const markers = text.split('\n').flatMap((l, i) => (/<!--\s*\/?\s*prerelease\s*-->/i.test(l) ? [[i + 1, 'pre-release marker', l.trim()]] : []));
+  const markers = text.split('\n').flatMap((l, i) => (MARKER_LIKE.test(l) ? [[i + 1, 'pre-release or repo-only marker', l.trim()]] : []));
   return [...markers, ...staleHits(text), ...(internal ? internalHits(text, { decisions }) : [])];
 }
-/** A repository README: its block problems, then what its shipped form violates. */
+/** The repo-only lines of `source` that its shipped form `shipped` still holds. */
+export function leakProblems(source, shipped) {
+  return repoOnlyLines(source).filter(l => shipped.includes(l)).map(l => [0, 'repo-only text in the shipped copy', l]);
+}
+// The one exemption inside repo-only blocks: a link target on the repository's GitHub pages.
+const GITHUB_BLOB = /\]\(https:\/\/github\.com\/3sln\/snug\/blob\/main\/[^)\s]+\)/g;
+/** What the repo-only blocks' own lines violate (rules 1 and 2; line numbers of the repository copy). */
+export function repoOnlyProblems(text) {
+  const inside = new Set(readmeBlocks(text).blocks.filter(b => b.kind === 'repo-only')
+    .flatMap(({ open, close }) => Array.from({ length: close - open - 1 }, (_, k) => open + 1 + k)));
+  const view = text.split('\n').map((l, i) => (inside.has(i) ? l.replace(GITHUB_BLOB, ']()') : '')).join('\n');
+  return [...staleHits(view), ...internalHits(view)];
+}
+/** A repository README: its block problems, then what its shipped form and its repo-only blocks violate. */
 export function readmeProblems(text) {
-  const { problems } = prereleaseBlocks(text);
-  if (problems.length) return problems.map(([n, p]) => [n, 'pre-release block', p]);
-  return shippedProblems(stripPrerelease(text));
+  const { problems } = readmeBlocks(text);
+  if (problems.length) return problems.map(([n, p]) => [n, 'README block', p]);
+  const shipped = stripShipped(text);
+  return [...shippedProblems(shipped), ...leakProblems(text, shipped), ...repoOnlyProblems(text)];
 }
 
 function selfTest() {
@@ -162,13 +182,40 @@ function selfTest() {
   const good = `# x\n\n${O}\n> ${stale}\n${C}\n\n## Install\n`;
   expect('block: one well-formed block, stale text inside', readmeProblems(good).length === 0);
   expect('block: none at all', readmeProblems('# x\n\n## Install\n').length === 0);
-  expect('block: stripped', stripPrerelease(good) === '# x\n\n## Install\n');
+  expect('block: stripped', stripShipped(good) === '# x\n\n## Install\n');
   for (const [what, t] of [['duplicated', good + `${O}\nx\n${C}\n`], ['nested', `${O}\n${O}\n${C}\n${C}\n`],
     ['closer first', `${C}\n${O}\n`], ['unclosed', `${O}\nx\n`], ['stray closer', `${O}\n${C}\n${C}\n`],
     ['inline marker', `text ${O} more\n`], ['misspelled', '<!--prerelease-->\n']])
     expect(`block: ${what} fails`, readmeProblems(t).length > 0);
   expect('block: stale text outside it fails', readmeProblems(`${good}\n${stale}\n`).length > 0);
   expect('block: a shipped README still carrying it fails', shippedProblems(`# x\n${O}\nok\n${C}\n`).length > 0);
+  // repo-only blocks (D369): any number, beside the pre-release block, never nested
+  const RO = '<!-- repo-only -->', RC = '<!-- /repo-only -->';
+  const design = 'Design: [architecture](https://github.com/3sln/snug/blob/main/docs/architecture.md), [spec](https://github.com/3sln/snug/blob/main/SPEC.md).';
+  const repoOnly = `# x\n\n${RO}\n${design}\n${RC}\n\n## Install\n`;
+  expect('repo-only: one block with design links', readmeProblems(repoOnly).length === 0);
+  expect('repo-only: stripped', stripShipped(repoOnly) === '# x\n\n## Install\n');
+  const mixed = `# x\n\n${O}\n> ${stale}\n${C}\n\n${RO}\na\n${RC}\n\nb\n\n${RO}\n${design}\n${RC}\n`;
+  expect('repo-only: several, beside a pre-release block', readmeProblems(mixed).length === 0);
+  expect('repo-only: all stripped', stripShipped(mixed) === '# x\n\nb\n');
+  for (const [what, t] of [['stray closer', `${RO}\na\n${RC}\n${RC}\n`], ['closer first', `${RC}\n${RO}\n`],
+    ['unclosed', `x\n${RO}\na\n`], ['nested', `${RO}\n${RO}\na\n${RC}\n${RC}\n`],
+    ['in a pre-release block', `${O}\n${RO}\na\n${RC}\n${C}\n`], ['around a pre-release block', `${RO}\n${O}\na\n${C}\n${RC}\n`],
+    ['closed by the other kind', `${RO}\na\n${C}\n`], ['inline marker', `text ${RO}\n`],
+    ['misspelled', '<!--repo-only-->\n'], ['misspelled closer', 'a\n<!-- /repo only -->\n']]) {
+    expect(`repo-only: ${what} fails`, readmeProblems(t).length > 0);
+    let threw = false;
+    try { stripShipped(t); } catch { threw = true; }
+    expect(`repo-only: ${what} makes the strip throw`, threw);
+  }
+  for (const [what, body] of [['stale text', stale], ['a decision number', 'as decided (D369)'],
+    ['a relative design link', '[a](docs/architecture.md)'], ['another repository\'s link', '[a](https://github.com/x/y/blob/main/docs/architecture.md)'],
+    ['a design document named in prose', 'see program.md']])
+    expect(`repo-only: ${what} inside fails`, readmeProblems(`${RO}\n${body}\n${RC}\n`).length > 0);
+  expect('repo-only: design links outside a block fail', readmeProblems(`# x\n${design}\n`).length > 0);
+  expect('repo-only: a shipped README carrying a marker fails', shippedProblems(`# x\n${RO}\nok\n${RC}\n`).length > 0);
+  expect('repo-only: a shipped copy holding its text fails', leakProblems(repoOnly, `# x\n${design}\n`).length > 0);
+  expect('repo-only: a stripped copy holds none of it', leakProblems(mixed, stripShipped(mixed)).length === 0);
   for (const s of ['Nothing is published to npm or crates.io yet.', 'The public JS package is private and experimental.',
     'The package is unreleased and private.', 'Until snug is on npm, build it.', '`cargo add snug-cbor` once published',
     'Every manifest is still `private: true`.', 'a checkout says `0.0.0-unreleased`', 'Use it from a checkout only.', 'Not yet on npm or crates.io.',
@@ -197,11 +244,14 @@ const report = (file, hits, what) => {
   failed += hits.length;
 };
 const { md, decl, code, rust } = files();
-let blocks = 0;
+const blocks = { prerelease: 0, 'repo-only': 0 };
 for (const f of md) {
   const text = readFileSync(join(repo, f), 'utf8');
-  // the READMEs as shipped, without their pre-release block; the notices credit the tools by name
-  if (READMES.includes(f)) { report(f, readmeProblems(text), 'README'); blocks += prereleaseBlocks(text).blocks.length; }
+  // the READMEs as shipped, without their pre-release and repo-only blocks; the notices credit the tools by name
+  if (READMES.includes(f)) {
+    report(f, readmeProblems(text), 'README');
+    for (const b of readmeBlocks(text).blocks) blocks[b.kind]++;
+  }
   else report(f, shippedProblems(text, { decisions: f !== 'CHANGELOG.md', internal: f !== 'THIRD_PARTY_NOTICES.md' }), 'shipped text');
   // the SDK README sits at its package's root
   report(f, linkProblems(f === 'host/wasm-sdk/README.md' ? 'README.md' : f, text).map(([l, p]) => [l, '', p]), 'broken link');
@@ -213,5 +263,5 @@ for (const f of decl) {
 }
 for (const f of code) report(f, shippedProblems(readFileSync(join(repo, f), 'utf8'), { internal: false }), 'shipped text');
 for (const f of rust) report(f, shippedProblems(rustdoc(readFileSync(join(repo, f), 'utf8'))), 'shipped rustdoc');
-console.log(`  ${failed ? 'FAIL' : 'ok  '} docs-test: ${md.length} documents, ${decl.length} declaration files, ${code.length} examples, ${rust.length} rustdoc sources, ${blocks} README pre-release block(s)${failed ? `; ${failed} problem(s)` : ''}`);
+console.log(`  ${failed ? 'FAIL' : 'ok  '} docs-test: ${md.length} documents, ${decl.length} declaration files, ${code.length} examples, ${rust.length} rustdoc sources, ${blocks.prerelease} README pre-release block(s), ${blocks['repo-only']} repo-only block(s)${failed ? `; ${failed} problem(s)` : ''}`);
 process.exit(failed ? 1 : 0);

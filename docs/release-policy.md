@@ -370,7 +370,10 @@ caps only, not releases.
   `[x.y.z] — date` (§3). The workflow takes the release notes from that
   section and refuses a release without it;
 - no README pre-release block (D366): `bb dist` refuses a source commit
-  that still has one;
+  that still has one. Repo-only blocks (`<!-- repo-only -->` …
+  `<!-- /repo-only -->`, D369) are permanent GitHub-only text and stay:
+  every shipped README (npm, SDK, crate, and so `dist`) is stripped of
+  them, and `bb docs-test` checks both copies;
 - whatever else the release needs, landed before or in the same commit
   (docs, manifests): the land gates and `bb docs-test` already hold `main`
   to its released state.
@@ -768,7 +771,9 @@ the registries ship:
   source commit. The same artefacts on the same parent give the same
   commit and tag hashes.
 - **Refusals.** The script refuses the placeholder version, a source
-  commit whose READMEs still carry the pre-release block (§4, the bump),
+  commit whose READMEs still carry the pre-release block (§4, the bump;
+  repo-only blocks do not stop it, as the artefacts it unpacks are already
+  stripped of them), malformed README block markers,
   artefacts that disagree on the version, an existing tag, and a version the branch
   already ends at. It writes refs only in the `--repo` it is given, and it
   never pushes. The release workflow pushes the branch and its tags after
