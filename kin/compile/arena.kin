@@ -71,6 +71,9 @@
 (defconst ^:pub ^I32 ERR_REGEXP_BLOCK 56)
 ;; D334: `.abnf` / `.abnfb` used, the ABNF module not in the registry (`unsupported_control`)
 (defconst ^:pub ^I32 ERR_NEED_ABNF 57)
+;; D373 (F9): strict lexing refused HT, a lone CR or a control character in a comment
+;; (`syntax`; the host's message names `lexing: 'lenient'`)
+(defconst ^:pub ^I32 ERR_LEXING 58)
 
 ;; ------------------------------------------------------------ the header
 (defconst ^:pub ^I32 H_TOP 0)
@@ -144,6 +147,9 @@
 ;; D359: `.default` -- 0 the published RFC 8610 §3.8.6 reading, an implied `.ne`
 ;; (the default); 1 annotation only (`defaultControl: 'annotation'`, erratum 9229)
 (defconst ^:pub ^I32 H_DEFAULT 453)
+;; D373 (F9): the lexer -- 0 strict, RFC 8610 Appendix B's whitespace and comments (the
+;; default); 1 lenient, 0.1.0's (`lexing: 'lenient'`: HT, a lone CR, any comment byte)
+(defconst ^:pub ^I32 H_LEXING 454)
 ;; D141: extension registry flags (bit 0: admitted under the `bus` profile)
 (defconst ^:pub ^I32 H_EXT_FLAGS 62)
 ;; D141: the bid of the used controls' names blob (-1: none used)

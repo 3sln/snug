@@ -751,17 +751,43 @@ pub(crate) fn id_end(h: &[i32], i: i32) -> i32 {
         }
     }
 }
-pub(crate) fn skip_space(h: &[i32], i: i32) -> i32 {
-    // Past whitespace (SP, HT, LF, CR) and ;-comments.
+pub(crate) fn skip_space(h: &mut [i32], i: i32) -> i32 {
+    // Past whitespace and ;-comments, or -1. Strict (the default, D373/F9; RFC 8610
+    // Appendix B's S): SP, LF and CR LF; a comment is PCHARs up to a newline or the
+    // text's end (a final comment needs no newline, in both modes). HT, a lone CR and
+    // a control character (C0, DEL, C1) in a comment are ERR_LEXING. Lenient
+    // (`lexing: 'lenient'`, 0.1.0's lexer): SP, HT, LF and CR, and a comment runs to
+    // LF or CR whatever it holds.
     let mut j: i32 = i;
+    let strict: bool = hg(h, H_LEXING) == 0;
     loop {
         let c: i32 = sc(h, j);
-        if ((c == 32) || (c == 9)) || ((c == 10) || (c == 13)) {
+        if (c == 32) || (c == 10) {
+            j += 1;
+        } else if (c == 9) || (c == 13) {
+            if strict && ((c == 9) || (sc(h, j + 1) != 10)) {
+                return fail(h, ERR_LEXING, j);
+            }
             j += 1;
         } else if c == 59 {
             j += 1;
-            while (sc(h, j) >= 0) && ((sc(h, j) != 10) && (sc(h, j) != 13)) {
-                j += 1;
+            loop {
+                let d: i32 = sc(h, j);
+                if (d < 0) || ((d == 10) || (d == 13)) {
+                    break;
+                }
+                if strict && ((d < 32) || (d == 127)) {
+                    return fail(h, ERR_LEXING, j);
+                }
+                if strict && (d > 127) {
+                    let cp: i32 = cp_at(h, j);
+                    if (cp < 160) || (cp > 1114109) {
+                        return fail(h, ERR_LEXING, j);
+                    }
+                    j += hg(h, H_R1);
+                } else {
+                    j += 1;
+                }
             }
         } else {
             return j;
@@ -885,6 +911,9 @@ pub fn lex(h: &mut [i32], from: i32) -> i32 {
             return -1;
         }
         i = skip_space(h, i);
+        if i < 0 {
+            return -1;
+        }
         if sc(h, i) < 0 {
             push_tok(h, TK_EOF, i, i, 0, 0, 0);
             if erred(h) {

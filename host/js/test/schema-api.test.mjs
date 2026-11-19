@@ -44,6 +44,26 @@ test('D359: .default carries the implied .ne; defaultControl: annotation drops i
   await assert.rejects(async () => compile(text, { defaultControl: 'none' }), TypeError);
 });
 
+test('D373: strict lexing (the default) refuses HT, a lone CR and comment controls; lexing: lenient is 0.1.0\'s', async () => {
+  const refused = [['r =\tuint', 1, 4], ['r = {\n\ta: uint\n}', 2, 1], ['r = uint\rs = tstr', 1, 9], ['r = uint ; c\rs = tstr', 1, 13],
+    ['r = uint ; a\tb', 1, 13], ['r = uint ; \u0001', 1, 12], ['r = uint ; \u007f', 1, 12], ['r = uint ; \u0085', 1, 12]];
+  for (const [text, line, column] of refused) {
+    await assert.rejects(async () => compile(text), e => e.code === 'syntax' && e.line === line && e.column === column &&
+      /lexing: 'lenient'/.test(e.message), JSON.stringify(text));
+    const s = await compile(text, { lexing: 'lenient' });
+    assert.equal(s.validate(encode(text.includes('{') ? { a: 1 } : 1), 'r').ok, true, JSON.stringify(text));
+  }
+  // a final comment needs no newline, in both modes; CR LF and a non-ASCII comment are strict
+  for (const lexing of ['strict', 'lenient'])
+    assert.equal((await compile('r = uint ; the end', { lexing })).validate(encode(1), 'r').ok, true);
+  assert.equal((await compile('r = uint\r\n; café ✓\r\ns = tstr\r\n')).validate(encode('a'), 's').ok, true);
+  // bound into the source key: 'strict' is the default, 'lenient' another key for the same Program
+  const text = 'r = uint', strict = await compile(text), lenient = await compile(text, { lexing: 'lenient' });
+  assert.equal((await compile(text, { lexing: 'strict' })).program.sourceKey, strict.program.sourceKey);
+  assert.notEqual(lenient.program.sourceKey, strict.program.sourceKey);
+  await assert.rejects(async () => compile(text, { lexing: 'loose' }), TypeError);
+});
+
 test('Schema and Program refuse structured clone (postMessage) with DataCloneError', async () => {
   const s = await compile('r = uint');
   for (const x of [s, s.program]) {

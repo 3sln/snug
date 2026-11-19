@@ -2,9 +2,9 @@
 //! compiler (`snug::compile::main`). Every decision -- syntax, semantics,
 //! limits, the compile budget, the Program's bytes -- is the generated core's; this file owns
 //! only the arena, the decimal float-literal port (`str::parse::<f64>`,
-//! at most 17 significant digits, checked by the core) and the result's shape.
-use crate::snug::compile::arena::{ARENA_MAX_WORDS, ARENA_MIN_WORDS, ERR_ARENA, ERR_NEED_ABNF, ERR_NEED_FLOATS, ERR_NEED_UNICODE,
-    ERR_REGEXP_BLOCK};
+//! at most 20 significant digits, checked by the core) and the result's shape.
+use crate::snug::compile::arena::{ARENA_MAX_WORDS, ARENA_MIN_WORDS, ERR_ARENA, ERR_LEXING, ERR_NEED_ABNF, ERR_NEED_FLOATS,
+    ERR_NEED_UNICODE, ERR_REGEXP_BLOCK};
 use crate::snug::compile::main as kc;
 use std::cell::RefCell;
 
@@ -32,7 +32,7 @@ pub struct Compiled {
     pub warnings: Vec<Warning>,
 }
 
-/// A compile warning: its stable code (`W1`..`W8`), the rule it is in (None for
+/// A compile warning: its stable code (`W1`..`W9`), the rule it is in (None for
 /// a schema-wide warning), its 1-based line and column (0 when about no place)
 /// and a fixed message. Identical on every host.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -113,6 +113,18 @@ pub enum DefaultControl {
     Annotation,
 }
 
+/// The lexer: `Strict` (the default) takes RFC 8610 Appendix B's whitespace and
+/// comments, so a tab, a lone CR or a control character in a comment is a `syntax`
+/// error; `Lenient` is 0.1.0's lexer, which accepts them. A final comment needs no
+/// newline in either. Bound into the source key. Not exhaustive.
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum Lexing {
+    #[default]
+    Strict,
+    Lenient,
+}
+
 /// Optional explicit compile-time Unicode ranges (the default loads no tables)
 /// and extension controls (none by default).
 #[derive(Default)]
@@ -125,6 +137,8 @@ pub struct CompileOptions<'a> {
     pub cuts: Cuts,
     /// What `.default` means (`Ne` by default).
     pub default_control: DefaultControl,
+    /// The lexer (`Strict` by default).
+    pub lexing: Lexing,
     /// Format 2.0: the PEG group arena cap in words; None = the default.
     pub group_words: Option<i32>,
     pub limits: &'a [i32],
@@ -163,7 +177,7 @@ pub fn compile_bytes(bytes: &[u8], profile: i32, limits: &[i32]) -> Result<Compi
 }
 
 pub fn compile_bytes_with_options(bytes: &[u8], options: &CompileOptions<'_>) -> Result<Compiled, SchemaError> {
-    let CompileOptions { profile, limits, unicode, controls, regexp, cuts, default_control, group_words, abnf } = options;
+    let CompileOptions { profile, limits, unicode, controls, regexp, cuts, default_control, lexing, group_words, abnf } = options;
     let mut opt = vec![-1i32; kc::OPT_WORDS as usize];
     opt[0] = *profile;
     for (i, v) in limits.iter().enumerate().take(COMPILE_OPTIONS.len()) {
@@ -174,6 +188,8 @@ pub fn compile_bytes_with_options(bytes: &[u8], options: &CompileOptions<'_>) ->
     opt[kc::OPT_GROUP_WORDS as usize] = group_words.unwrap_or(-1);
     // D359: 0 the implied .ne (default), 1 annotation only
     opt[kc::OPT_DEFAULT as usize] = if *default_control == DefaultControl::Annotation { 1 } else { 0 };
+    // D373: 0 RFC 8610 Appendix B's whitespace and comments (default), 1 0.1.0's lexer
+    opt[kc::OPT_LEXING as usize] = if *lexing == Lexing::Lenient { 1 } else { 0 };
     // D141: the extension-control registry rides after the OPT_WORDS options
     if let Some(c) = controls {
         opt.extend(c.words());
@@ -221,6 +237,8 @@ pub fn compile_bytes_with_options(bytes: &[u8], options: &CompileOptions<'_>) ->
                         "XSD block escapes require unavailable pinned Unicode block data"
                     } else if code == ERR_NEED_ABNF {
                         ".abnf and .abnfb require the ABNF controls (Controls::with_abnf; JS: @3sln/snug/abnf)"
+                    } else if code == ERR_LEXING {
+                        "tabs, a lone CR and control characters in comments need Lexing::Lenient (JS: lexing: 'lenient')"
                     } else { "CDDL schema refused" },
                     detail,
                 });

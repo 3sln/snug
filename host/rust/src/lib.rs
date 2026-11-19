@@ -73,7 +73,7 @@ pub use program::Program;
 pub use view::{View, Cursor, TypedView, TypedElement, Document};
 pub use api::{Schema, CompileOptions, CompileLimits, CompilerProfile, ValidationOptions, SourceOptions,
     Scratch, Failure, Segment, Blob, BytesBlob};
-pub use compile::{AbnfMode, Cuts, DefaultControl, Regexp, SchemaError, Warning};
+pub use compile::{AbnfMode, Cuts, DefaultControl, Lexing, Regexp, SchemaError, Warning};
 pub use schema::SourceError;
 pub use controls::{Control, Controls};
 pub use sequence::{read_sequence, Message, MessageFailure, OnInvalid, Sequence, SequenceOptions, SequenceReader};

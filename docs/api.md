@@ -46,7 +46,7 @@ The following named sets are the complete option-key lists used below:
 | `decode` | DecodeOptions | none |
 | `encode` | EncodeOptions | none |
 | `new Writer` | EncodeOptions + `keysSorted`, `limits` | nested `limits`: Limits only |
-| `compile` | `profile`, `regexp`, `cuts`, `defaultControl`, `groupWords`, `limits`, `unicode`, `controls`, `controlsInBus`, `abnf` | nested `limits`: [CompileLimits](#compilation) only |
+| `compile` | `profile`, `regexp`, `cuts`, `defaultControl`, `lexing`, `groupWords`, `limits`, `unicode`, `controls`, `controlsInBus`, `abnf` | nested `limits`: [CompileLimits](#compilation) only |
 | `Schema.validate`, schema-first `validate` | ValidationOptions | none |
 | `Schema.decode`, schema-first `decode` | ValidationOptions | none |
 | `Schema.validateAt`, schema-first `validateAt` | SpanOptions | none |
@@ -182,6 +182,7 @@ interface CompileOptions {
   regexp?: 'xsd' | 'iregexp';            // .regexp dialect; default 'xsd'
   cuts?: 'rfc' | 'branch';               // map cut semantics; default 'rfc'
   defaultControl?: 'ne' | 'annotation';  // .default: implied .ne (default) or annotation only
+  lexing?: 'strict' | 'lenient';         // RFC 8610 whitespace and comments (default) or 0.1.0's lexer
   groupWords?: number;                   // PEG group arena cap in words; default 4,194,304, at most 2^24
   limits?: CompileLimits;
   unicode?: Int32Array;                  // tables from @3sln/snug/unicode
@@ -203,6 +204,13 @@ implied `.ne`, so a present value equal to the default does not match.
 `'annotation'` makes `.default` change no verdict, as RFC 8610 Erratum 9229
 proposes (its status is Reported, not verified). The annotation reading is
 part of the source key.
+`lexing` defaults to `'strict'`: whitespace is RFC 8610 Appendix B's (space,
+LF and CR LF) and a `;` comment holds no control characters, so a tab, a lone
+CR, or a C0, DEL or C1 character in a comment is a `syntax` error whose
+message names `lexing: 'lenient'`. `'lenient'` is snug 0.1.0's lexer, which
+accepts them (tab-indented schemas need it). In both, a comment on the last
+line needs no newline. Any other value is a TypeError. `'lenient'` is part of
+the source key.
 `abnf?: 'strict' | 'lenient'` is how `.abnf`/`.abnfb` controllers
 parse: `'strict'` (the default) is RFC 5234 + RFC 7405 + RFC 9165 §3;
 `'lenient'` also admits snug's non-RFC forms ([ABNF](#abnf-3slnsnugabnf)). Any
@@ -379,7 +387,7 @@ another. Use the path to explain, and the offset only to locate.
 | `program.serialize(): Uint8Array` | Deterministic §13.3 container, synchronously hashed. |
 | `new Schema(program: Program)` | Schema over a public verified Program. |
 | `schema.program` | The immutable public Program. |
-| `schema.warnings` | Frozen array of the compile warnings, `{ code, rule, line, column, message }` (code `W1`..`W8`; `rule` null for a schema-wide one), in a deterministic order; empty for a Schema not made by `compile`. |
+| `schema.warnings` | Frozen array of the compile warnings, `{ code, rule, line, column, message }` (code `W1`..`W9`; `rule` null for a schema-wide one), in a deterministic order; empty for a Schema not made by `compile`. |
 | `schema.brand`, `program.brand` | A Symbol, so `structuredClone` / `postMessage` of a Schema or Program throws `DataCloneError` instead of producing a plain object without methods. Send `program.serialize()` bytes. |
 | `schema.validate(bytes, rule, options?)` | ValidationResult; default top any. |
 | `schema.decode(bytes, rule, options?)` | Value, or SnugFault with the same witness; no values built before success. |

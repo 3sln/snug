@@ -24,7 +24,8 @@
 //   6. SOURCE_KEY = SHA-256 of program-2 §1's preimage (version element 2, cuts and
 //      groupWords appended to the limits), recomputed independently; the effective cut
 //      mode is in the preimage whether given or defaulted (D301: no option = 'rfc');
-//      'reference' is no longer a cut mode (no alias);
+//      'reference' is no longer a cut mode (no alias); lenient lexing appends the
+//      `.default` reading and 1 (D373);
 //   7. outcomes do not depend on the starting arena size;
 //   8. the tier census of the corpus (arrays A0/A1/A2, maps F/S/T), printed against the
 //      design's syntactic census (architecture §20.5);
@@ -366,9 +367,21 @@ for (const { label, P, B } of programs) {
       }
     }
   }
+  // D373: lenient lexing appends the `.default` reading and 1 to the option list; strict, the default, nothing
+  for (const c of cases.slice(0, 20)) {
+    for (const [defaultControl, tail] of [['ne', [0, 1]], ['annotation', [1, 1]]]) {
+      let p;
+      try { p = compile(c.text, { lexing: 'lenient', defaultControl }).program; } catch { continue; }
+      n++;
+      const pre = encode(['snug/program-key', 2, SNUG_VERSION, 0, [...LIMITS, 0, -1, ...tail], new Uint8Array(Buffer.from(c.text, 'utf8')), [], [], 0]);
+      const d = createHash('sha256').update(pre).digest();
+      if ([0, 1, 2, 3, 4, 5, 6, 7].every(i => p[7 + i] === d.readInt32BE(4 * i))) good++;
+      else fail(`${c.label} [lexing lenient, defaultControl ${defaultControl}]: SOURCE_KEY is not SHA-256 of program-2 §1's preimage`);
+    }
+  }
   try { compile('r = {a: int}', { cuts: 'reference' }); fail(`cuts: 'reference' was accepted (D301: no alias)`); }
   catch (e) { if (!(e instanceof TypeError)) fail(`cuts: 'reference' threw ${e}, not a TypeError`); }
-  console.log(`  ${good === n ? 'ok  ' : 'FAIL'} ${good}/${n} SOURCE_KEYs equal SHA-256 of program-2 §1's preimage (cuts, groupWords; baseline encoder, node:crypto)`);
+  console.log(`  ${good === n ? 'ok  ' : 'FAIL'} ${good}/${n} SOURCE_KEYs equal SHA-256 of program-2 §1's preimage (cuts, groupWords, lenient lexing; baseline encoder, node:crypto)`);
 }
 
 // ---------------------------------------------------------------- 7: arena-size independence

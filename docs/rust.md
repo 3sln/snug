@@ -49,7 +49,10 @@ selects the cut semantics (`Cuts::Rfc`, the literal RFC 8610 cut, by default;
 group arena in words (default 4,194,304; a run that needs more refuses with
 `group_limit`), as JS's `cuts` and `groupWords`. `CompileOptions::default_control`
 is JS's `defaultControl`: `DefaultControl::Ne` (the default, RFC 8610
-§3.8.6's implied `.ne`) or `DefaultControl::Annotation`.
+§3.8.6's implied `.ne`) or `DefaultControl::Annotation`. `CompileOptions::lexing`
+is JS's `lexing`: `Lexing::Strict` (the default, RFC 8610 Appendix B's
+whitespace and comments) or `Lexing::Lenient` (0.1.0's lexer, which accepts
+tabs, a lone CR and control characters in comments).
 
 Schemas and Programs clone cheaply through immutable shared storage. Share a
 Schema between threads, and use one reusable `Scratch` per concurrent caller.

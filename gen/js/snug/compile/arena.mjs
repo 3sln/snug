@@ -85,6 +85,8 @@ export const ERR_REGEXP_BLOCK = 56;
 
 export const ERR_NEED_ABNF = 57;
 
+export const ERR_LEXING = 58;
+
 export const H_TOP = 0;
 
 export const H_ERR = 1;
@@ -208,6 +210,8 @@ export const H_GROUP_GIVEN = 451;
 export const H_PMODE = 452;
 
 export const H_DEFAULT = 453;
+
+export const H_LEXING = 454;
 
 export const H_EXT_FLAGS = 62;
 

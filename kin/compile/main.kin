@@ -10,7 +10,8 @@
 ;;
 ;; `opt` (OPT_WORDS words, -1 = default) is every compile option, in the order
 ;; of program.md §13.3's source key, then the leaf limit, the regexp dialect
-;; (D242), the cut mode and the group arena cap (format 2.0, program-2 §1);
+;; (D242), the cut mode and the group arena cap (format 2.0, program-2 §1),
+;; the `.default` reading (D359) and the lexer (D373);
 ;; words from OPT_WORDS on, when present, are the extension-control registry
 ;; (snug.compile.ext, D141).
 ;;
@@ -21,7 +22,7 @@
             [snug.lang :refer [I32 Bool Bytes Ints IntsR Str + - * neg quot bit-and < > <= >= == != and or not
                                u8 blen ia iset ilen str-len str-u8]]
             [snug.compile.arena :refer [hg hs erred fail charge vinit vlen vpush1 vget vset vtrunc vbase msort-records
-                                        H_CUTS H_LIM_GROUP H_GROUP_GIVEN H_DEFAULT T_WARN
+                                        H_CUTS H_LIM_GROUP H_GROUP_GIVEN H_DEFAULT H_LEXING T_WARN
                                         INF H_TOP H_ERR H_ERR_POS H_ERR_RULE H_BUDGET H_DEPTH H_NSRC
                                         H_CUR_RULE H_ERR_LINE H_ERR_COL H_ERR_RNAME H_ERR_RNAME_LEN
                                         H_LIM_TEXT H_LIM_NEST H_LIM_AST H_LIM_INST H_LIM_ALTS H_LIM_APOS
@@ -43,7 +44,7 @@
             [snug.compile.emit :refer [emit-program]]
             [snug.compile.ext :refer [ext-init n-exts ext-name-len ext-name-byte ext-max]]))
 
-(defconst ^:pub ^I32 OPT_WORDS 23)
+(defconst ^:pub ^I32 OPT_WORDS 24)
 (defconst ^:pub ^I32 OPT_REGEXP 19)
 ;; format 2.0 (D301): 0 `rfc`, the literal RFC 8610 cut (commitment epochs; the
 ;; default, also for -1), 1 `branch` (rule A, D273)
@@ -53,6 +54,9 @@
 ;; D359: `.default` -- 0 an implied `.ne` (RFC 8610 §3.8.6; the default, also for
 ;; -1), 1 annotation only
 (defconst ^:pub ^I32 OPT_DEFAULT 22)
+;; D373 (F9): the lexer -- 0 strict, RFC 8610 Appendix B (the default, also for -1),
+;; 1 lenient (0.1.0's)
+(defconst ^:pub ^I32 OPT_LEXING 23)
 (defconst ^:pub ^I32 GROUP_WORDS_DEFAULT 4194304)
 (defconst ^:pub ^I32 GROUP_WORDS_MAX 16777216)
 
@@ -75,6 +79,7 @@
     (hs h H_REGEXP (opt-limit opt OPT_REGEXP 0 1))
     (hs h H_CUTS (opt-limit opt OPT_CUTS 0 1))
     (hs h H_DEFAULT (opt-limit opt OPT_DEFAULT 0 1))
+    (hs h H_LEXING (opt-limit opt OPT_LEXING 0 1))
     (let [gw (opt-limit opt OPT_GROUP_WORDS (neg 1) GROUP_WORDS_MAX)]
       (hs h H_GROUP_GIVEN gw)
       (if (< gw 0) (hs h H_LIM_GROUP GROUP_WORDS_DEFAULT) (hs h H_LIM_GROUP gw)))
@@ -268,9 +273,13 @@
     (for [^I32 i 0 vn]
       (vpush1 h T_KEYPRE (version-byte i))))
   (let [pr (hg h H_PROFILE)] (push-uint h T_KEYPRE pr))
-  (comment "D359: a 20th element, 1, when `.default` is annotation only; the default"
-           "reading adds nothing, so its preimage keeps 19 elements.")
-  (if (== (hg h H_DEFAULT) 0) (head-push h T_KEYPRE 4 0 19) (head-push h T_KEYPRE 4 0 20))
+  (comment "D359: a 20th element, 1, when `.default` is annotation only; D373: a 21st, 1,"
+           "under lenient lexing (the 20th then the `.default` reading, 0 or 1). The"
+           "defaults add nothing, so their preimage keeps 19 elements.")
+  (let [dc (hg h H_DEFAULT)
+        lx (hg h H_LEXING)]
+    (if (!= lx 0) (head-push h T_KEYPRE 4 0 21)
+      (if (!= dc 0) (head-push h T_KEYPRE 4 0 20) (head-push h T_KEYPRE 4 0 19))))
   (for [^I32 k 0 17]
     (let [v (hg h (if-limit k))]
       (push-uint h T_KEYPRE v)))
@@ -278,7 +287,8 @@
         gw (hg h H_GROUP_GIVEN)]
     (push-uint h T_KEYPRE cm)
     (if (< gw 0) (head-push h T_KEYPRE 1 0 0) (push-uint h T_KEYPRE gw)))
-  (if (!= (hg h H_DEFAULT) 0) (push-uint h T_KEYPRE 1))
+  (if (or (!= (hg h H_DEFAULT) 0) (!= (hg h H_LEXING) 0)) (push-uint h T_KEYPRE (hg h H_DEFAULT)))
+  (if (!= (hg h H_LEXING) 0) (push-uint h T_KEYPRE 1))
   (let [n (hg h H_NSRC)]
     (head-push h T_KEYPRE 2 0 n)
     (for [^I32 j 0 n]
@@ -374,6 +384,7 @@
     [55] "control_registry"
     [56] "regexp"
     [57] "unsupported_control"
+    [58] "syntax"
     [45] "map_key"
     [49] "tag"
     [50] "major"
