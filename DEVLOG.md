@@ -9898,6 +9898,21 @@ allowed at your discretion"). D037 is amended and signed.
     84,554 -> 84,719 (cap 84,682); full min 289,120 -> 289,612 and gzip 99,107 -> 99,298 stay
     under. Static is options.mjs's `lexing` (already compacted: `abnf` and `lexing` share one
     validator); full is the lexer, the key element and the host message.
+  - **Caps raised (coordinator under D303, 2026-11-18):** snug/compile static min 2,662 →
+    2,700, static gzip 1,374 → 1,400, full brotli 84,682 → 84,800. Each is the measured size
+    plus a small slack, not ×1.02, because that would have added 1.7 KB of brotli headroom.
+    Recorded in tools/size/budget.json.
+- [x] **Signed off** (manager, 2026-11-18), for part 2 (F9 and the stale host comments). The
+  `.cborseq` part was signed off above.
+  - **Review:** strict mode accepts only SP, LF and CR LF as whitespace. A lone CR or a tab is
+    ERR_LEXING. A comment holds PCHARs (%x20-7E / %xA0-10FFFD) up to LF, CR or the end of the
+    text, so a final comment needs no newline in either mode. Lenient mode is 0.1.0's lexer.
+    `abnf` and `lexing` share one 'strict' | 'lenient' validator.
+  - Merged on 7aa8965. On the merged main: `bb size` passes with the raised caps, there is no
+    drift, docs-test is ok, and compile2-test is ok (203/203 SOURCE_KEYs including the lenient
+    key, 8/8 W9, 3,288/3,288 oracle verdicts).
+  - D037 was signed by the D373 commit, owner's decision of 2026-11-18. It is not signed again
+    here.
 
 ## Findings
 
