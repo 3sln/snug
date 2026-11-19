@@ -18,6 +18,10 @@ export interface CompileOptions {
    *  the default does not match; or 'annotation', which changes no verdict, as RFC 8610 erratum 9229
    *  (status Reported, not verified) proposes. Bound into the source key. */
   defaultControl?: 'ne' | 'annotation';
+  /** The lexer: 'strict' (default) takes RFC 8610 Appendix B's whitespace and comments, so a tab, a
+   *  lone CR or a control character in a comment is a `syntax` error; 'lenient' is 0.1.0's lexer, which
+   *  accepts them. A final comment needs no newline in either. Bound into the source key. */
+  lexing?: 'strict' | 'lenient';
   /** The PEG group arena cap in words (default 4,194,304; at most 2^24). */
   groupWords?: number;
   profile?: 'full' | 'bindle' | 'bus'; limits?: CompileLimits; unicode?: Int32Array;

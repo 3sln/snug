@@ -44,8 +44,18 @@ and neither contains those files.
   plain type, so `//=` on a prelude name is now `type_group_mismatch` and a
   generic `/=` on one is `generic_arity`. To replace a prelude rule, define
   it with `=` (D372).
+- Tab-indented schemas need `lexing: 'lenient'` (Rust `Lexing::Lenient`).
+  Schema text is lexed as RFC 8610 Appendix B says by default: whitespace is
+  space, LF and CR LF, and a comment holds no control characters. A tab, a
+  lone CR, or a C0, DEL or C1 character in a comment is now `syntax`, with a
+  message naming the option (D373).
 
 ### Added
+
+- The compile option `lexing: 'strict' | 'lenient'` (Rust
+  `CompileOptions::lexing`, `Lexing`, `#[non_exhaustive]`): `'strict'` is the
+  default; `'lenient'` is 0.1.0's lexer. A comment on the last line needs no
+  newline in either. `'lenient'` is part of the source key (D373).
 
 - Decimal float literals in a schema may have up to 20 significant digits
   (17 before), still rounded exactly and identically on every host, so

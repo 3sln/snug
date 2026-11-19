@@ -4,8 +4,8 @@
 ;;
 ;; The registry rides after the OPT_WORDS compile options (snug.compile.main):
 ;;
-;;     opt[23]      n, the number of registered controls (0..256)
-;;     opt[24]      flags: bit 0 admits them under the `bus` profile; bit 1 is the
+;;     opt[24]      n, the number of registered controls (0..256)
+;;     opt[25]      flags: bit 0 admits them under the `bus` profile; bit 1 is the
 ;;                  ABNF parse mode `abnf: 'lenient'` (D340), which the host's
 ;;                  argument check applies -- carried here so the source key
 ;;                  (the registry's [flags, ...]) binds it
@@ -15,14 +15,14 @@
 ;;
 ;; A shorter opt registers nothing; opt[19] is the regexp dialect (D242),
 ;; opt[20] the cut mode and opt[21] the group arena cap (format 2.0), opt[22]
-;; the `.default` reading (D359).
+;; the `.default` reading (D359), opt[23] the lexer (D373).
 (ns snug.compile.ext
   (:require [kin.lang :refer [defn let return set if while for do comment defconst]]
             [snug.lang :refer [I32 Bool Ints IntsR + - * neg quot shl bit-or < > <= >= == != and or not ia ilen]]
             [snug.compile.arena :refer [hg hs fail charge vlen vpush1 vget vtrunc
                                         ERR_CONTROL_REGISTRY H_EXT_FLAGS T_EXT T_EXTB T_EXTUSE T_SRC]]))
 
-(defconst ^:pub ^I32 EXT_OPT_AT 23)
+(defconst ^:pub ^I32 EXT_OPT_AT 24)
 (defconst ^:pub ^I32 EXT_MAX_CONTROLS 256)
 (defconst ^:pub ^I32 EXT_MAX_NAME 64)
 

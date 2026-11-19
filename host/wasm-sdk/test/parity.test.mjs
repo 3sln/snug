@@ -888,6 +888,22 @@ test('D371a: a push source of a declared length of 2^31 or more is too_large at 
   assert.equal(WSRC.sessionLimits().live, base);
 });
 
+test('D373: strict lexing (the default) and lexing: lenient give the native Program bytes or SchemaError', async () => {
+  const t = tally('lexing (Program bytes / SchemaError)');
+  const texts = ['r =\tuint', 'r = {\n\ta: uint\n}', 'r = uint\rs = tstr', 'r = uint ; c\rs = tstr', 'r = uint ; a\tb',
+    'r = uint ; \u0001', 'r = uint ; \u007f', 'r = uint ; \u0085', 'r = uint ; the end', 'r = uint\r\n; café ✓\r\ns = tstr\r\n'];
+  for (const text of texts) {
+    for (const opts of [{}, { lexing: 'strict' }, { lexing: 'lenient' }, { lexing: 'lenient', defaultControl: 'annotation' }]) {
+      const a = await outcomeAsync(async () => programBytes(await wcompile(text, opts)));
+      t.same(`${JSON.stringify(text)} ${JSON.stringify(opts)}`, a, await outcomeAsync(async () => programBytes(await ncompile(text, opts))));
+      if (!opts.lexing && /\t|\r(?!\n)|; [\u0001\u007f\u0085]/.test(text)) assert.match(a.message ?? '', /lexing: 'lenient'/, JSON.stringify(text));
+    }
+  }
+  t.same('lexing: loose', await outcomeAsync(() => wcompile('r = uint', { lexing: 'loose' })),
+    await outcomeAsync(() => ncompile('r = uint', { lexing: 'loose' })));
+  t.done();
+});
+
 test('D371: a fake schema object is a TypeError for view() and View.validateAt, as natively', async () => {
   const ws = await wcompile('r = uint'), ns = await ncompile('r = uint');
   let asked = 0;

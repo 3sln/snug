@@ -4,7 +4,8 @@
   "notes": [
     "D349: a dead self-reference (`0*0 g`) after a member in a map group; the compiler's Program must verify and mean the group without it.",
     "D350: an embedded refusal after a byte string whose content is a malformed head, under the valid preset; its offset is where the inner walk stopped (program.md §9.2 rule 7), on every route (vm-test's buffer route here; vmsession-test's shapes 14-16 for sessions).",
-    "D372: `/=` and `//=` on a prelude name extend the prelude rule (RFC 8610 Appendix D); `.cborseq any` is `.cborseq [* any]` (RFC 8610 §3.8.4); an occurrence n*m with m < n matches nothing (RFC 8610 §3.2, warning W9); decimal float literals of up to 20 significant digits, hard rounding cases pinned by their encodings (compile2-test also compiles this file on both hosts)."
+    "D372: `/=` and `//=` on a prelude name extend the prelude rule (RFC 8610 Appendix D); `.cborseq any` is `.cborseq [* any]` (RFC 8610 §3.8.4); an occurrence n*m with m < n matches nothing (RFC 8610 §3.2, warning W9); decimal float literals of up to 20 significant digits, hard rounding cases pinned by their encodings (compile2-test also compiles this file on both hosts).",
+    "D373: strict lexing by default (RFC 8610 Appendix B: SP, LF and CR LF; comments of PCHAR): HT, a lone CR and a control character in a comment are `syntax`; a final comment needs no newline (a deliberate deviation). `lexing: 'lenient'` (0.1.0's lexer) is tested in the host suites, since these suites compile with default options."
   ],
   "suites": [
     {
@@ -399,6 +400,55 @@
     {
       "category": "regression", "name": "D372: a 20-digit literal above the halfway point to 2^1024 rounds to infinity and is refused",
       "cddl": "r = 1.7976931348623158080e308\n", "snugSchemaError": "float_literal", "cases": []
+    },
+    {
+      "category": "regression", "name": "D373: strict lexing (the default) refuses HT as whitespace",
+      "cddl": "r =\tuint\n", "snugSchemaError": "syntax", "cases": []
+    },
+    {
+      "category": "regression", "name": "D373: strict lexing refuses a tab-indented member",
+      "cddl": "r = {\n\ta: uint\n}\n", "snugSchemaError": "syntax", "cases": []
+    },
+    {
+      "category": "regression", "name": "D373: strict lexing refuses a lone CR",
+      "cddl": "r = uint\rs = tstr\n", "snugSchemaError": "syntax", "cases": []
+    },
+    {
+      "category": "regression", "name": "D373: strict lexing refuses a lone CR ending a comment",
+      "cddl": "r = uint ; c\rs = tstr\n", "snugSchemaError": "syntax", "cases": []
+    },
+    {
+      "category": "regression", "name": "D373: strict lexing refuses HT in a comment",
+      "cddl": "r = uint ; a\tcomment\n", "snugSchemaError": "syntax", "cases": []
+    },
+    {
+      "category": "regression", "name": "D373: strict lexing refuses a C0 control in a comment",
+      "cddl": "r = uint ; \u0001\n", "snugSchemaError": "syntax", "cases": []
+    },
+    {
+      "category": "regression", "name": "D373: strict lexing refuses DEL in a comment",
+      "cddl": "r = uint ; \u007f\n", "snugSchemaError": "syntax", "cases": []
+    },
+    {
+      "category": "regression", "name": "D373: strict lexing refuses a C1 control in a comment",
+      "cddl": "r = uint ; \u0085\n", "snugSchemaError": "syntax", "cases": []
+    },
+    {
+      "category": "regression", "name": "D373: a final comment without a newline compiles (both lexing modes; a deliberate deviation from RFC 8610's COMMENT)",
+      "cddl": "r = uint ; no newline at the end",
+      "cases": [
+        {"rule": "r", "hex": "01", "expect": true},
+        {"rule": "r", "hex": "6161", "expect": false}
+      ]
+    },
+    {
+      "category": "regression", "name": "D373: CR LF newlines and a non-ASCII comment compile under strict lexing",
+      "cddl": "r = uint\r\n; caf\u00e9 \u2713\r\ns = tstr\r\n",
+      "cases": [
+        {"rule": "r", "hex": "01", "expect": true},
+        {"rule": "s", "hex": "6161", "expect": true},
+        {"rule": "s", "hex": "01", "expect": false}
+      ]
     }
   ]
 }

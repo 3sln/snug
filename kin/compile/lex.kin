@@ -25,8 +25,8 @@
                                bit-and bit-or bit-xor < > <= >= == != and or not ult]]
             [snug.compile.arena :refer [hg hs erred fail charge vbase vlen vpush vpush1
                                         vget vset vtrunc vinit
-                                        ERR_SYNTAX ERR_FLOAT ERR_NEED_FLOATS
-                                        H_R0 H_R1 H_N_FLOATS H_FL_GIVEN
+                                        ERR_SYNTAX ERR_FLOAT ERR_NEED_FLOATS ERR_LEXING
+                                        H_R0 H_R1 H_N_FLOATS H_FL_GIVEN H_LEXING
                                         T_SRC T_TOK T_LITB T_STK T_FLREQ T_STK6]]))
 
 (defconst ^:pub ^I32 TK_EOF 0)
@@ -540,18 +540,36 @@
                    (return j))))
            (return j)))))))
 
-(defn ^I32 skip-space [^IntsR h ^I32 i]
-  (comment "Past whitespace (SP, HT, LF, CR) and ;-comments.")
-  (let [^:mut j i]
+(defn ^I32 skip-space [^Ints h ^I32 i]
+  (comment "Past whitespace and ;-comments, or -1. Strict (the default, D373/F9; RFC 8610"
+           "Appendix B's S): SP, LF and CR LF; a comment is PCHARs up to a newline or the"
+           "text's end (a final comment needs no newline, in both modes). HT, a lone CR and"
+           "a control character (C0, DEL, C1) in a comment are ERR_LEXING. Lenient"
+           "(`lexing: 'lenient'`, 0.1.0's lexer): SP, HT, LF and CR, and a comment runs to"
+           "LF or CR whatever it holds.")
+  (let [^:mut j i
+        strict (== (hg h H_LEXING) 0)]
     (forever
      (let [c (sc h j)]
-       (if (or (or (== c 32) (== c 9)) (or (== c 10) (== c 13)))
+       (if (or (== c 32) (== c 10))
          (set j (+ j 1))
-         (if (== c 59)
-           (do (set j (+ j 1))
-               (while (and (>= (sc h j) 0) (and (!= (sc h j) 10) (!= (sc h j) 13)))
-                 (set j (+ j 1))))
-           (return j)))))))
+         (if (or (== c 9) (== c 13))
+           (do (if (and strict (or (== c 9) (!= (sc h (+ j 1)) 10)))
+                 (return (fail h ERR_LEXING j)))
+               (set j (+ j 1)))
+           (if (== c 59)
+             (do (set j (+ j 1))
+                 (forever
+                  (let [d (sc h j)]
+                    (if (or (< d 0) (or (== d 10) (== d 13))) (break))
+                    (if (and strict (or (< d 32) (== d 127)))
+                      (return (fail h ERR_LEXING j)))
+                    (if (and strict (> d 127))
+                      (do (let [cp (cp-at h j)]
+                            (if (or (< cp 160) (> cp 1114109)) (return (fail h ERR_LEXING j)))
+                            (set j (+ j (hg h H_R1)))))
+                      (set j (+ j 1))))))
+             (return j))))))))
 
 (defn ^I32 punct [^Ints h ^I32 kind ^I32 i ^I32 w]
   (push-tok h kind i (+ i w) 0 0 0)
@@ -639,6 +657,7 @@
     (forever
      (if (erred h) (return (neg 1)))
      (set i (skip-space h i))
+     (if (< i 0) (return (neg 1)))
      (if (< (sc h i) 0)
        (do (push-tok h TK_EOF i i 0 0 0)
            (if (erred h) (return (neg 1)))

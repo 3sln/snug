@@ -66,6 +66,8 @@ merged into program.md and this file is deleted.
   D359: a 20th element, `1`, follows when the compile option
   `defaultControl` is `'annotation'` (`.default` without its implied `.ne`);
   the default reading adds no element, so its preimage keeps 19.
+  D373: under `lexing: 'lenient'` a 21st element, `1`, follows, the 20th then
+  the `.default` reading (`0` or `1`); strict lexing, the default, adds none.
 
 ## 2. Header changes
 

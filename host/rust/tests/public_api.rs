@@ -771,6 +771,29 @@ fn p916_warnings_cut_subcode_and_root_reexports() {
     let ann = Schema::compile(dtext, &CompileOptions { default_control: snug::DefaultControl::Annotation, ..Default::default() }).unwrap();
     ann.validate(&n5, "r", &mut scratch).unwrap();
     assert_ne!(ne.program().source_key(), ann.program().source_key());
+    // D373: strict lexing (the default) refuses HT, a lone CR and comment controls with
+    // `syntax` at JS's line and column; Lexing::Lenient is 0.1.0's lexer
+    let lenient = CompileOptions { lexing: snug::Lexing::Lenient, ..Default::default() };
+    for (text, line, column) in [("r =\tuint", 1, 4), ("r = uint\rs = tstr", 1, 9), ("r = uint ; c\rs = tstr", 1, 13),
+        ("r = uint ; a\tb", 1, 13), ("r = uint ; \u{1}", 1, 12), ("r = uint ; \u{7f}", 1, 12), ("r = uint ; \u{85}", 1, 12)] {
+        match Schema::compile(text, &CompileOptions::default()) {
+            Err(Error::Compile(e)) => {
+                assert_eq!((e.code, e.line, e.column), ("syntax", line, column), "{text:?}");
+                assert!(e.message.contains("Lexing::Lenient"), "{text:?}");
+            }
+            other => panic!("{text:?}: {other:?}"),
+        }
+        Schema::compile(text, &lenient).unwrap().validate(&[1], "r", &mut scratch).unwrap();
+    }
+    // a final comment needs no newline, in both modes; CR LF and a non-ASCII comment are strict
+    for options in [CompileOptions::default(), CompileOptions { lexing: snug::Lexing::Lenient, ..Default::default() }] {
+        Schema::compile("r = uint ; the end", &options).unwrap().validate(&[1], "r", &mut scratch).unwrap();
+    }
+    let crlf = Schema::compile("r = uint\r\n; caf\u{e9} \u{2713}\r\ns = tstr\r\n", &CompileOptions::default()).unwrap();
+    crlf.validate(&unhex("6161"), "s", &mut scratch).unwrap();
+    let strict = Schema::compile("r = uint", &CompileOptions { lexing: snug::Lexing::Strict, ..Default::default() }).unwrap();
+    assert_eq!(strict.program().source_key(), Schema::compile("r = uint", &CompileOptions::default()).unwrap().program().source_key());
+    assert_ne!(strict.program().source_key(), Schema::compile("r = uint", &lenient).unwrap().program().source_key());
     // an ordinary wrong value has no subcode
     let plain = Schema::compile("r = { a: \"x\" }", &CompileOptions::default()).unwrap();
     let e = plain.validate(&unhex("a161616179"), "r", &mut scratch).unwrap_err();

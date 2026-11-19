@@ -1766,7 +1766,14 @@ lexer accepts HT as whitespace and requires the whole text to be
 well-formed UTF-8; string literals follow RFC 8610's SCHAR/BCHAR ranges.
 **Why**: hosts must report identically (columns in UTF-16 units would make
 JS and Rust disagree); HT appears in real schemas and changes no meaning.
-- [ ] **Signed off** (owner)
+*Amended (owner, 2026-11-18, F9 "Strict, lenient option"; implemented in D373):* the lexer is
+strict by default, as RFC 8610 Appendix B: whitespace is SP, LF and CR LF, and a comment holds
+PCHARs; HT, a lone CR, and a C0, DEL or C1 character in a comment are `syntax` (error code 58,
+whose host message names the option). The compile option `lexing: 'lenient'` (Rust
+`Lexing::Lenient`) keeps 0.1.0's lexer, HT included, and is bound into the source key. A final
+comment needs no newline in either mode (a deliberate deviation from RFC 8610's `COMMENT`).
+- [x] **Signed off** (owner, 2026-11-18) -- the F9 decision "Strict, lenient option", relayed
+  by the coordinator. Implemented in D373.
 
 ### D038 — Controls the architecture left open
 **Decision**: *(amended 2026-10-29: `.plus` adds two integer literals
@@ -9836,6 +9843,62 @@ of 2026-11-18 recorded under "Release 0.1.0 → The next batch", and the owner's
     unchanged) and the regression suites, 3 of which fail on ec940e2.
   - The release-blocking item is closed. F9 and the comments stay open under this entry.
 
+**Part 2: F9, strict lexing by default; the stale host comments** (fork of the coordinator,
+2026-11-18, after the owner allowed the snug edits directly: "Edits to anything under snug are
+allowed at your discretion"). D037 is amended and signed.
+* **Lexer** (`kin/compile/lex.kin` `skip-space`): strict (header word `H_LEXING` 454 = 0, the
+  default) takes RFC 8610 Appendix B's S: SP, LF and CR LF, and a `;` comment of PCHARs
+  (U+0020..U+007E and U+00A0..U+10FFFD) up to LF, CR LF or the text's end. HT, a lone CR (one
+  ending a comment too), and a C0, DEL or C1 character in a comment fail with `ERR_LEXING` (58,
+  named `syntax`, so the error-code list is unchanged) at the offending byte. Lenient (`1`) is
+  0.1.0's loop, unchanged. A final comment needs no newline in either mode, a deliberate
+  deviation from RFC 8610's `COMMENT`, documented in cddl-support.md. HT and a lone CR inside
+  `h''` / `b64''` were already refused by BCHAR, so `lex-bytes`' HT branch stays dead and no
+  branch was added. The prelude is lexed strictly too; it has no tab.
+* **Option**: `OPT_LEXING` 23, so `OPT_WORDS` is 24 and the registry moves to word 24
+  (`snug.compile.ext` `EXT_OPT_AT`; wasm `cc.rs` and the SDK's option words follow). JS
+  `lexing: 'strict' | 'lenient'` (options.mjs, compile.d.ts), Rust `CompileOptions::lexing` with
+  `Lexing { Strict, Lenient }` (`#[non_exhaustive]`, re-exported at the crate root), and the
+  wasm SDK. The host messages name the option: JS and the SDK append "; tabs, a lone CR and
+  control characters in comments need lexing: 'lenient'"; Rust's `SchemaError::message` names
+  `Lexing::Lenient` (cc.rs passes it to the SDK as hint 4).
+* **Source key** (program-2.md §1): `'lenient'` makes the option list 21 elements, the 20th the
+  `.default` reading (0 or 1), the 21st 1; strict adds nothing, so a strict preimage is
+  byte-identical to before. compile2-test recomputes it independently (lenient with either
+  `.default` reading).
+* **Corpus**: no corpus schema (511 texts: the conformance files, the RFC corpus, the contracts)
+  has a tab, a lone CR or a control character in a comment, so none needed converting or the
+  lenient option. regressions.json gains 8 strict refusals (`syntax`) and 2 compiling suites (a
+  final comment without a newline; CR LF with a non-ASCII comment).
+* **Stale comments**: W1..W9 in docs/api.md, host/js/types/schema.d.ts and
+  host/rust/src/compile.rs; "at most 20 significant digits" in host/js/src/compile.mjs and
+  host/rust/src/compile.rs.
+* **Docs and CHANGELOG**: api.md, rust.md, cddl-support.md (the UTF-8 row no longer says HT is
+  supported), program-2.md; CHANGELOG Breaking "Tab-indented schemas need `lexing: 'lenient'`"
+  and Added for the option.
+* **Tests** (targeted, per the owner's policy; no full gates, no identity):
+  - compile2-test ok: 1,065/1,065 identical across hosts (the 8 strict refusals among 25/25
+    expected refusals, errors field for field), 203/203 SOURCE_KEYs, the 3,288 oracle verdicts
+    unchanged.
+  - npm-test 1,522/1,522 (new: `D373` in schema-api.test.mjs: each refusal's line and column,
+    the message, lenient acceptance, the final comment in both modes, CR LF, the key).
+  - rust-api-test ok (public_api.rs: the same refusals, `Lexing::Lenient`, the key; doctests,
+    rustdoc, clippy).
+  - wasm-sdk-test 32/32 (new: lexing parity with native, Program bytes or SchemaError).
+  - types-test, docs-test ok; the 5 new regression cases hold in JS (vm-test not run: no
+    lowering change).
+* **Proofs**: with strict forced off in generated JS, the D373 JS test fails and all 8 strict
+  refusal suites compile; with lexing unbound from the key, the D373 JS test fails.
+* **Sizes**:
+  - wasm compiler 152,891 -> 153,330 B (+439), gzip 69,197 -> 69,436; cap 153,564 / 69,851;
+    sdk-runtime unchanged (327,443).
+  - snug/sources unchanged (183,984).
+  - **snug/compile over its caps, NOT raised (needs the coordinator under D303):** static min
+    2,658 -> 2,671 (cap 2,662), static gzip 1,374 -> 1,382 (cap 1,374), full brotli
+    84,554 -> 84,719 (cap 84,682); full min 289,120 -> 289,612 and gzip 99,107 -> 99,298 stay
+    under. Static is options.mjs's `lexing` (already compacted: `abnf` and `lexing` share one
+    validator); full is the lexer, the key element and the host message.
+
 ## Findings
 
 - 2026-11-11 (manager): **the 6½-day `scan-test.mjs 300 1` process
@@ -13613,10 +13676,10 @@ can run alongside them; its build work is post-RC unless it is cheap.
       controller (e.g. `[* uint] .and [2*2 any]`) must be refused with `control_value`, as it
       was in 0.1.0. Since D372 it silently matches nothing. Main is unreleased, so it may be
       carried briefly, but it must be fixed before any `version.edn` bump.
-    - [ ] F9, strict lexing by default (the owner's decision of 2026-11-18, recorded under
-      D037). It is waiting on the owner's answer to a permission refusal of the kin and host
-      edits. D037 stays unsigned until it lands.
-    - [ ] Stale host comments: the warning range W1..W8 (now W9) in docs/api.md,
+    - [x] F9, strict lexing by default (the owner's decision of 2026-11-18, recorded under
+      D037). The owner then allowed the edits directly; implemented in D373 part 2, D037
+      signed. Its snug/compile size raise waits on the coordinator.
+    - [x] Stale host comments (D373 part 2): the warning range W1..W8 (now W9) in docs/api.md,
       host/js/types/schema.d.ts and host/rust/src/compile.rs, and "at most 17 significant
       digits" (now 20) in host/js/src/compile.mjs and host/rust/src/compile.rs.
   - **Post-release nits:**
