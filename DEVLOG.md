@@ -9913,6 +9913,8 @@ allowed at your discretion"). D037 is amended and signed.
     key, 8/8 W9, 3,288/3,288 oracle verdicts).
   - D037 was signed by the D373 commit, owner's decision of 2026-11-18. It is not signed again
     here.
+  - **Hosted:** push CI run 44428310969 on 483b3fa is green: land, linux, compat and the `ci`
+    aggregate; release skipped as designed.
 
 ## Findings
 
