@@ -966,7 +966,9 @@ The work limits are per attempt, so size them with some headroom:
   copy.
 - **Compile work units.** When the compiler's working memory runs out it grows
   it and starts again with a fresh budget, so one compile can do up to
-  (restarts + 1) × `compileBudget`: at most 9×, and usually under 2×.
+  (restarts + 1) × `compileBudget`: at most 9×, and usually under 2×. The
+  first memory is sized from the schema text's length, so most schemas need
+  no restart.
 
 Compile limit names are in the [API reference](api.md#compilation).
 Runtime schema options are `maxBytes`, `maxDepth`, `maxEntries`, `maxItems`,

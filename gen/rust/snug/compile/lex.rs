@@ -647,9 +647,11 @@ pub(crate) fn lex_bytes(h: &mut [i32], s: i32, q: i32, qual: i32) -> i32 {
     // A byte string token starting at s whose quote is at q; qual 0 plain
     // (UTF-8 of the text), 1 h'' (hex), 2 b64'' (base64 or base64url). The
     // quoted body is decoded first; h and b64 then reinterpret it, skipping
-    // whitespace and (h'' only, RFC 9682) ;-comments.
+    // whitespace and ;-comments (RFC 9682 Appendix B.2; b64'' under strict lexing
+    // only, D374: lenient refuses a ; there, as 0.1.0 did).
     let raw: i32 = vlen(h, T_LITB);
     let e: i32 = lex_quoted(h, q, 39);
+    let strict: bool = hg(h, H_LEXING) == 0;
     if e < 0 {
         return -1;
     }
@@ -667,8 +669,17 @@ pub(crate) fn lex_bytes(h: &mut [i32], s: i32, q: i32, qual: i32) -> i32 {
         let c: i32 = vget(h, T_LITB, raw + i);
         if ((c == 32) || (c == 9)) || ((c == 10) || (c == 13)) {
             i += 1;
-        } else if (qual == 1) && (c == 59) {
+        } else if (c == 59) && ((qual == 1) || strict) {
+            // RFC 9682 Appendix B.2: a ;-comment to LF, in h'' and (strict, D374)
+            // b64''. Strict: PCHARs, so a C0 (but CR LF's CR), DEL or C1 (C2 80..9F),
+            // which only an escape can put here, is refused at the literal (`syntax`:
+            // lenient refuses a b64'' comment too, so no lexing hint).
             while (i < rawlen) && (vget(h, T_LITB, raw + i) != 10) {
+                let d: i32 = vget(h, T_LITB, raw + i);
+                let n: i32 = vget(h, T_LITB, raw + (i + 1));
+                if strict && (((d == 127) || ((d == 194) && (n < 160))) || ((d < 32) && ((d != 13) || ((n != 10) || ((i + 1) >= rawlen))))) {
+                    return fail(h, ERR_SYNTAX, s);
+                }
                 i += 1;
             }
         } else if qual == 1 {

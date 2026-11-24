@@ -486,8 +486,7 @@ let schema = Schema::compile("event = { type: tstr }", &CompileOptions::default(
 let body: &[u8] = &[0xa1, 0x64, b't', b'y', b'p', b'e', 0x61, b'a',
                     0xa1, 0x64, b't', b'y', b'p', b'e', 0x05,
                     0xa1, 0x64, b't', b'y', b'p', b'e', 0x61, b'c'];
-let mut skip = SequenceOptions::default();   // non-exhaustive: set fields on the default
-skip.on_invalid = OnInvalid::Skip;
+let skip = SequenceOptions::default().on_invalid(OnInvalid::Skip);   // non-exhaustive: chain setters on the default
 let mut types = Vec::new();
 for item in schema.read_sequence(body, "event", &skip)? {   // any std::io::Read
     match item {
@@ -512,8 +511,11 @@ assert!(seq.is_done());
 entries, items, bignum bytes, budget), the wire profile (`wire`), `top`, `cose`,
 `on_invalid` (`Stop` by default; `Skip` skips only schema refusals of complete
 messages), `fail_fast`, the read `chunk` and the async reader's `quantum`.
-`SequenceOptions` is non-exhaustive, so it is built from
-`SequenceOptions::default()` with its fields set, as above. A refusal is
+`SequenceOptions` is non-exhaustive, so code outside the crate cannot write
+a struct literal: start from `SequenceOptions::default()` and chain one setter
+per field, named after it and taking its type
+(`SequenceOptions::default().quantum(64).max_depth(Some(8))`), as above, or
+assign the fields of a mutable default. A refusal is
 `Error::Sequence(MessageFailure { index, message_offset, offset, failure,
 skippable })` with absolute offsets; EOF inside a message is
 `cbor/truncated`, a message not ending within `max_message_bytes` is

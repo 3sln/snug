@@ -96,13 +96,15 @@ function compileOnce(text, profile, limits, unicode, entries, inBus, regexp, cut
   const tables = unicode ?? new Int32Array(0);
   if (!(tables instanceof Int32Array) || (typeof SharedArrayBuffer !== 'undefined' && tables.buffer instanceof SharedArrayBuffer))
     throw new TypeError('unicode must be the Int32Array tables from @3sln/snug/unicode');
-  let fl = new Int32Array(0);
+  // D374: size the first arena from the text (up to ~54 words a byte measured), at most RETAIN_WORDS; outcomes are the same
+  let fl = new Int32Array(0), want = Math.min(RETAIN_WORDS, ARENA_MIN_WORDS + 48 * bytes.length);
   for (;;) {
+    if (arena.length < want) arena = new Int32Array(want);
     const h = arena;
     const code = compileSchema(bytes, opt, fl, tables, h);
     if (code === ERR_ARENA) {
       if (arena.length >= ARENA_MAX_WORDS) throw new SchemaError('limit_memory', 0, 0, undefined);
-      arena = new Int32Array(Math.min(arena.length * 2, ARENA_MAX_WORDS));
+      want = Math.min(arena.length * 2, ARENA_MAX_WORDS);
       continue;
     }
     if (code === ERR_NEED_FLOATS) { fl = floats(h, bytes); continue; }

@@ -75,13 +75,20 @@ pub enum OnInvalid {
 /// `None` is the compiled limit with a schema, the decode default
 /// (as [`DecodeOptions`]'s) without one.
 ///
-/// Not exhaustive: a later release may add a field. Start from the default and
-/// set the fields you need:
+/// Not exhaustive: a later release may add a field, so code outside the crate
+/// cannot write a struct literal. Start from the default and chain a setter per
+/// field you need (each takes and returns the options by value), or set the
+/// fields on a mutable default:
 ///
 /// ```
-/// let mut options = snug::SequenceOptions::default();
-/// options.on_invalid = snug::OnInvalid::Skip;
-/// options.max_message_bytes = Some(1 << 20);
+/// use snug::{OnInvalid, SequenceOptions};
+/// let options = SequenceOptions::default().on_invalid(OnInvalid::Skip).max_message_bytes(Some(1 << 20));
+/// assert_eq!((options.on_invalid, options.max_message_bytes, options.chunk), (OnInvalid::Skip, Some(1 << 20), 65536));
+///
+/// let mut same = SequenceOptions::default();
+/// same.on_invalid = OnInvalid::Skip;
+/// same.max_message_bytes = Some(1 << 20);
+/// assert_eq!((same.on_invalid, same.max_message_bytes), (options.on_invalid, options.max_message_bytes));
 /// ```
 #[derive(Debug, Clone)]
 #[non_exhaustive]
@@ -137,6 +144,56 @@ impl Default for SequenceOptions {
             quantum: 0,
         }
     }
+}
+/// Chainable setters, one per field: each sets that field and returns the
+/// options, so code outside the crate can build them without a struct literal.
+impl SequenceOptions {
+    /// Sets [`top`](Self::top).
+    #[must_use]
+    pub fn top(mut self, top: Top) -> Self { self.top = top; self }
+    /// Sets [`cose`](Self::cose).
+    #[must_use]
+    pub fn cose(mut self, cose: bool) -> Self { self.cose = cose; self }
+    /// Sets [`wire`](Self::wire).
+    #[must_use]
+    pub fn wire(mut self, wire: Profile) -> Self { self.wire = wire; self }
+    /// Sets [`max_message_bytes`](Self::max_message_bytes).
+    #[must_use]
+    pub fn max_message_bytes(mut self, max_message_bytes: Option<u32>) -> Self { self.max_message_bytes = max_message_bytes; self }
+    /// Sets [`max_depth`](Self::max_depth).
+    #[must_use]
+    pub fn max_depth(mut self, max_depth: Option<u32>) -> Self { self.max_depth = max_depth; self }
+    /// Sets [`max_entries`](Self::max_entries).
+    #[must_use]
+    pub fn max_entries(mut self, max_entries: Option<u32>) -> Self { self.max_entries = max_entries; self }
+    /// Sets [`max_items`](Self::max_items).
+    #[must_use]
+    pub fn max_items(mut self, max_items: Option<u32>) -> Self { self.max_items = max_items; self }
+    /// Sets [`max_bignum_bytes`](Self::max_bignum_bytes).
+    #[must_use]
+    pub fn max_bignum_bytes(mut self, max_bignum_bytes: Option<u32>) -> Self { self.max_bignum_bytes = max_bignum_bytes; self }
+    /// Sets [`budget`](Self::budget).
+    #[must_use]
+    pub fn budget(mut self, budget: Option<u32>) -> Self { self.budget = budget; self }
+    /// Sets [`on_invalid`](Self::on_invalid).
+    #[must_use]
+    pub fn on_invalid(mut self, on_invalid: OnInvalid) -> Self { self.on_invalid = on_invalid; self }
+    /// Sets [`fail_fast`](Self::fail_fast).
+    #[must_use]
+    pub fn fail_fast(mut self, fail_fast: bool) -> Self { self.fail_fast = fail_fast; self }
+    /// Sets [`chunk`](Self::chunk).
+    #[must_use]
+    pub fn chunk(mut self, chunk: usize) -> Self { self.chunk = chunk; self }
+    /// Sets [`quantum`](Self::quantum), for the async readers only:
+    ///
+    /// ```
+    /// let options = snug::SequenceOptions::default().quantum(64).max_depth(Some(8));
+    /// assert_eq!((options.quantum, options.max_depth), (64, Some(8)));
+    /// // the sync readers never yield, so they refuse a nonzero quantum
+    /// assert_eq!(snug::Sequence::new(&options).err().unwrap(), snug::Error::Usage("options"));
+    /// ```
+    #[must_use]
+    pub fn quantum(mut self, quantum: u32) -> Self { self.quantum = quantum; self }
 }
 impl SequenceOptions {
     /// limits words 0..7, word 8 (0), word 9 the profile flags (as schema::Options::words).

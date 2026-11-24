@@ -259,12 +259,14 @@ function tokens(source) {
       const s = stringToken(source, i + (qualifier?.length ?? 0), quote); i = s.end;
       if (!s.value.isWellFormed()) fault('syntax', start);
       let value;
+      // RFC 9682 Appendix B.2: RFC 8610's WS rules, comments included, apply to h'' and b64'' content after escapes
+      const content = qualifier ? s.value.replace(/;[^\n]*/g, '') : s.value;
       if (quote === '"') value = { kind: 'text', value: s.value };
       else if (qualifier === 'h') {
-        const hex = s.value.replace(/\s/g, ''); if (!/^(?:[0-9a-fA-F]{2})*$/.test(hex)) fault('syntax', start);
+        const hex = content.replace(/\s/g, ''); if (!/^(?:[0-9a-fA-F]{2})*$/.test(hex)) fault('syntax', start);
         value = { kind: 'bytes', value: Uint8Array.from(Buffer.from(hex, 'hex')) };
       } else if (qualifier === 'b64') {
-        const b64 = s.value.replace(/\s/g, ''); if (!/^[A-Za-z0-9+/_-]*={0,2}$/.test(b64) || b64.replace(/=/g, '').length % 4 === 1) fault('syntax', start);
+        const b64 = content.replace(/\s/g, ''); if (!/^[A-Za-z0-9+/_-]*={0,2}$/.test(b64) || b64.replace(/=/g, '').length % 4 === 1) fault('syntax', start);
         value = { kind: 'bytes', value: Uint8Array.from(Buffer.from(b64, 'base64')) };
       } else value = { kind: 'bytes', value: utf8.encode(s.value) };
       out.push({ text: 'literal', value, start }); continue;

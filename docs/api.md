@@ -242,7 +242,9 @@ unknown options reject with TypeError before compilation.
 memory runs out, it grows that memory and starts again with a fresh budget,
 so one `compile` can do up to (restarts + 1) × `compileBudget` units of work:
 at most 9×, and usually under 2×. Size `compileBudget` with that in mind if
-you compile untrusted schemas.
+you compile untrusted schemas. The first memory is sized from the schema
+text's length (65,536 words plus 48 a byte, at most 4,194,304 words; reused
+across compiles in an isolate), so most schemas compile without a restart.
 
 `SchemaError` extends Error: constructor
 `(code, line = 0, column = 0, rule?)`, fields `code`, `line`, `column`,
