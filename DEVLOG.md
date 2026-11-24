@@ -10064,6 +10064,8 @@ gain on large compiles). Recorded in tools/size/budget.json.
   - `#[non_exhaustive]` on `SequenceOptions` is kept; the setters are additive.
   - Process: one `sed -i` on a then-untracked new test file. All tracked edits went through
     Edit/Write. The rule covers every repo file, and the engineer has been told.
+  - **Hosted:** push CI run 45330906629 on d165eac is green: land, linux, compat and the `ci`
+    aggregate; release skipped as designed.
 
 ## Findings
 
