@@ -10,7 +10,7 @@ source into JavaScript and Rust, and a WebAssembly build comes from the Rust
 side. All three give the same verdicts, error codes and step counts for the
 same input, and the test suite checks that they do.
 
-> **Experimental.** snug 0.1.0 is an early release. The API may change
+> **Experimental.** snug 0.2.0 is an early release. The API may change
 > between 0.x versions, and it has not seen production use yet.
 > [Issues and feedback](https://github.com/3sln/snug/issues) are welcome.
 

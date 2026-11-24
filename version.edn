@@ -15,5 +15,5 @@
 ;;
 ;; Both must be semver strings of at most 32 bytes (the Program container's
 ;; producer field). kin/scripts/version-sites.mjs reads this file.
-{:version     "0.1.0"
+{:version     "0.2.0"
  :placeholder "0.0.0-unreleased"}
