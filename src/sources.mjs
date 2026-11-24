@@ -169,23 +169,40 @@ function checkRead(chunk, offset, length) {
   return chunk;
 }
 
+/** The length a handle's session is opened for. D371: a handle of 2^31 bytes or more is larger than
+ *  every limit allows. Its session is opened for 0 bytes (so the schema, rule and options are checked
+ *  as for any handle, and nothing sized by the length is allocated), then closed unread, and the
+ *  answer is too_large at offset 0, what an over-limit handle of 2^31-1 bytes gets. */
 function checkHandle(handle) {
   if (!handle || !Number.isSafeInteger(handle.size) || handle.size < 0 || typeof handle.read !== 'function') throw new TypeError('a handle is {size, read(offset, length)}.');
+  return huge(handle.size) ? 0 : handle.size;
 }
+// The push sources' argument and length refusals (one helper each: the module is size-capped)
+const fed = chunk => { if (!(chunk instanceof Uint8Array)) throw new TypeError('feed expects a Uint8Array.'); };
+const mismatch = message => { throw new SourceError('length_mismatch', message); };
+// D371, D371a: a handle size or declared length past every limit, and the answer it gets
+const huge = n => Number.isSafeInteger(n) && n > I32_MAX;
+const TOO_LARGE = () => ({ ok: false, reason: 'cbor/too_large', path: [], offset: 0 });
+/** D371a: a push source's session for a declared length of 2^31 or more (opened for 0 bytes, so every
+ *  argument is checked) is closed, and its first step answers too_large at offset 0, as an over-limit
+ *  one of 2^31-1 bytes does; `settle` as driveSession's. */
+const tooLarge = (s, settle) => (s.close?.(), { step: () => ({ state: 'done', result: settle(TOO_LARGE()) }) });
 
 function* drive(handle, options, opts = {}) {
   validateOptions(options, 'decode');
   validateOptions(opts, 'source');
   const { chunk = 65536, quantum = 0 } = opts;
-  checkHandle(handle);
-  return yield* driveSession(new ScanSession(handle.size, options, { quantum }), handle, chunk);
+  return yield* driveSession(new ScanSession(checkHandle(handle), options, { quantum }), handle, chunk, scanResult);
 }
 
-function* driveSession(session, handle, chunk) {
+/** settle: the answer of a validation result (scanResult for a scan; none: the result itself). */
+function* driveSession(session, handle, chunk, settle) {
   let base = 0, window = new Uint8Array(0);
   let want = { state: 'need', offset: 0, length: Math.min(chunk, handle.size) };
   // a read that fails ends the drive: the session's arrays are released (P9.7)
-  try { for (;;) {
+  try {
+  if (huge(handle.size)) { const r = TOO_LARGE(); return settle ? settle(r) : r; }
+  for (;;) {
     if (want.state !== 'done') {
       // The window to run over: the cached one if it holds what is asked, else one read.
       const at = want.state === 'need' ? want.offset : want.position;
@@ -245,20 +262,20 @@ export function scanHandleSync(handle, options = {}, opts = {}) {
 /** Validate against schema's rule through a handle whose read may return a Promise.
  * Resolves Schema.validate's result, or rejects with SourceError. */
 export async function validateHandle(schema, handle, rule, options = {}, opts = {}) {
-  validateOptions(options, 'validation');
-  validateOptions(opts, 'source');
-  const { chunk = 65536, quantum = 0 } = opts;
-  checkHandle(handle);
-  return runAsync(driveSession(openSession(schema, rule, handle.size, options, { quantum }), handle, chunk));
+  return runAsync(vmDrive(schema, handle, rule, options, opts));
 }
 
 /** The same through a handle whose read returns bytes synchronously. */
 export function validateHandleSync(schema, handle, rule, options = {}, opts = {}) {
+  return runSync(vmDrive(schema, handle, rule, options, opts), 'validateHandleSync');
+}
+
+/** The schema handle drivers' common part (their arguments checked now, as the SDK's vmDrive). */
+function vmDrive(schema, handle, rule, options, opts) {
   validateOptions(options, 'validation');
   validateOptions(opts, 'source');
   const { chunk = 65536, quantum = 0 } = opts;
-  checkHandle(handle);
-  return runSync(driveSession(openSession(schema, rule, handle.size, options, { quantum }), handle, chunk), 'validateHandleSync');
+  return driveSession(openSession(schema, rule, checkHandle(handle), options, { quantum }), handle, chunk);
 }
 
 /** Bytes pushed in order, for a message of a DECLARED length. feed(chunk) answers
@@ -267,7 +284,9 @@ export function validateHandleSync(schema, handle, rule, options = {}, opts = {}
  *  the bytes from the scanner's current position on (bounded by what it asks for). */
 export function pushScanner(length, options = {}, scheduling = {}) {
   if (length === undefined) return pushUnknown(scanUnknown(options, scheduling), scheduling, scanResult);
-  const session = new ScanSession(length, options, scheduling);
+  const big = huge(length);
+  let session = new ScanSession(big ? 0 : length, options, scheduling);
+  if (big) session = tooLarge(session, scanResult);
   return pushSession(session, length, want => session.vm ? want.keep : Math.min(want.state === 'need' ? want.offset : want.position, rscanPosition(session.s)));
 }
 
@@ -281,7 +300,8 @@ export function pushValidator(schema, length, rule, options = {}, scheduling = {
   if (length === undefined) return pushUnknown(openSession(schema, rule, undefined, options, sessionScheduling), scheduling, r => r);
   // failFast only changes an unknown-length message; a declared length is read whole either way (as
   // pushScanner, the handle drivers and Rust's SourceOptions), so it is accepted and has no effect (P9.13)
-  return pushSession(openSession(schema, rule, length, options, sessionScheduling), length, want => want.keep);
+  const big = huge(length), session = openSession(schema, rule, big ? 0 : length, options, sessionScheduling);
+  return pushSession(big ? tooLarge(session, r => r) : session, length, want => want.keep);
 }
 
 // ---------------------------------------------------------------- unknown length (D085)
@@ -356,12 +376,12 @@ function pushUnknown(session, scheduling, settle) {
     let r = session.end(delivered);
     // the walk was waiting for bytes: it goes on over what it holds, never past the end
     while (r.state === 'yield') r = session.step(buf.subarray(0, bufLen), bufBase);
-    if (r.state !== 'done') throw new SourceError('length_mismatch', 'The session asked for bytes past the end.');
+    if (r.state !== 'done') mismatch('The session asked for bytes past the end.');
     return final(r);
   };
   return guarded(session, {
     feed(chunk) {
-      if (!(chunk instanceof Uint8Array)) throw new TypeError('feed expects a Uint8Array.');
+      fed(chunk);
       if (result) return { state: 'done', result };
       const start = delivered;
       delivered += chunk.length;
@@ -478,8 +498,8 @@ function pushSession(session, length, keepOf) {
   };
   return guarded(session, {
     feed(chunk) {
-      if (!(chunk instanceof Uint8Array)) throw new TypeError('feed expects a Uint8Array.');
-      if (delivered + chunk.length > length) throw new SourceError('length_mismatch', 'More bytes were pushed than the declared length.');
+      fed(chunk);
+      if (delivered + chunk.length > length) mismatch('More bytes were pushed than the declared length.');
       const start = delivered;
       delivered += chunk.length;
       // A verdict can come before the last byte arrives (a byte string's content is
@@ -500,10 +520,10 @@ function pushSession(session, length, keepOf) {
     /** Abandon the message: release its session now; feeding it afterwards throws. */
     close() { session.close?.(); },
     finalize() {
-      if (delivered !== length) throw new SourceError('length_mismatch', `The source delivered ${delivered} of ${length} declared bytes.`);
+      if (delivered !== length) mismatch(`The source delivered ${delivered} of ${length} declared bytes.`);
       while (!finished) {
         const r = run();
-        if (r.state === 'need') throw new SourceError('length_mismatch', 'The session needs bytes beyond what was delivered.');
+        if (r.state === 'need') mismatch('The session needs bytes beyond what was delivered.');
       }
       return want.result ?? true;
     },

@@ -13,11 +13,12 @@ use crate::snug::compile::prelude::*;
 use crate::snug::compile::regexp::*;
 use crate::snug::compile::rules::*;
 
-pub const OPT_WORDS: i32 = 23;
+pub const OPT_WORDS: i32 = 24;
 pub const OPT_REGEXP: i32 = 19;
 pub const OPT_CUTS: i32 = 20;
 pub const OPT_GROUP_WORDS: i32 = 21;
 pub const OPT_DEFAULT: i32 = 22;
+pub const OPT_LEXING: i32 = 23;
 pub const GROUP_WORDS_DEFAULT: i32 = 4194304;
 pub const GROUP_WORDS_MAX: i32 = 16777216;
 pub const OPT_PROFILE: i32 = 0;
@@ -43,6 +44,7 @@ pub fn setup_limits(h: &mut [i32], opt: &[i32]) {
     hs(h, H_REGEXP, opt_limit(opt, OPT_REGEXP, 0, 1));
     hs(h, H_CUTS, opt_limit(opt, OPT_CUTS, 0, 1));
     hs(h, H_DEFAULT, opt_limit(opt, OPT_DEFAULT, 0, 1));
+    hs(h, H_LEXING, opt_limit(opt, OPT_LEXING, 0, 1));
     let gw: i32 = opt_limit(opt, OPT_GROUP_WORDS, -1, GROUP_WORDS_MAX);
     hs(h, H_GROUP_GIVEN, gw);
     if gw < 0 {
@@ -256,7 +258,7 @@ pub fn snug_version() -> &'static str {
     // writes the release version here in a release build, then re-emits.
     // Its length and bytes below are read from this literal, so any semver
     // string works; semver is ASCII, which str-len / str-u8 need.
-    return "0.1.0";
+    return "0.2.0";
 }
 pub(crate) fn snug_version_len() -> i32 {
     // The version text's length in bytes.
@@ -313,12 +315,17 @@ pub fn build_key_preimage(h: &mut [i32]) {
     }
     let pr: i32 = hg(h, H_PROFILE);
     push_uint(h, T_KEYPRE, pr);
-    // D359: a 20th element, 1, when `.default` is annotation only; the default
-    // reading adds nothing, so its preimage keeps 19 elements.
-    if hg(h, H_DEFAULT) == 0 {
-        head_push(h, T_KEYPRE, 4, 0, 19);
-    } else {
+    // D359: a 20th element, 1, when `.default` is annotation only; D373: a 21st, 1,
+    // under lenient lexing (the 20th then the `.default` reading, 0 or 1). The
+    // defaults add nothing, so their preimage keeps 19 elements.
+    let dc: i32 = hg(h, H_DEFAULT);
+    let lx: i32 = hg(h, H_LEXING);
+    if lx != 0 {
+        head_push(h, T_KEYPRE, 4, 0, 21);
+    } else if dc != 0 {
         head_push(h, T_KEYPRE, 4, 0, 20);
+    } else {
+        head_push(h, T_KEYPRE, 4, 0, 19);
     }
     for k in 0..17 {
         let v: i32 = hg(h, if_limit(k));
@@ -332,7 +339,10 @@ pub fn build_key_preimage(h: &mut [i32]) {
     } else {
         push_uint(h, T_KEYPRE, gw);
     }
-    if hg(h, H_DEFAULT) != 0 {
+    if (hg(h, H_DEFAULT) != 0) || (hg(h, H_LEXING) != 0) {
+        push_uint(h, T_KEYPRE, hg(h, H_DEFAULT));
+    }
+    if hg(h, H_LEXING) != 0 {
         push_uint(h, T_KEYPRE, 1);
     }
     let n: i32 = hg(h, H_NSRC);
@@ -449,6 +459,7 @@ pub fn error_name(code: i32) -> &'static str {
         55 => "control_registry",
         56 => "regexp",
         57 => "unsupported_control",
+        58 => "syntax",
         45 => "map_key",
         49 => "tag",
         50 => "major",
@@ -630,6 +641,7 @@ pub fn warning_name(code: i32) -> &'static str {
         6 => "W6",
         7 => "W7",
         8 => "W8",
+        9 => "W9",
         _ => "W0",
     };
 }
@@ -644,6 +656,7 @@ pub fn warning_message(code: i32) -> &'static str {
         6 => "order-sensitive member overlaps another member (RFC 8610 section 3.5.3)",
         7 => "worst-case group arena at the compiled limits can exceed the arena cap",
         8 => "choice alternative starts with the same cut key as an earlier one: under the default RFC cuts the earlier alternative's cut fails the whole map (see the guide, Discriminated unions under the RFC cut)",
+        9 => "occurrence maximum is below its minimum, so the entry matches nothing",
         _ => "",
     };
 }

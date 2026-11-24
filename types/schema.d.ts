@@ -15,7 +15,7 @@ export type ValidationResult = { ok: true } | {
    * `^=>`) whose value failed and the cut stopped the alternatives after it. */
   subcode?: Subcode;
 };
-/** A compile warning (never a refusal): its stable code (`W1`..`W8`), the rule it is in (null for a schema-wide
+/** A compile warning (never a refusal): its stable code (`W1`..`W9`), the rule it is in (null for a schema-wide
  * one), its 1-based line and column (0 when about no place) and a fixed message. */
 export interface CompileWarning {
   readonly code: string; readonly rule: string | null; readonly line: number; readonly column: number;

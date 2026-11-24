@@ -1,7 +1,7 @@
 {
   "artefact": "snug wasm modules (the @3sln/snug-wasm SDK loads them)",
-  "version": "0.1.0",
-  "commit": "bcfd46d010740c8c11ae1fb72a0a1f644bd7e5b2",
+  "version": "0.2.0",
+  "commit": "8c679f2f09894824c2f7252f7a4d625f90b199cf",
   "dirtyInputs": [
     "M gen/rust/snug/compile/main.rs",
     " M host/wasm/Cargo.toml"
@@ -27,9 +27,9 @@
       "role": "runtime",
       "build": "host/wasm (feature sdk), opt-level 3, LTO, one codegen unit; wasm-opt -O3 --strip-debug --strip-producers",
       "from": ".cache/snug-wasm-sdk/snug.wasm",
-      "bytes": 326155,
-      "gzip": 132235,
-      "sha256": "df36d58e3dff6df2a185a71fff239caaef467c677879c466bc888e09e5972200",
+      "bytes": 327443,
+      "gzip": 132603,
+      "sha256": "468b064bfb83628a79f21a80a549f84db25fc969d0baf04eff845e29384b428c",
       "features": [
         "bulk-memory",
         "sign-ext"
@@ -39,9 +39,9 @@
       "role": "compiler",
       "build": "host/wasm (feature compiler), opt-level \"z\", LTO, one codegen unit; wasm-opt -Oz --strip-debug --strip-producers",
       "from": ".cache/snug-wasm-cc/snug.wasm",
-      "bytes": 151945,
-      "gzip": 69080,
-      "sha256": "86b3128abc114c07c348432773900915b21ff6397eef320b26ff7aea7da9e91d",
+      "bytes": 153494,
+      "gzip": 69548,
+      "sha256": "ac0c27383b369938a0bdae52ea277f171ce17205589d6be1f8259def2b49cd5e",
       "features": [
         "bulk-memory",
         "sign-ext"

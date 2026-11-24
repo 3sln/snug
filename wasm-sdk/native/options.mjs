@@ -79,17 +79,21 @@ export function validateCompileOptions(options) {
     'pegNodes', 'arrayPositions', 'regexpPositions', 'width', 'poolBytes', 'totalBytes',
     'compileBudget', 'leaves', 'depth', 'inputBytes', 'entries', 'items', 'bignumBytes', 'budget']
     .map(name => [name, integer]));
+  // D340, D373: `abnf` and `lexing` are each 'strict' (the default) or 'lenient'
+  const strictness = enumeration('strict', 'lenient');
   const shape = { profile: enumeration('full', 'bindle', 'bus'), regexp: enumeration('xsd', 'iregexp'),
     // format 2.0: the cut mode (D301: 'rfc' default, 'branch' = rule A) and the group arena cap in words (D276, D281; at most 2^24)
     cuts: enumeration('rfc', 'branch'), groupWords: value => integer(value) && value <= 16777216,
     // D359: .default as RFC 8610 §3.8.6's implied .ne ('ne', the default) or an annotation only
     defaultControl: enumeration('ne', 'annotation'),
+    // D373: RFC 8610 Appendix B's whitespace and comments ('strict', the default) or 0.1.0's lexer ('lenient')
+    lexing: strictness,
     limits: value => checked(value, compileLimits, 'limits'),
     unicode: value => value instanceof Int32Array && !(typeof SharedArrayBuffer === 'function' && value.buffer instanceof SharedArrayBuffer),
     // D141: registered extension controls (checked in full by ext.mjs) and their admission under `bus`
     controls: controlsShape, controlsInBus: boolean,
     // D340: .abnf/.abnfb controllers parse as RFC 5234 + 7405 + 9165 §3 ('strict', the default) or 'lenient'
-    abnf: enumeration('strict', 'lenient') };
+    abnf: strictness };
   checked(options, shape, 'options');
   return options;
 }

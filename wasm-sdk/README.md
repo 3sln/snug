@@ -3,7 +3,7 @@
 CDDL (RFC 8610) validation and CBOR (RFC 8949) encoding, decoding and checked
 views, running on the WebAssembly build of snug's Rust core.
 
-> **Experimental.** @3sln/snug-wasm 0.1.0 is an early release. The API may
+> **Experimental.** @3sln/snug-wasm 0.2.0 is an early release. The API may
 > change between 0.x versions, and it has not seen production use yet.
 > [Issues and feedback](https://github.com/3sln/snug/issues) are welcome.
 

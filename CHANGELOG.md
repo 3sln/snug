@@ -10,6 +10,118 @@ artefact — `[js]`, `[rust]`, `[wasm-sdk]` — when they do not apply to all;
 paths, not links, because this file ships in the npm package and the crate,
 and neither contains those files.
 
+## [0.2.0] — 2026-11-24
+
+### Breaking
+
+- `[rust]` `SequenceOptions` is `#[non_exhaustive]`: build it from
+  `SequenceOptions::default()` and set its fields; a struct literal, even
+  with `..SequenceOptions::default()`, no longer compiles outside the crate.
+  It has a new field, `quantum`: work units between yields for
+  `read_sequence_async` and `Schema::read_sequence_async`, which answer
+  `Pending` (after waking themselves) once per yield, inside a long message
+  too. The sync readers (`read_sequence`, `Schema::read_sequence`,
+  `Sequence`) never yield, and refuse a nonzero quantum with
+  `Error::Usage("options")`, as JS's `sequenceReader` refuses one (D371).
+- `[rust]` `Sequence::feed` and `Sequence::finish` after the sequence has
+  ended (`finish`, or a refusal that stops it) answer one
+  `Error::Usage("ended")`; they answered nothing. JS and the wasm SDK throw
+  `TypeError` there already (D371).
+- `[rust]` `SourceError::TooLarge` is removed, and with it
+  `Error::Source("too_large")`. A blob of 2³¹ bytes or more now gets the
+  verdict `cbor/too_large` at offset 0, unread, as a smaller blob over the
+  input limit does. `[js]` `[wasm-sdk]` The same for a handle, and for a
+  push source's declared length: `validateHandle`, `validateHandleSync` and
+  `pushValidator(schema, length, …)` answer that verdict, and `scanHandle`,
+  `scanHandleSync` and `pushScanner(length)` throw `SnugFault` `too_large`
+  (a push source at its first step, as one of 2³¹ − 1 bytes over the limit);
+  they threw `TypeError`. `openSession(schema, rule, length)` still refuses
+  such a length with `TypeError` (D371, D371a).
+- `/=` on a prelude name extends the prelude rule instead of replacing it:
+  RFC 8610 Appendix D adds the prelude to every schema. `uint /= tstr` now
+  accepts `1` as well as `"a"`, and the prelude rules built on the name
+  follow (`int /= bool` widens `int` and `integer`). Every prelude rule is a
+  plain type, so `//=` on a prelude name is now `type_group_mismatch` and a
+  generic `/=` on one is `generic_arity`. To replace a prelude rule, define
+  it with `=` (D372).
+- Tab-indented schemas need `lexing: 'lenient'` (Rust `Lexing::Lenient`).
+  Schema text is lexed as RFC 8610 Appendix B says by default: whitespace is
+  space, LF and CR LF, and a comment holds no control characters. A tab, a
+  lone CR, or a C0, DEL or C1 character in a comment is now `syntax`, with a
+  message naming the option (D373).
+
+### Added
+
+- The compile option `lexing: 'strict' | 'lenient'` (Rust
+  `CompileOptions::lexing`, `Lexing`, `#[non_exhaustive]`): `'strict'` is the
+  default; `'lenient'` is 0.1.0's lexer. A comment on the last line needs no
+  newline in either. `'lenient'` is part of the source key (D373).
+
+- Decimal float literals in a schema may have up to 20 significant digits
+  (17 before), still rounded exactly and identically on every host, so
+  `1.0000000000000001111` is 1 + 2⁻⁵². A longer one is `float_literal`
+  (D372).
+
+- `[rust]` Chainable setters on `SequenceOptions`, one per field, named after
+  it: `SequenceOptions::default().quantum(64).max_depth(Some(8))`. Each takes
+  and returns the options by value and is `#[must_use]`. `SequenceOptions`
+  stays `#[non_exhaustive]`, so fields can still be added without a breaking
+  release; the setters are how code outside the crate builds one without a
+  struct literal. Assigning the fields of a mutable default still works
+  (D374).
+
+### Budget and limits
+
+- Documented: under `wire: 'valid'` a validation call can do up to about
+  twice its budget's work, plus passes linear in the input, and one compile
+  can do up to (restarts + 1) × `compileBudget` (at most 9×, usually under
+  2×). Size budgets for both (D371).
+- The compiler's first working memory is sized from the schema text's length
+  (65,536 words plus 48 a byte, at most 4,194,304 words), so a large schema
+  usually compiles without restarting; before, every compile started at
+  65,536 words and doubled. The cap (16,777,216 words), the per-isolate and
+  per-thread reuse and every outcome are unchanged. A schema of a few
+  kilobytes or more compiles about 1.1–2× faster the first time in a process
+  (D374).
+
+### Fixed
+
+- A `;` comment inside `b64''` is skipped, as inside `h''`: RFC 9682
+  Appendix B.2 applies the whitespace rules, comments included, to both. It
+  was `syntax`, and still is under `lexing: 'lenient'`, which keeps 0.1.0's
+  lexer. Under the default strict lexing, a C0 control (other than the CR of
+  a CR LF), DEL or C1 character in an `h''` or `b64''` comment is `syntax`,
+  as in any other comment; only an escape such as `\u0001` can put one there
+  (D374).
+- `bstr .cborseq any` compiles: `any` matches every array, so the content
+  is any CBOR sequence, as `[* any]` (RFC 8610 §3.8.4); it was
+  `control_value`. Every other controller type must still be an array:
+  `bstr .cborseq uint` and an AND of arrays such as
+  `[* uint] .and [2*2 any]` stay `control_value` (D372, D373).
+- An occurrence `n*m` with m < n, such as `[3*2 uint]`, compiles and
+  matches nothing (RFC 8610 §3.2); it was `syntax`. The new compile
+  warning W9 flags it (D372).
+- `[wasm-sdk]` A session or sequence reader closed by an extension
+  predicate from inside its own step is freed when the step ends, and that
+  step answers `TypeError` ("closed during its step"), as natively. Before,
+  the close met the instance's guard and threw, and a predicate that caught
+  that left the session live: the reader counted as ended, so nothing freed
+  it until garbage collection. A reader whose close throws is no longer
+  marked ended, so a later close still frees it (D371).
+- `[wasm-sdk]` The runtime module no longer makes two mutable references
+  to its state at once (navigation lookups read the key buffer while
+  holding the navigation words); an export called while another runs now
+  traps, which the SDK reports as `InstanceLost`. No verdict changes (D371).
+
+### Security
+
+- `[js]` `[wasm-sdk]` `view(bytes, { schema, rule })` and
+  `View.validateAt(rule, { schema })` take only a Schema made by the same
+  package; any other object is a `TypeError`. An object with a Schema's
+  methods passed the options check: the JS view trusted its answer, so one
+  that answered `ok` opened a View of bytes nothing had checked, and the
+  wasm SDK's let it choose the rule the bytes were checked against (D371).
+
 ## [0.1.0] — 2026-11-17
 
 The first release. The **Breaking**, **Fixed** and **Security** entries

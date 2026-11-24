@@ -179,6 +179,9 @@ export class Program {
   serialize() { const { P, B } = internals.get(this); return serializeProgram(P, B, versions.get(this)); }
 }
 export const innerOf = program => internals.get(program);
+// D371: the Schemas this module made; view() and View.validateAt take no other object
+const schemas = new WeakSet();
+export const isSchema = s => schemas.has(s);
 
 function bytesInput(bytes) {
   if (!(bytes instanceof Uint8Array)) throw new TypeError('snug: bytes must be a Uint8Array');
@@ -191,6 +194,7 @@ export class Schema {
     if (!internals.has(program)) throw new TypeError('snug: Schema needs a verified Program');
     brand(this, 'Schema');
     this.program = program; this.#inner = internals.get(program);
+    schemas.add(this);
     Object.freeze(this);
   }
   /** The compile warnings, as the native Schema's. */

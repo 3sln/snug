@@ -29,10 +29,10 @@ current implementation.
 
 | Construct | Supported behaviour |
 | --- | --- |
-| Type/group rules, references, `/=`, `//=` | Supported; duplicate `=` definitions refused. User rules may shadow prelude names. |
+| Type/group rules, references, `/=`, `//=` | Supported. A second `=` for a name is `duplicate_rule`, even when it is identical to the first (RFC 8610 does not say; refusing it catches mistakes). `/=` on a prelude name extends the prelude rule, which RFC 8610 Appendix D says is automatically added: `uint /= tstr` accepts both `1` and `"a"`. Every prelude rule is a type, so `//=` on one is `type_group_mismatch`. `=` on a prelude name shadows the prelude rule, and the prelude rules built on that name follow it: `tstr = bstr` also makes `text` a byte string. |
 | Type choices `/`, group choices `//`, nested groups | Supported. A type choice over one item is a set test; a group choice `//` is prioritised and locks in its first successful alternative (RFC 8610 Appendix A; see [arrays](#arrays-and-repetition)). |
 | Maps `{}`, arrays `[]`, labelled members | Supported; array member names are labels, not matching constraints. |
-| Occurrence `?`, `*`, `+`, `n*m`, fixed counts | Supported within the exactness/size conditions below. |
+| Occurrence `?`, `*`, `+`, `n*m`, fixed counts | Supported within the exactness/size conditions below. `n*m` with m < n, such as `[3*2 uint]`, is valid syntax (RFC 8610 §3.2) that matches nothing; compile warning W9 flags it. |
 | Generic type/group rules and instantiation | Supported, memoised with limits; unresolved/wrong-arity uses refused. |
 | Sockets `$name`, `$$name` and extensions | Supported in `full`; an unplugged `$x` is the empty type choice and an unplugged `$$x` the empty group choice (RFC 8610 §3.9): nothing matches through them, so `{ a: int, $$x }` matches nothing until plugged, while `? $$x` matches by absence. |
 | Unwrap `~`, group enumeration `&` | Supported for applicable targets; map/enumeration recursive groups refused. |
@@ -41,7 +41,7 @@ current implementation.
 | Numeric, text and byte literals, ranges `..`/`...` | Exact integer comparison; numeric float comparison, prelude float widths as sets of values; hexadecimal/decimal floats and h'/b64'/byte literals supported. The integer literal `-0` (or `-0x0`) is 0; the float `-0.0` stays negative zero. |
 | Major-type syntax, tags | `#0`…`#7`, simple values `#7.n`, tag content `#6.n(T)`, and RFC 9682 §3.2 head numbers `#6.<T>(C)` and `#7.<T>`. For `#7`, a head number 0..23 or 32..255 is that simple value; 24 is every simple value 32..255 (additional information 24); 25, 26 and 27 are `float16`, `float32` and `float64` (by value); 28..31 match nothing. `T` must be an integer type; its values above 255 match nothing. `#0.n` to `#3.n` read `n` as the head's additional information (RFC 8610 §2.2.3), by value: below 24 the argument `n` itself (`#0.5` is 5, `#1.0` is −1, `#2.3` a 3-byte byte string); 24, 25, 26 and 27 an argument of 1, 2, 4 or 8 bytes (`#0.24` is 0..255, `#3.25` a text of at most 65,535 bytes); 31 an indefinite length (any byte or text string, no integer); 28..30 nothing. `#4.n` and `#5.n` are refused. Runtime profile still restricts actual tags/simple values. |
 | Appendix D prelude | Compiled from CDDL text. `biguint`, `bignint` and `bigint` match every tag 2/3 bignum, non-preferred ones included under `valid` (leading zeroes, small values; RFC 8949 §3.4.3); ranges and numeric controls compare bignums by value. Some names have no value under the current wire profile. |
-| UTF-8 schema text and escapes | Whole schema must be valid UTF-8; code-point columns, HT whitespace, Unicode escapes/surrogate pairs, RFC 9682 braced escapes, byte-literal whitespace/comments supported. |
+| UTF-8 schema text and escapes | Whole schema must be valid UTF-8; code-point columns, Unicode escapes/surrogate pairs, RFC 9682 braced escapes, byte-literal whitespace/comments supported. Whitespace and comments follow RFC 8610 Appendix B by default: space, LF and CR LF, and comments without control characters; a tab, a lone CR or a C0/DEL/C1 character in a comment is `syntax`. The compile option `lexing: 'lenient'` (Rust `Lexing::Lenient`) accepts them, as snug 0.1.0 did. Inside `h''` and `b64''` the content, after escapes, may hold whitespace and `;` comments up to a newline (RFC 9682 Appendix B.2). In a comment there, strict lexing refuses a C0 control (other than the CR of a CR LF), DEL or C1 character, which only an escape can put there. Outside a comment, a tab or CR from an escape (`\t`, `\r`) counts as whitespace in both modes. Under `lexing: 'lenient'` an `h''` comment may hold any character, and a `;` inside `b64''` is `syntax`, as in 0.1.0. A comment on the last line needs no newline in either mode, a deliberate deviation from RFC 8610's `COMMENT`, which ends in one. |
 
 Only user non-generic **type** rules become validation roots. Productive
 recursive schema instantiation must fit the compile budget and limits;
@@ -59,10 +59,10 @@ ever-growing generic expansion is refused rather than exhausting resources.
 | `.and`, `.within` | Intersections, with operands evaluated as same-item dependencies; they do not create extra accepting alternatives. |
 | `.regexp` | Whole-string XSD Appendix F by default; `regexp: 'iregexp'` selects strict RFC 9485. Both compile to the same bounded code-point automata; details below. |
 | `.cbor T` | Byte content must be exactly one current-profile CBOR item matching T. |
-| `.cborseq [G]` | Byte content is a sequence matching the controller's array group, including positions/occurrences. Controller must be array types only. |
+| `.cborseq [G]` | Byte content is a sequence matching the controller's array group, including positions/occurrences. `any` matches every array, so `.cborseq any` is `.cborseq [* any]` (RFC 8610 §3.8.4). Every other controller type must be an array type: `bstr .cborseq uint`, `.cborseq ([uint] / tstr)` and an AND of arrays such as `.cborseq ([* uint] .and [2*2 any])` are `control_value`. |
 | `.default`, `.feature` | `.feature` is an annotation, no effect on matching. `.default` carries RFC 8610 §3.8.6's implied `.ne`: a value equal to the default is left out, so present it does not match (`uint .default 1` refuses `1`). A default `.ne` cannot compare (an array, a map, a range, or a target such as `any`) is refused as that `.ne` would be. The compile option `defaultControl: 'annotation'` (Rust `DefaultControl::Annotation`) makes `.default` an annotation with no effect, as RFC 8610 Erratum 9229 proposes; that erratum's status is Reported, not verified. |
 | `.cat`, `.det` | Compile-time concatenation of two text or byte string literals, of either kind; the result has the target's type and, as text, must be valid UTF-8 (RFC 9165 §2.2); `.det` dedents each literal first (RFC 9165 §2.3: lines end at LF or CR LF, so a line of spaces before CR LF is blank). |
-| `.plus` | Compile-time addition of two integer literals, any size; float operands refused. |
+| `.plus` | Compile-time addition of two integer literals, any size. A float operand is refused (`control_value`). RFC 9165 §2.1 also defines sums with a float, converted to the target's type; snug does not implement those. |
 | `.abnf`, `.abnfb` | RFC 9165 §3 ABNF (RFC 5234 with RFC 7405's `%s`/`%i` strings), with the **optional module** `@3sln/snug/abnf` / `Controls::with_abnf()`; without it `unsupported_control`, naming the module. Language membership over the string's Unicode scalars (`.abnf`) or bytes (`.abnfb`), targets of either string type; metered against the budget. See [ABNF](#abnf-abnf-abnfb) below. |
 | registered `.name` | An **extension control**: `target .name argument` with `.name` registered at compile time; the target AND a host predicate over the item's encoding. The argument must be a literal: integer, text, bytes, a named simple value (`true`), a range `lo..hi` (passed as `[lo, hi]`) or an array of those. Generic ones ship in `@3sln/snug/controls` / `snug::controls`: `.chars`, `.unique`, `.samelen`. Refused under the `bus` profile unless `controlsInBus`. See the guide's "Custom controls". |
 
@@ -74,8 +74,9 @@ binary64 holds it, the nearest binary64 inside the half-line. So `number .ge
 0`, `float .lt 1` and `int .eq 1.0` compile; `.eq` across the kinds matches
 only an exactly equal value.
 Decimal schema float literals have
-at most 17 significant digits, must be finite, and a nonzero value may not
-round to zero. Hex floats are rounded exactly, identically on every host. Unsupported
+at most 20 significant digits (trailing zeroes do not count), must be finite, and a nonzero
+value may not round to zero. Each one is rounded to the nearest binary64 exactly, identically on
+every host. A longer literal is refused (`float_literal`). Hex floats are rounded exactly, identically on every host. Unsupported
 control targets/controllers are errors rather than ignored controls.
 
 An unregistered `.name` is the schema error `unknown_control`, and the message

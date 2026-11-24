@@ -83,9 +83,14 @@ What `valid` reads, and how:
 
 The first refusal in stream order decides, whatever its class: a validity
 refusal met before a well-formedness error is the answer. For example, RFC
-8949 Appendix F.1's `bf 01 02 01 02` (not closed) and `bf 00 00 00 ff` (a
-break as a map value) are `duplicate_key` at offset 3 under `valid`, not
-`truncated` / `malformed`. Only `truncated` and `malformed` are
+8949 Appendix F.1's `bf 01 02 01 02` (kind 2, too little data: the map is
+never closed) and `bf 00 00 00 ff` (kind 3, subkind 4: a break in a value
+position) are `duplicate_key` at offset 3 under `valid`. A reading that
+checks well-formedness first would call them `truncated` at offset 5 and
+`malformed` at offset 4. snug keeps stream order because it walks once,
+without reading ahead: a verdict never depends on bytes after the refusal,
+and a buffer, a stream and every chunking of it give the same code and
+offset. Only `truncated` and `malformed` are
 well-formedness verdicts, under every preset: `f8` followed by a value below
 32 is `malformed` under `deterministic` and Bindle too, not `non_shortest`
 or `simple`.

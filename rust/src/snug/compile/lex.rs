@@ -462,8 +462,10 @@ pub(crate) fn lex_number(h: &mut [i32], s: i32, p: i32, negative: i32) -> i32 {
         push_tok(h, TK_INT, s, k, negative, off4, len4);
         return k;
     }
-    // Decimal float: at most 17 significant digits (D020), converted by the host.
-    if (first_nz >= 0) && (((last_nz - first_nz) + 1) > 17) {
+    // Decimal float: at most 20 significant digits (D020, D372: ECMA-262
+    // StringToNumber rounds correctly up to 20 and Rust's parse always does),
+    // converted by the host.
+    if (first_nz >= 0) && (((last_nz - first_nz) + 1) > 20) {
         return fail(h, ERR_FLOAT, s);
     }
     let idx: i32 = hg(h, H_N_FLOATS);
@@ -645,9 +647,11 @@ pub(crate) fn lex_bytes(h: &mut [i32], s: i32, q: i32, qual: i32) -> i32 {
     // A byte string token starting at s whose quote is at q; qual 0 plain
     // (UTF-8 of the text), 1 h'' (hex), 2 b64'' (base64 or base64url). The
     // quoted body is decoded first; h and b64 then reinterpret it, skipping
-    // whitespace and (h'' only, RFC 9682) ;-comments.
+    // whitespace and ;-comments (RFC 9682 Appendix B.2; b64'' under strict lexing
+    // only, D374: lenient refuses a ; there, as 0.1.0 did).
     let raw: i32 = vlen(h, T_LITB);
     let e: i32 = lex_quoted(h, q, 39);
+    let strict: bool = hg(h, H_LEXING) == 0;
     if e < 0 {
         return -1;
     }
@@ -665,8 +669,17 @@ pub(crate) fn lex_bytes(h: &mut [i32], s: i32, q: i32, qual: i32) -> i32 {
         let c: i32 = vget(h, T_LITB, raw + i);
         if ((c == 32) || (c == 9)) || ((c == 10) || (c == 13)) {
             i += 1;
-        } else if (qual == 1) && (c == 59) {
+        } else if (c == 59) && ((qual == 1) || strict) {
+            // RFC 9682 Appendix B.2: a ;-comment to LF, in h'' and (strict, D374)
+            // b64''. Strict: PCHARs, so a C0 (but CR LF's CR), DEL or C1 (C2 80..9F),
+            // which only an escape can put here, is refused at the literal (`syntax`:
+            // lenient refuses a b64'' comment too, so no lexing hint).
             while (i < rawlen) && (vget(h, T_LITB, raw + i) != 10) {
+                let d: i32 = vget(h, T_LITB, raw + i);
+                let n: i32 = vget(h, T_LITB, raw + (i + 1));
+                if strict && (((d == 127) || ((d == 194) && (n < 160))) || ((d < 32) && ((d != 13) || ((n != 10) || ((i + 1) >= rawlen))))) {
+                    return fail(h, ERR_SYNTAX, s);
+                }
                 i += 1;
             }
         } else if qual == 1 {
@@ -749,17 +762,43 @@ pub(crate) fn id_end(h: &[i32], i: i32) -> i32 {
         }
     }
 }
-pub(crate) fn skip_space(h: &[i32], i: i32) -> i32 {
-    // Past whitespace (SP, HT, LF, CR) and ;-comments.
+pub(crate) fn skip_space(h: &mut [i32], i: i32) -> i32 {
+    // Past whitespace and ;-comments, or -1. Strict (the default, D373/F9; RFC 8610
+    // Appendix B's S): SP, LF and CR LF; a comment is PCHARs up to a newline or the
+    // text's end (a final comment needs no newline, in both modes). HT, a lone CR and
+    // a control character (C0, DEL, C1) in a comment are ERR_LEXING. Lenient
+    // (`lexing: 'lenient'`, 0.1.0's lexer): SP, HT, LF and CR, and a comment runs to
+    // LF or CR whatever it holds.
     let mut j: i32 = i;
+    let strict: bool = hg(h, H_LEXING) == 0;
     loop {
         let c: i32 = sc(h, j);
-        if ((c == 32) || (c == 9)) || ((c == 10) || (c == 13)) {
+        if (c == 32) || (c == 10) {
+            j += 1;
+        } else if (c == 9) || (c == 13) {
+            if strict && ((c == 9) || (sc(h, j + 1) != 10)) {
+                return fail(h, ERR_LEXING, j);
+            }
             j += 1;
         } else if c == 59 {
             j += 1;
-            while (sc(h, j) >= 0) && ((sc(h, j) != 10) && (sc(h, j) != 13)) {
-                j += 1;
+            loop {
+                let d: i32 = sc(h, j);
+                if (d < 0) || ((d == 10) || (d == 13)) {
+                    break;
+                }
+                if strict && ((d < 32) || (d == 127)) {
+                    return fail(h, ERR_LEXING, j);
+                }
+                if strict && (d > 127) {
+                    let cp: i32 = cp_at(h, j);
+                    if (cp < 160) || (cp > 1114109) {
+                        return fail(h, ERR_LEXING, j);
+                    }
+                    j += hg(h, H_R1);
+                } else {
+                    j += 1;
+                }
             }
         } else {
             return j;
@@ -883,6 +922,9 @@ pub fn lex(h: &mut [i32], from: i32) -> i32 {
             return -1;
         }
         i = skip_space(h, i);
+        if i < 0 {
+            return -1;
+        }
         if sc(h, i) < 0 {
             push_tok(h, TK_EOF, i, i, 0, 0, 0);
             if erred(h) {

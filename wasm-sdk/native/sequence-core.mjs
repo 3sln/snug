@@ -123,8 +123,10 @@ class SequenceCore {
     res.error = e; res.state = 'done';
     return res;
   }
-  /** The sequence ended: the backend's session (if it holds one) is freed. */
-  close() { this.done = true; this.b.close?.(); }
+  /** The sequence ended: the backend's session (if it holds one) is freed. `done` only once that
+   *  succeeded (D371): a close that threw leaves the reader open, so a later close (a readSequence
+   *  loop's exit) still frees the session. */
+  close() { this.b.close?.(); this.done = true; }
   enter() {
     if (this.done) throw new TypeError('snug: the sequence has ended');
     if (this.busy) throw new Error('snug: a sequence reader cannot be re-entered');

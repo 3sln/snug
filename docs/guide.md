@@ -956,6 +956,20 @@ encoded document. Embedded `.cbor`/`.cborseq` checks restart item accounting
 but share the VM budget and remain physically depth-bounded. `validateAt`
 continues depth but restarts items unless explicitly seeded.
 
+The work limits are per attempt, so size them with some headroom:
+
+- **Validation work units under `wire: 'valid'`.** A call can do up to about
+  twice the budget's work, plus passes over the input that are linear in its
+  size. The first walk reads the input as sent; when it meets an encoding only
+  valid CBOR allows (an indefinite length, for example), or runs out of
+  budget, a second walk with its own budget runs over the input's canonical
+  copy.
+- **Compile work units.** When the compiler's working memory runs out it grows
+  it and starts again with a fresh budget, so one compile can do up to
+  (restarts + 1) × `compileBudget`: at most 9×, and usually under 2×. The
+  first memory is sized from the schema text's length, so most schemas need
+  no restart.
+
 Compile limit names are in the [API reference](api.md#compilation).
 Runtime schema options are `maxBytes`, `maxDepth`, `maxEntries`, `maxItems`,
 `maxBignumBytes`, `budget`; they can only lower compiled values. Bignum

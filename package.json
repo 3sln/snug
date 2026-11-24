@@ -1,6 +1,6 @@
 {
   "name": "@3sln/snug",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "CDDL (RFC 8610) validation and CBOR (RFC 8949) encoding, decoding and checked views",
   "keywords": [
     "cddl",

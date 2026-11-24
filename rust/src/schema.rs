@@ -553,8 +553,6 @@ pub enum SourceError {
     /// The source failed with no error to keep (`read`); prefer
     /// [`SourceError::Io`] when there is one.
     Read,
-    /// The blob is larger than the session can address (`too_large`).
-    TooLarge,
     /// The process has its maximum of live sessions ([`crate::sessions`]).
     SessionLimit,
     /// The transport's own error, kept whole for
@@ -657,13 +655,17 @@ pub(crate) struct BlobCore<'p> {
 impl<'p> BlobCore<'p> {
     pub(crate) fn new(prog: &'p Program, rule: i32, size: usize, opts: &Options, chunk: usize, quantum: i32)
                       -> Result<BlobCore<'p>, SourceError> {
-        if size > 0x7fff_ffff {
-            return Err(SourceError::TooLarge);
-        }
-        let session = Session::new(prog, rule, size as i32, opts, quantum).map_err(|_| SourceError::SessionLimit)?;
+        // D371: a blob of 2^31 bytes or more is larger than every limit allows. Its session is
+        // opened for 0 bytes (nothing sized by the length is allocated) and `next` answers
+        // too_large at offset 0 unread, what an over-limit blob of 2^31 - 1 bytes gets.
+        let total = if size > 0x7fff_ffff { 0 } else { size as i32 };
+        let session = Session::new(prog, rule, total, opts, quantum).map_err(|_| SourceError::SessionLimit)?;
         Ok(BlobCore { session, size, chunk, quantum, base: 0, window: Vec::new(), at: 0, need: chunk.min(size), reading: None })
     }
     pub(crate) fn next(&mut self) -> Io {
+        if self.size > 0x7fff_ffff {
+            return Io::Done(Err(Failure { code: 20, reason: "cbor/too_large", subcode: None, offset: 0, path: Vec::new(), budget_used: 0 }));
+        }
         loop {
             if let Some((offset, len)) = self.reading {
                 return Io::Read { offset, len };

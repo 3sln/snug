@@ -37,6 +37,8 @@ const decoder = new TextDecoder('utf-8', { ignoreBOM: true });
 const encoder = new TextEncoder();
 const MAX_SAFE = Number.MAX_SAFE_INTEGER;
 const DIRECTORY_MIN = 8;
+/** view() and View.validateAt take only a snug Schema (D371; the wasm SDK's says the same). */
+const NOT_A_SCHEMA ='snug view: the schema option must be a snug Schema';
 const isShared = b => typeof SharedArrayBuffer === 'function' && b.buffer instanceof SharedArrayBuffer;
 
 // ------------------------------------------------------------------ message state
@@ -402,6 +404,7 @@ export class View {
     const { schema } = options;
     const m = this.#m, s = schema ?? m.schema;
     if (!s) throw new TypeError('snug view: validateAt needs a schema');
+    if (!schemaPrograms.has(s)) throw new TypeError(NOT_A_SCHEMA);   // D371, as view()'s
     const e = m.skip(this.#p);
     return s.validateAt(m.b, this.#p, e, rule, { ...m.limits, cose: m.cose && this.#d === 0, top: 'any', depth: this.#d });
   }
@@ -529,18 +532,18 @@ export function view(bytes, opts = {}) {
   // Valid input that is not its own deterministic form is read through its canonical copy (P8.4, D262), which the
   // view owns: offsets are positions in it, raw() its canonical encodings, map order the wire's.
   if (opts.schema) {
+    // D371: only a snug Schema. An object that merely has a Schema's methods could answer `ok` for any bytes,
+    // and the View would then walk input nothing checked
+    const program = schemaPrograms.get(opts.schema);
+    if (!program) throw new TypeError(NOT_A_SCHEMA);
     if (typeof opts.rule !== 'string') throw new TypeError('snug view: a schema needs a rule');
     const copy = {}, vo = selectOptions(opts, 'validation');
-    // D351: a snug Schema (the public one has no `check`) runs through its Program, so the view gets the
-    // canonical copy of valid input that is not its own deterministic form
-    const program = schemaPrograms.get(opts.schema);
-    let r;
-    if (program) {
-      const rule = program.ruleIndex(opts.rule);
-      if (rule < 0) throw new TypeError('snug: unknown rule');
-      validateOptions(vo, 'validation');
-      r = program.result(program.run(rule, b, vo, undefined, copy));
-    } else r = typeof opts.schema.check === 'function' ? opts.schema.check(b, opts.rule, vo, copy) : opts.schema.validate(b, opts.rule, vo);
+    // D351: the Schema runs through its Program, so the view gets the canonical copy of valid input that is
+    // not its own deterministic form
+    const rule = program.ruleIndex(opts.rule);
+    if (rule < 0) throw new TypeError('snug: unknown rule');
+    validateOptions(vo, 'validation');
+    const r = program.result(program.run(rule, b, vo, undefined, copy));
     if (!r.ok) { const e = new Error(`snug: ${r.reason}`); e.reason = r.reason; e.path = r.path; e.offset = r.offset; if (r.subcode) e.subcode = r.subcode; throw e; }
     if (copy.bytes) { b = copy.bytes; borrowed = false; }
     unsorted = copy.unsorted === true;

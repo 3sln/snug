@@ -1,11 +1,11 @@
 {
   "note": "Generated release output (docs/release-policy.md §9), not source history.",
-  "version": "0.1.0",
-  "source": "bcfd46d010740c8c11ae1fb72a0a1f644bd7e5b2",
+  "version": "0.2.0",
+  "source": "8c679f2f09894824c2f7252f7a4d625f90b199cf",
   "artefacts": {
-    "3sln-snug-0.1.0.tgz": "624605fc80348119b4e1b6fef85d531cfc553df1fd38de355795937ed3a4987e",
-    "snug-cbor-0.1.0.crate": "bed3798eac1a9fc4881656b40b77da5e117752d86a1e1eb40c7099d062f13a95",
-    "3sln-snug-wasm-0.1.0.tgz": "62cb7e2c9486f1348d64df9cca95e3731e9b9fefdf65fd4ccbfc7e9a657fa3c2"
+    "3sln-snug-0.2.0.tgz": "d8569dc7dfface6d98ea5ddda30ea905b7b30ad5043dcbd0d99536dfaf7300ce",
+    "snug-cbor-0.2.0.crate": "5b9e930c015d99eb8dbe9c012d753b6419a9d33a4b8551d70b4944daa1aaf960",
+    "3sln-snug-wasm-0.2.0.tgz": "5615a5a264d10c3532e3f5071614f466c4a6ff9c3b189bb54a6b90b7b6cdfee7"
   },
   "trees": {
     "/": "@3sln/snug",

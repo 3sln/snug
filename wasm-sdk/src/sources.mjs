@@ -58,11 +58,16 @@ class WasmSession {
   constructor(h) {
     if (h === -3) throw sessionLimitFault();
     if (h < 0) throw new Error(`snug wasm: session refused (${h})`);
-    this.h = h; this.gen = rt.generation; this.wp = 0; this.wcap = 0; this.done = false;
+    this.h = h; this.gen = rt.generation; this.wp = 0; this.wcap = 0; this.done = false; this.stepping = false;
     this.token = {}; sessions.register(this, { h, gen: this.gen }, this.token);
     this.lastWindow = null; this.lastLen = -1; this.lastBase = -1;
   }
-  free() { if (this.h >= 0) { if (this.gen === rt.generation) rt.x.sdk_ses_free(this.h); sessions.unregister(this.token); this.h = -1; } }
+  // D371 (the native D347): freed from inside its own step (an extension predicate closing it), the
+  // session keeps its state until the step has left the instance; the step then frees it
+  free() {
+    if (this.stepping) return;
+    if (this.h >= 0) { if (this.gen === rt.generation) rt.x.sdk_ses_free(this.h); sessions.unregister(this.token); this.h = -1; }
+  }
   live() { if (this.h < 0 || this.gen !== rt.generation) throw new Error('snug wasm: the session is finished or its instance was reset'); }
   /** The window buffer, at least n bytes (contents kept): its pointer. */
   window(n) {
@@ -80,8 +85,10 @@ class WasmSession {
   raw(n, base) {
     this.live();
     let r;
+    this.stepping = true;
     try { r = rt.withExt(this.ext ?? null, () => rt.x.sdk_ses_step(this.h, n, base)); }
     catch (e) { this.h = -1; rt.lost(e); }
+    finally { this.stepping = false; }
     rt.refresh();   // a step may grow memory (key arena copies, the EXT window): re-derive the views first
     return r;
   }
@@ -150,6 +157,8 @@ class VmSession extends WasmSession {
     const r = this.raw(n, base);
     // a predicate that threw voids the session (its walk went on with a false verdict)
     try { rethrow(this.ext); } catch (e) { this.dead = e; this.free(); throw e; }
+    // closed during the step (D371, as native D347): freed now, and the step has no answer
+    if (this.closed) { this.free(); throw new TypeError('snug: the session was closed during its step'); }
     if (r === VMS_NEED) return { state: 'need', offset: this.info(0), length: this.info(1), keep: this.info(3) };
     if (r === VMS_YIELD) return { state: 'yield', position: this.info(2), keep: this.info(3) };
     if (r === VMS_HELD) return { state: 'held', result: this.inner.result() };
@@ -242,14 +251,47 @@ function checkRead(chunk, offset, length) {
   if (chunk.length !== length) throw new SourceError('short_read', `A handle read at ${offset} gave ${chunk.length} of ${length} bytes.`);
   return chunk;
 }
+/** The length a handle's session is opened for. D371: a handle of 2^31 bytes or more is larger than
+ *  every limit allows: its session is opened for 0 bytes (the checks of any handle, no allocation
+ *  sized by the length), freed unread, and the answer is too_large at offset 0, as natively. */
 function checkHandle(handle) {
   if (!handle || !Number.isSafeInteger(handle.size) || handle.size < 0 || typeof handle.read !== 'function') throw new TypeError('a handle is {size, read(offset, length)}.');
+  return huge(handle.size) ? 0 : handle.size;
+}
+// D371, D371a: a handle size or declared length past every limit, and the answer it gets
+const huge = n => Number.isSafeInteger(n) && n > I32_MAX;
+const TOO_LARGE = () => ({ ok: false, reason: 'cbor/too_large', path: [], offset: 0 });
+
+/** D371a: a push source of a declared length of 2^31 or more, as natively. Its session (opened for 0
+ *  bytes, so every argument is checked) is freed, and the source answers as an over-limit one of
+ *  2^31-1 bytes does: its first step (a non-empty feed, resume, or finalize once every declared byte
+ *  was delivered) is too_large at offset 0, through `settle` (scanResult for a scanner). */
+function tooLargePush(session, length, settle) {
+  session.free();
+  let delivered = 0, want = null;
+  const step = () => (want ??= { state: 'done', result: settle(TOO_LARGE()) });
+  return {
+    feed(chunk) {
+      if (!(chunk instanceof Uint8Array)) throw new TypeError('feed expects a Uint8Array.');
+      if (delivered + chunk.length > length) throw new SourceError('length_mismatch', 'More bytes were pushed than the declared length.');
+      delivered += chunk.length;
+      return want || chunk.length ? step() : { state: 'need' };
+    },
+    resume: step,
+    close() {},
+    finalize() {
+      if (delivered !== length) throw new SourceError('length_mismatch', `The source delivered ${delivered} of ${length} declared bytes.`);
+      return step().result ?? true;
+    },
+  };
 }
 
-function* driveSession(session, handle, chunk) {
+/** settle: the answer of a validation result (scanResult for a scan; none: the result itself). */
+function* driveSession(session, handle, chunk, settle) {
   let base = 0, window = new Uint8Array(0);
   let want = { state: 'need', offset: 0, length: Math.min(chunk, handle.size) };
   try {
+    if (huge(handle.size)) { const r = TOO_LARGE(); return settle ? settle(r) : r; }
     for (;;) {
       if (want.state !== 'done') {
         const at = want.state === 'need' ? want.offset : want.position;
@@ -338,15 +380,13 @@ function scanDrive(handle, options, opts) {
   validateOptions(options, 'decode');
   validateOptions(opts, 'source');
   const { chunk = 65536, quantum = 0 } = opts;
-  checkHandle(handle);
-  return driveSession(scanSession(handle.size, options, { quantum }), handle, chunk);
+  return driveSession(scanSession(checkHandle(handle), options, { quantum }), handle, chunk, scanResult);
 }
 function vmDrive(schema, handle, rule, options, opts) {
   validateOptions(options, 'validation');
   validateOptions(opts, 'source');
   const { chunk = 65536, quantum = 0 } = opts;
-  checkHandle(handle);
-  return driveSession(PublicSession.host(openSession(schema, rule, handle.size, options, { quantum })), handle, chunk);
+  return driveSession(PublicSession.host(openSession(schema, rule, checkHandle(handle), options, { quantum })), handle, chunk);
 }
 
 export async function scanHandle(handle, options = {}, opts = {}) { return runAsync(scanDrive(handle, options, opts)); }
@@ -356,7 +396,8 @@ export function validateHandleSync(schema, handle, rule, options = {}, opts = {}
 
 export function pushScanner(length, options = {}, scheduling = {}) {
   if (length === undefined) return pushUnknown(scanUnknown(options, scheduling), scheduling, scanResult);
-  const session = scanSession(length, options, scheduling);
+  const session = scanSession(huge(length) ? 0 : length, options, scheduling);
+  if (huge(length)) return tooLargePush(session, length, scanResult);
   return pushSession(session, length, want => session.scanning ? want.keep : Math.min(want.state === 'need' ? want.offset : want.position, session.position()));
 }
 export function pushValidator(schema, length, rule, options = {}, scheduling = {}) {
@@ -366,7 +407,9 @@ export function pushValidator(schema, length, rule, options = {}, scheduling = {
   if (length === undefined) return pushUnknown(PublicSession.host(openSession(schema, rule, undefined, options, sessionScheduling)), scheduling, r => r);
   // failFast only changes an unknown-length message; a declared length is read whole either way (as
   // pushScanner, the handle drivers and Rust's SourceOptions), so it is accepted and has no effect (P9.13)
-  return pushSession(PublicSession.host(openSession(schema, rule, length, options, sessionScheduling)), length, want => want.keep);
+  const session = PublicSession.host(openSession(schema, rule, huge(length) ? 0 : length, options, sessionScheduling));
+  if (huge(length)) return tooLargePush(session, length, r => r);
+  return pushSession(session, length, want => want.keep);
 }
 
 // ---------------------------------------------------------------- unknown length (D085, D173)

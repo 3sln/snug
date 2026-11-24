@@ -59,11 +59,13 @@ export async function compile(text, options = {}) {
   if (!(bytes instanceof Uint8Array)) throw new TypeError('compile expects CDDL text.');
   // D340: the ABNF parse mode rides in the registry flags (the source key binds it)
   const registry = registryWords(entries, controlsInBus, abnf === 'lenient');
-  // format 2.0: options 20 (cuts), 21 (groupWords) and 22 (D359: the .default reading) precede the registry
-  const opt = new Int32Array(23 + registry.length).fill(-1);
-  opt.set(registry, 23);
+  // format 2.0: options 20 (cuts), 21 (groupWords), 22 (D359: the .default reading) and 23 (D373: the lexer)
+  // precede the registry
+  const opt = new Int32Array(24 + registry.length).fill(-1);
+  opt.set(registry, 24);
   opt[20] = options.cuts === 'branch' ? 1 : 0; // D301: 0 rfc (default), 1 branch
   opt[22] = options.defaultControl === 'annotation' ? 1 : 0; // D359: 0 the implied .ne (default), 1 annotation
+  opt[23] = options.lexing === 'lenient' ? 1 : 0; // D373: 0 strict (default), 1 0.1.0's lexer
   if (options.groupWords !== undefined) opt[21] = Math.min(options.groupWords, 0x7fffffff);
   opt[0] = PROFILES[profile];
   opt[19] = regexp === 'iregexp' ? 1 : 0;
@@ -89,6 +91,7 @@ export async function compile(text, options = {}) {
       const detail = inf[5] === 1 ? '; Unicode categories require tables from @3sln/snug/unicode'
         : inf[5] === 2 ? '; XSD block escapes require unavailable pinned Unicode block data'
         : inf[5] === 3 ? '; .abnf and .abnfb require the ABNF controls from @3sln/snug/abnf'
+        : inf[5] === 4 ? "; tabs, a lone CR and control characters in comments need lexing: 'lenient'"
         : code === 'unknown_control' && name !== undefined ? ` (.${name} is not a registered control)` : '';
       c.cc_release();
       throw refused(code, inf[1], inf[2], rule, detail);

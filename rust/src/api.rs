@@ -108,6 +108,9 @@ pub struct CompileOptions<'a> {
     /// What `.default` means: RFC 8610 §3.8.6's implied `.ne` (default) or an
     /// annotation only (`DefaultControl::Annotation`). Bound into the source key.
     pub default_control: crate::compile::DefaultControl,
+    /// The lexer: RFC 8610 Appendix B's whitespace and comments (default) or
+    /// 0.1.0's lenient one (`Lexing::Lenient`). Bound into the source key.
+    pub lexing: crate::compile::Lexing,
     /// The PEG group arena's cap in words: `None` is the
     /// default 4,194,304; a run that needs more refuses with `group_limit`.
     pub group_words: Option<i32>,
@@ -248,6 +251,7 @@ impl Schema {
                 regexp: options.regexp,
                 cuts: options.cuts,
                 default_control: options.default_control,
+                lexing: options.lexing,
                 group_words: options.group_words,
                 abnf: options.abnf,
                 limits: &limits,

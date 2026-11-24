@@ -218,6 +218,24 @@ export function buildRules(h, urules, prules) {
                 return -1;
             }
         }
+        // D372: a schema name with only `/=` / `//=` definitions extends the
+        // prelude rule (RFC 8610 Appendix D: the prelude is automatically
+        // added), so the prelude definition joins its chain. Every prelude rule
+        // is a plain type, so a `//=` or generic extension is refused at the
+        // schema's first definition.
+        if ((r2 >= 0) && ((rw(h, r2, 7) === 0) && (rw(h, r2, 12) === 0))) {
+            if (rw(h, r2, 4) === RK_GROUP) {
+                fail(h, ERR_KIND, npos(h, rw(h, r2, 2)));
+                return -1;
+            }
+            if (rw(h, r2, 5) !== 0) {
+                fail(h, ERR_GENERIC, npos(h, rw(h, r2, 2)));
+                return -1;
+            }
+            if (!addDef(h, r2, p)) {
+                return -1;
+            }
+        }
         p = nnext(h, p);
     }
     if (erred(h)) {

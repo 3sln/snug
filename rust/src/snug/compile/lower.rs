@@ -646,16 +646,24 @@ pub(crate) fn lower_ctl(h: &mut [i32], node: i32, env: i32) -> i32 {
             return fail(h, ERR_PROFILE, pos);
         }
         // RFC 8610 §3.8.4: a .cborseq controller is an array type describing
-        // the sequence (the VM matches it as a virtual array, D040).
+        // the sequence (the VM matches it as a virtual array, D040). D372/D373:
+        // every leaf must be an ARRAY or `any`, which matches every array and
+        // stands for `[* any]` (seq-content); any other leaf (a non-array type,
+        // an AND of arrays) is `control_value`, as in 0.1.0. An empty controller
+        // (an unplugged `$x`) matches nothing.
         if code == 13 {
             let cts: i32 = lower_type(h, nb(h, node), env);
             if cts < 0 {
                 return -1;
             }
             for i in 0..ts_n(h, cts) {
-                if lk(h, ts_leaf(h, cts, i)) != K_ARRAY {
+                let k: i32 = lk(h, ts_leaf(h, cts, i));
+                if (k != K_ARRAY) && (k != K_ANY) {
                     return fail(h, ERR_CONTROL_VALUE, pos);
                 }
+            }
+            if ts_n(h, cts) == 0 {
+                return ts_of1(h, -2);
             }
         }
         let cn: i32 = nb(h, node);
@@ -1492,7 +1500,8 @@ pub(crate) fn p_ent(h: &mut [i32], ent: i32, env: i32) -> i32 {
     // One group entry: ENTRY (arrays: member keys are labels) or MEMBER (maps),
     // a parenthesised group, a group rule, an unwrap, or an unplugged `$$`
     // socket (FAIL, R14 / D251); the occurrence applied by pb-rep. `n*m` with
-    // m < n is refused (D293).
+    // m < n is valid syntax that matches nothing (RFC 8610 §3.2, D372): the
+    // entry is lowered (its errors stand) and replaced by FAIL, with warning W9.
     let pos: i32 = npos(h, ent);
     let k: i32 = nk(h, ent);
     let lo: i32 = ent_lo(h, ent);
@@ -1503,9 +1512,6 @@ pub(crate) fn p_ent(h: &mut [i32], ent: i32, env: i32) -> i32 {
     }
     if hi < 0 {
         hi = INF;
-    }
-    if hi < lo {
-        return fail(h, ERR_SYNTAX, pos);
     }
     let mut child: i32 = -1;
     if k == N_MEMBER {
@@ -1551,6 +1557,10 @@ pub(crate) fn p_ent(h: &mut [i32], ent: i32, env: i32) -> i32 {
     if child < 0 {
         return -1;
     }
+    if hi < lo {
+        warn(h, 9, pos);
+        return pb_node(h, P_FAIL, -1, 0, 0, pos);
+    }
     return pb_rep(h, child, lo, hi, pos);
 }
 pub(crate) fn p_group(h: &mut [i32], g: i32, env: i32) -> i32 {
@@ -1585,6 +1595,26 @@ pub(crate) fn process_group(h: &mut [i32], l: i32, mode: i32) -> i32 {
     let g: i32 = lw(h, l, 12);
     let env: i32 = lw(h, l, 13);
     peg_begin(h, mode);
+    if g < 0 {
+        // `.cborseq any`'s `[* any]` (seq-any-array): no AST; word 13 is its place.
+        let al: i32 = mk_any(h);
+        let any: i32 = ts_of1(h, al);
+        let ent: i32 = pb_node(h, P_ENTRY, any, 0, 0, env);
+        let rep: i32 = pb_rep(h, ent, 0, INF, env);
+        let sq: i32 = pb_list(h, P_SEQ, env);
+        let alt: i32 = pb_list(h, P_CHOICE, env);
+        if (rep < 0) || ((sq < 0) || (alt < 0)) {
+            return -1;
+        }
+        pb_add(h, sq, rep);
+        pb_add(h, alt, sq);
+        let id0: i32 = peg_finish(h, alt, env);
+        if id0 < 0 {
+            return -1;
+        }
+        lsetd(h, l, 0, id0);
+        return 0;
+    }
     let root: i32 = p_group(h, g, env);
     if root < 0 {
         return -1;
@@ -1595,6 +1625,46 @@ pub(crate) fn process_group(h: &mut [i32], l: i32, mode: i32) -> i32 {
     }
     lsetd(h, l, 0, id);
     return 0;
+}
+pub(crate) fn seq_any_array(h: &mut [i32], pos: i32) -> i32 {
+    // A fresh ARRAY leaf `[* any]` for `.cborseq any` (D372), filled by the
+    // worklist: word 12 -1 (no group node), word 13 the control's place.
+    let l: i32 = leaf_new(h, K_ARRAY, 0);
+    if l < 0 {
+        return -1;
+    }
+    lset(h, l, 12, -1);
+    lset(h, l, 13, pos);
+    lset(h, l, 14, hg(h, H_CUR_RULE));
+    lsetd(h, l, 0, -1);
+    vpush1(h, T_WORK, l);
+    return l;
+}
+pub(crate) fn seq_content(h: &mut [i32], cts: i32, pos: i32) -> i32 {
+    // A .cborseq controller's arrays (D372, D373): ARRAY leaves kept, ANY as `[* any]`
+    // (lower-ctl has refused every other leaf).
+    if !charge(h, 1 + ts_n(h, cts)) {
+        return -1;
+    }
+    let from: i32 = vlen(h, T_STK);
+    for i in 0..ts_n(h, cts) {
+        let l: i32 = ts_leaf(h, cts, i);
+        let k: i32 = lk(h, l);
+        if k == K_ARRAY {
+            vpush1(h, T_STK, l);
+        }
+        if k == K_ANY {
+            let a: i32 = seq_any_array(h, pos);
+            if a < 0 {
+                return -1;
+            }
+            vpush1(h, T_STK, a);
+        }
+    }
+    if erred(h) {
+        return -1;
+    }
+    return ts_make(h, from);
 }
 pub(crate) fn enum_ent(h: &mut [i32], ent: i32, env: i32) -> i32 {
     // Push the value types of one entry (recursively through groups).
@@ -1727,8 +1797,15 @@ pub fn process_work(h: &mut [i32]) -> i32 {
             if k == K_TAGSET {
                 lsetd(h, l, 4, cts);
             }
-            if k == K_EMBED {
+            if (k == K_EMBED) && ((lflags(h, l) & 1) == 0) {
                 lsetd(h, l, 0, cts);
+            }
+            if (k == K_EMBED) && ((lflags(h, l) & 1) != 0) {
+                let sts: i32 = seq_content(h, cts, npos(h, lw(h, l, 12)));
+                if sts < 0 {
+                    return -1;
+                }
+                lsetd(h, l, 0, sts);
             }
         }
         if k == K_ARRAY {
