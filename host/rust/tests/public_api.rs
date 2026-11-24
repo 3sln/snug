@@ -794,6 +794,34 @@ fn p916_warnings_cut_subcode_and_root_reexports() {
     let strict = Schema::compile("r = uint", &CompileOptions { lexing: snug::Lexing::Strict, ..Default::default() }).unwrap();
     assert_eq!(strict.program().source_key(), Schema::compile("r = uint", &CompileOptions::default()).unwrap().program().source_key());
     assert_ne!(strict.program().source_key(), Schema::compile("r = uint", &lenient).unwrap().program().source_key());
+    // D374: b64'' content skips ;-comments under strict lexing (RFC 9682 Appendix B.2);
+    // Lexing::Lenient refuses the ; there, as 0.1.0 did
+    let b0102 = unhex("420102");
+    for text in ["r = b64'AQ ; c\n I='", "r = b64'AQI= ; c\n'", "r = b64'AQ= ; c\n ='", "r = b64'AQI= ; end'"] {
+        let want = if text.contains("AQ=") { unhex("4101") } else { b0102.clone() };
+        Schema::compile(text, &CompileOptions::default()).unwrap().validate(&want, "r", &mut scratch).unwrap();
+        match Schema::compile(text, &lenient) {
+            Err(Error::Compile(e)) => assert_eq!((e.code, e.line, e.column), ("syntax", 1, 5), "{text:?}"),
+            other => panic!("{text:?}: {other:?}"),
+        }
+    }
+    // a control character in an h'' or b64'' comment (only an escape can put one there) is
+    // plain `syntax` at the literal under strict lexing; lenient accepts it in h'' only
+    for ctl in ["\\u0001", "\\t", "a\\rb", "\\u007f", "\\u{85}"] {
+        let h = format!("s = uint\nr = h'01 ; {ctl}\n 02'");
+        let b = format!("s = uint\nr = b64'AQI= ; {ctl}\n'");
+        for text in [&h, &b] {
+            match Schema::compile(text, &CompileOptions::default()) {
+                Err(Error::Compile(e)) => {
+                    assert_eq!((e.code, e.line, e.column), ("syntax", 2, 5), "{text:?}");
+                    assert!(!e.message.contains("Lexing::Lenient"), "{text:?}");
+                }
+                other => panic!("{text:?}: {other:?}"),
+            }
+        }
+        Schema::compile(&h, &lenient).unwrap().validate(&b0102, "r", &mut scratch).unwrap();
+        assert!(Schema::compile(&b, &lenient).is_err(), "{b:?}");
+    }
     // an ordinary wrong value has no subcode
     let plain = Schema::compile("r = { a: \"x\" }", &CompileOptions::default()).unwrap();
     let e = plain.validate(&unhex("a161616179"), "r", &mut scratch).unwrap_err();

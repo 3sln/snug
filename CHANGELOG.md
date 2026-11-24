@@ -62,15 +62,37 @@ and neither contains those files.
   `1.0000000000000001111` is 1 + 2⁻⁵². A longer one is `float_literal`
   (D372).
 
+- `[rust]` Chainable setters on `SequenceOptions`, one per field, named after
+  it: `SequenceOptions::default().quantum(64).max_depth(Some(8))`. Each takes
+  and returns the options by value and is `#[must_use]`. `SequenceOptions`
+  stays `#[non_exhaustive]`, so fields can still be added without a breaking
+  release; the setters are how code outside the crate builds one without a
+  struct literal. Assigning the fields of a mutable default still works
+  (D374).
+
 ### Budget and limits
 
 - Documented: under `wire: 'valid'` a validation call can do up to about
   twice its budget's work, plus passes linear in the input, and one compile
   can do up to (restarts + 1) × `compileBudget` (at most 9×, usually under
   2×). Size budgets for both (D371).
+- The compiler's first working memory is sized from the schema text's length
+  (65,536 words plus 48 a byte, at most 4,194,304 words), so a large schema
+  usually compiles without restarting; before, every compile started at
+  65,536 words and doubled. The cap (16,777,216 words), the per-isolate and
+  per-thread reuse and every outcome are unchanged. A schema of a few
+  kilobytes or more compiles about 1.1–2× faster the first time in a process
+  (D374).
 
 ### Fixed
 
+- A `;` comment inside `b64''` is skipped, as inside `h''`: RFC 9682
+  Appendix B.2 applies the whitespace rules, comments included, to both. It
+  was `syntax`, and still is under `lexing: 'lenient'`, which keeps 0.1.0's
+  lexer. Under the default strict lexing, a C0 control (other than the CR of
+  a CR LF), DEL or C1 character in an `h''` or `b64''` comment is `syntax`,
+  as in any other comment; only an escape such as `\u0001` can put one there
+  (D374).
 - `bstr .cborseq any` compiles: `any` matches every array, so the content
   is any CBOR sequence, as `[* any]` (RFC 8610 §3.8.4); it was
   `control_value`. Every other controller type must still be an array:

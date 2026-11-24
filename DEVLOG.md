@@ -9916,6 +9916,146 @@ allowed at your discretion"). D037 is amended and signed.
   - **Hosted:** push CI run 44428310969 on 483b3fa is green: land, linux, compat and the `ci`
     aggregate; release skipped as designed.
 
+### D374 — `b64''` comments (RFC 9682 Appendix B.2); `SequenceOptions` setters; the first compile arena sized from the text (post-release nits)
+**Decision** (D374 engineer; work package D374 from the manager, owner-approved; branch `p-d374`
+over main d1fa06a). Entries in CHANGELOG `[Unreleased]` (Added, Budget and limits, Fixed).
+
+**1. `b64''` comments** (Fixed; `kin/compile/lex.kin` `lex-bytes`).
+* **Fix.** RFC 9682 Appendix B.2 applies RFC 8610's WS rules (Figure 14 with the updated PCHAR),
+  comments included, to the content of `h''` *and* `b64''` after escapes. Under strict lexing (the
+  default) a `;` in `b64''` content now starts a comment to LF, as in `h''`. Lenient keeps 0.1.0:
+  0.1.0 refused a `;` in `b64''` (`b64val` of `;` is −1: `syntax` at the literal), and lenient
+  still does. `;` is in neither base64 alphabet, so nothing was ambiguous.
+* **Comment characters, strict.** In an `h''` or `b64''` comment a C0 control other than the CR of
+  a CR LF, DEL or C1 (UTF-8 `C2 80..9F`) is refused, as F9 refuses them in other comments. The
+  literal's own characters are BCHARs, which already exclude them, so only an escape (`\u0001`,
+  `\t`, `\r`, `\u{85}`) can put one there.
+* **Decisions** (engineering, under D230 spec conformance by default):
+  - The check covers `h''` comments too. D373 left escape-made controls in an `h''` comment
+    accepted under strict lexing; one rule for both qualifiers is RFC 9682 B.2's reading.
+    Lenient `h''` is unchanged (0.1.0 accepted them).
+  - The refusal is plain `syntax` (`ERR_SYNTAX`) at the literal's start, like every other
+    `h''`/`b64''` content error; not `ERR_LEXING`, whose host message advises `lexing: 'lenient'`
+    and would be wrong for `b64''` (lenient refuses the comment outright). It is also the smaller
+    code (size below).
+  - Not changed: a tab or CR made by an escape *outside* a comment is still content whitespace in
+    both modes (RFC 8610's WS has neither; out of this package), `=` padding is unchecked beyond
+    "no data after `=`" (`b64'AQ==='` compiles, as in 0.1.0), and U+10FFFE/F from an escape in a
+    content comment stays accepted (PCHAR excludes them; the package named C0, DEL and C1).
+    Recorded in cddl-support.md.
+  - Padding checked: `=` before a comment, after one, and split by one (`b64'AQ= ; c\n ='` is
+    `01`); data after padding across a comment stays `syntax`; base64url `-`, `_` are fine.
+* **Oracle** (`corpus/tools/peg-oracle.mjs`): it models `b64''` (and `h''`), but skipped comments
+  in neither, so it refused both. It now strips `;` to LF from `h''`/`b64''` content after
+  escapes, written from RFC 9682 B.2's text; it stays lenient about controls (snug refuses those
+  schemas, so the differential skips them). Unit test `D374: ...` added (485/485 pass, 1 skipped:
+  the Ruby differential without Ruby). compile2-test's oracle verdicts went 3,288 → 3,292.
+* **Regressions** (`corpus/conformance/regressions.json`, 14 `D374:` suites, and a note): one
+  compiling suite (comment mid-data, padding before/after/around a comment, base64url, `;`
+  without a space and a second `;` inside, a final comment with no newline, CR LF), data after
+  padding across a comment refused, C0/HT/lone CR/DEL/C1 refused in a `b64''` comment and in an
+  `h''` comment, a lone CR ending an `h''` literal's content after a decoded `0A` byte (the
+  bounds guard on the CR LF look-ahead), and `h''` comments with CR LF and non-ASCII still
+  compiling. Host tests: `host/js/test/schema-api.test.mjs` `D374: ...` (strict acceptance,
+  lenient `syntax` at 1:5 for `b64''`, each control refused at 2:5 with no lexing hint, lenient
+  accepting it in `h''`); `host/rust/tests/public_api.rs` (the same in the D373 block).
+* **Fails on d1fa06a:** 7 of the 14 suites (the compiling `b64''` suite and the 6 `h''` refusals);
+  the other 7 are refusals 0.1.0's lexer also makes, kept as pins. The JS test FAILED on
+  d1fa06a's sources, the Rust public_api test FAILED there (`b64'AQ ; c\n I='`: `syntax` at
+  1:5), and the oracle's base version refused both comment forms.
+* **Mutation proofs** (generated JS edited by hand, then restored; `bb emit` output re-checked):
+  the strict check disabled: 11 of the 14 suites FAILED (the 11 control refusals) and the JS
+  test FAILED; `b64''` comment skipping disabled: the compiling suite and the JS test FAILED;
+  the `i + 1 < rawlen` guard dropped: the lone-CR-after-`0A` suite FAILED.
+
+**2. `SequenceOptions` setters** (Added `[rust]`; `host/rust/src/sequence.rs`).
+* **Change.** One chainable setter per public field (13: `top`, `cose`, `wire`,
+  `max_message_bytes`, `max_depth`, `max_entries`, `max_items`, `max_bignum_bytes`, `budget`,
+  `on_invalid`, `fail_fast`, `chunk`, `quantum`), named after the field, taking its type (so
+  `max_depth(Some(8))`, which can also clear to `None`), `self` by value, returning `Self`,
+  `#[must_use]`. **`#[non_exhaustive]` is kept** on `SequenceOptions` and everywhere else (owner,
+  via the manager: adding fields without breaking callers matters more than literal sugar); the
+  setters are purely additive. Field assignment on a mutable default still works.
+* **The other options structs:** `CompileOptions`, `CompileLimits`, `DecodeOptions`,
+  `EncodeOptions`, `ValidationOptions`, `SourceOptions`, `SessionLimits` and `schema::Options`
+  are not `#[non_exhaustive]`: their fields are public and (but `SessionLimits`, two fields) they
+  implement `Default`, so external code writes `X { field, ..Default::default() }` (public_api.rs
+  does, as an integration test). None needed setters and none had any; only `SequenceOptions`
+  changed. The `#[non_exhaustive]` items besides it are enums.
+* **Tests.** `host/rust/tests/sequence_options.rs` (an integration test, public API only): every
+  setter sets its field and only it (Debug-equal to the default after resetting the one field),
+  the last call wins, an Option clears, field assignment still works; built options drive
+  `Schema::read_sequence` (`Skip`, chunk 3), `read_sequence` (`max_message_bytes` 4:
+  `too_large` at index 1), `Top::Map`, and `Sequence::new` still refuses a quantum. Doctests on
+  the struct (setters and the field form) and on `quantum`. docs/rust.md's sequence example and
+  text use the setters.
+* **Fails on d1fa06a:** the integration test does not compile there (E0599, no method
+  `max_depth` and 6 more). **Mutation:** `max_depth` made a no-op in the assembled crate: the
+  integration test and the `quantum` doctest FAILED.
+
+**3. The first compile arena** (Budget and limits; `host/js/src/compile.mjs`,
+`host/rust/src/compile.rs`, which the wasm compiler `cc.rs` uses unchanged).
+* **Measured.** Arena words used (`H_TOP` after success) are a fixed ~16,600 plus 4.3–54 words a
+  source byte (comments 4.3–4.9, long text literals 14, struct chains 32–38, a literal choice 45,
+  generic rules 50, small contracts up to 54; corpus schemas above 200 B: median 37, p90 48.5).
+  The corpus is small: its largest schema is 2,834 B, and only 8 schemas needed more than
+  65,536 words. A host-loop model showed only a first arena that fits gains: an attempt that
+  runs out costs about a whole compile, so 8 or 16 words a byte were no faster than today.
+* **Change.** First arena `min(RETAIN_WORDS = 4,194,304, 65,536 + 48 × bytes)` words, grown in
+  place of a smaller reused arena (never shrunk); then doubling to 16,777,216 as before. 48 covers
+  p90 of the corpus and every synthetic shape but generics; the RETAIN cap keeps the first arena
+  reusable and bounds the up-front allocation at 16 MiB (a 256 KiB text, the default limit, no
+  longer allocates its worst case at once). Both hosts share the growth path (`want`, one
+  allocation site), for size. The restart bound is unchanged: the first arena is never below
+  65,536 words, so at most 9 attempts; docs/api.md and the guide keep "at most 9×, usually
+  under 2×" and add that the first memory is sized from the text.
+* **Threshold:** keep only with a median cold-compile gain of at least 10% on the large inputs in
+  both hosts, beyond the A/A noise (±8% JS, ±7% Rust), and no input clearly slower.
+* **Numbers** (bench/README.md "First compile arena sized from the text (D374)": machine, method,
+  every run; cold = a fresh process, median of 31, trees interleaved): Rust 1.17–2.03× on every
+  input (synthetic 300 rules 19.8 → 12.3 and 25.4 → 15.0 ms; the CWT corpus schema 0.96 →
+  0.66 ms); JS 1.11–1.45× on most inputs in 3 runs (300 rules 209 → 150 ms), 0.89–1.18× on
+  synthetic 100 rules and 1.01–1.14× on the 130 KB one (above RETAIN: one restart). Warm: equal
+  within noise, the arena is already reused. **Kept.**
+* **Identical outcomes.** Program words, pools, warnings and errors of the JS host are equal on
+  d1fa06a and the branch for all 503 corpus and synthetic inputs outside the 7 D374 lexing
+  vectors; compile2-test: 396/396 outcomes independent of the starting arena, 1,093/1,093 JS ==
+  Rust. Proof of effect: the host-loop model's attempts for 300 rules drop from 6 to 1.
+* **Memory note:** an isolate or thread now keeps a first arena of up to 16 MiB after compiling
+  a text of ~86 KB or more (before, only if the compile needed it).
+
+**Tests** (targeted, per the owner's 2026-11-18 policy; no full gates, no identity):
+* compile2-test ok (37/37 expected refusals, 1,093/1,093 identical across hosts, 203/203
+  SOURCE_KEYs, 396/396 arena-independent, 3,292/3,292 oracle verdicts).
+* The D374 regression suites 14/14 in JS (vm-test not run: no lowering change).
+* `node corpus/tools/peg-oracle.test.mjs`: 485 pass, 0 fail, 1 skipped (Ruby).
+* npm test files touching the compiler: options, schema-api, serialized, host-lifetimes, unicode,
+  xsd-regexp, abnf, controls: 497/497.
+* rust-api-test ok (99 tests passed with the crate's doctests, 0 failed; docs/rust.md and README doctests, rustdoc with warnings
+  denied, clippy).
+* drift ok after the commit; docs-test ok. No shell script edited; wasm-sdk-test not run (no SDK
+  or cc.rs edit).
+* **Sizes, OVER CAPS, NOT RAISED (needs the coordinator under D303):** `bb size` snug/compile
+  full gzip 99,298 → 99,389 (cap 99,313) and full brotli 84,719 → 84,846 (cap 84,800); full min
+  289,612 → 289,800 stays under 290,426; static unchanged. Attribution: the lexer (item 1)
+  +136 min / +62 gzip / +64 brotli (over the gzip cap alone); the JS arena sizing (item 3)
+  +52 / +29 / +63. Already compacted: one bounds-checked look-ahead read instead of a guarded
+  mutable, no per-qualifier error code, and the arena's allocation shared with the growth path
+  (first forms: +204 / +94 / +186). `bb wasm-size`: compiler 153,330 → 153,510 B (cap 153,564;
+  the first form was 153,568, over, before the shared growth path), gzip 69,560 (cap 69,851);
+  sdk-runtime unchanged (327,443).
+
+**Alternatives:** an `ERR_LEXING` refusal with the lenient hint for `h''` only (refused: one more
+branch in a capped module for a corner only an escape reaches); a lower words-per-byte factor
+(refused: measured no faster); no RETAIN cap (refused: a 256 KiB text would allocate up to
+48 MiB at once); a builder type for `SequenceOptions` (refused: setters on the struct are
+simpler and keep one type).
+
+**Open:** the two snug/compile caps above (proposed: full gzip 99,400, full brotli 84,860,
+measured plus a small slack as in D373).
+
+- [ ] **Signed off** (manager).
+
 ## Findings
 
 - 2026-11-11 (manager): **the 6½-day `scan-test.mjs 300 1` process

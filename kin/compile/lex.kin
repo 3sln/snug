@@ -472,9 +472,11 @@
   (comment "A byte string token starting at s whose quote is at q; qual 0 plain"
            "(UTF-8 of the text), 1 h'' (hex), 2 b64'' (base64 or base64url). The"
            "quoted body is decoded first; h and b64 then reinterpret it, skipping"
-           "whitespace and (h'' only, RFC 9682) ;-comments.")
+           "whitespace and ;-comments (RFC 9682 Appendix B.2; b64'' under strict lexing"
+           "only, D374: lenient refuses a ; there, as 0.1.0 did).")
   (let [raw (vlen h T_LITB)
-        e (lex-quoted h q 39)]
+        e (lex-quoted h q 39)
+        strict (== (hg h H_LEXING) 0)]
     (if (< e 0) (return (neg 1)))
     (if (== qual 0)
       (do (push-tok h TK_BYTES s e 0 raw (- (vlen h T_LITB) raw))
@@ -489,8 +491,18 @@
         (let [c (vget h T_LITB (+ raw i))]
           (if (or (or (== c 32) (== c 9)) (or (== c 10) (== c 13)))
             (set i (+ i 1))
-            (if (and (== qual 1) (== c 59))
-              (do (while (and (< i rawlen) (!= (vget h T_LITB (+ raw i)) 10)) (set i (+ i 1))))
+            (if (and (== c 59) (or (== qual 1) strict))
+              (do (comment "RFC 9682 Appendix B.2: a ;-comment to LF, in h'' and (strict, D374)"
+                           "b64''. Strict: PCHARs, so a C0 (but CR LF's CR), DEL or C1 (C2 80..9F),"
+                           "which only an escape can put here, is refused at the literal (`syntax`:"
+                           "lenient refuses a b64'' comment too, so no lexing hint).")
+                  (while (and (< i rawlen) (!= (vget h T_LITB (+ raw i)) 10))
+                    (let [d (vget h T_LITB (+ raw i))
+                          n (vget h T_LITB (+ raw (+ i 1)))]
+                      (if (and strict (or (or (== d 127) (and (== d 194) (< n 160)))
+                                          (and (< d 32) (or (!= d 13) (or (!= n 10) (>= (+ i 1) rawlen))))))
+                        (return (fail h ERR_SYNTAX s))))
+                    (set i (+ i 1))))
               (if (== qual 1)
                 (do (let [v (hexval c)]
                       (if (< v 0) (return (fail h ERR_SYNTAX s)))

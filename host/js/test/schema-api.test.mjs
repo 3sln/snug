@@ -64,6 +64,28 @@ test('D373: strict lexing (the default) refuses HT, a lone CR and comment contro
   await assert.rejects(async () => compile(text, { lexing: 'loose' }), TypeError);
 });
 
+test('D374: b64\'\' content skips ;-comments under strict lexing; comment controls in h\'\'/b64\'\' are refused there; lenient is 0.1.0\'s', async () => {
+  const bytes = Uint8Array.of(0x42, 1, 2);
+  const b64 = ["r = b64'AQ ; c\n I='", "r = b64'AQI= ; c\n'", "r = b64'AQI= ; end'"];
+  for (const text of b64) {
+    assert.equal((await compile(text)).validate(bytes, 'r').ok, true, JSON.stringify(text));
+    // lenient: a ; in b64'' is refused, as 0.1.0 refused it
+    await assert.rejects(async () => compile(text, { lexing: 'lenient' }), e => e.code === 'syntax' && e.column === 5, JSON.stringify(text));
+  }
+  // a control character, which only an escape can put in the content, at the literal (line 2, column 5)
+  for (const ctl of ['\\u0001', '\\t', 'a\\rb', '\\u007f', '\\u{85}']) {
+    const h = `s = uint\nr = h'01 ; ${ctl}\n 02'`, b = `s = uint\nr = b64'AQI= ; ${ctl}\n'`;
+    // plain `syntax` (no lexing hint: lenient helps for h'' only); lenient accepts it in h'' (0.1.0) and refuses
+    // the b64'' comment itself
+    for (const text of [h, b])
+      await assert.rejects(async () => compile(text), e => e.code === 'syntax' && e.line === 2 && e.column === 5 && !/lenient/.test(e.message), text);
+    assert.equal((await compile(h, { lexing: 'lenient' })).validate(bytes, 'r').ok, true, h);
+    await assert.rejects(async () => compile(b, { lexing: 'lenient' }), e => e.code === 'syntax', b);
+  }
+  // CR LF ends a comment; a non-ASCII escape is a PCHAR
+  assert.equal((await compile("r = b64'AQ ; caf\\u00e9\r\n I='")).validate(bytes, 'r').ok, true);
+});
+
 test('Schema and Program refuse structured clone (postMessage) with DataCloneError', async () => {
   const s = await compile('r = uint');
   for (const x of [s, s.program]) {

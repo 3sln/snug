@@ -202,14 +202,19 @@ pub fn compile_bytes_with_options(bytes: &[u8], options: &CompileOptions<'_>) ->
     let mut fl: Vec<i32> = Vec::new();
     let r = ARENA.with(|cell| {
         let mut h = cell.borrow_mut();
+        // D374: size the first arena from the text (up to ~54 words a byte measured), at most
+        // RETAIN_WORDS so it stays reusable; outcomes do not depend on it (compile2-test 7)
+        let mut want = (bytes.len().min(RETAIN_WORDS) * 48 + ARENA_MIN_WORDS as usize).min(RETAIN_WORDS);
         loop {
+            if h.len() < want {
+                *h = vec![0; want];
+            }
             let code = kc::compile_schema(bytes, &opt, &fl, unicode.unwrap_or(&[]), &mut h);
             if code == ERR_ARENA {
                 if h.len() >= ARENA_MAX_WORDS as usize {
                     return Err(SchemaError { code: "limit_memory", line: 0, column: 0, rule: None, message: "CDDL schema refused", detail: None });
                 }
-                let n = (h.len() * 2).min(ARENA_MAX_WORDS as usize);
-                *h = vec![0; n];
+                want = (h.len() * 2).min(ARENA_MAX_WORDS as usize);
                 continue;
             }
             if code == ERR_NEED_FLOATS {

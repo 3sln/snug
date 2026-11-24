@@ -622,3 +622,48 @@ then at most about twice the bytes read, so the idle cost no longer depends on
 the limit. At the default cap of 1024 live sessions, idle peers hold about
 19 MiB in Rust instead of about 1.4 GiB. The rest of a Rust session is the
 4096-byte read buffer, the VM scratch and the session array.
+
+## First compile arena sized from the text (D374) — 2026-11-23
+
+Apple M1 Pro (10 cores), macOS 14.6.1, Node v24.6.0, rustc 1.92.0 (release,
+codegen-units 1); a shared machine at load average 7–27 during the runs.
+
+**Words per byte.** The arena words a compile uses (header word `H_TOP` after
+success in a 2²⁴-word arena) over the 431 corpus schemas that compile
+(conformance files, contracts, RFC corpus) and synthetic shapes: a fixed
+~16,600 words plus 4.3 (comments) to 54 (a 1 KB contract) words per source
+byte; median 37, p90 48.5 over the 32 corpus schemas above 200 bytes;
+struct chains 32–38, a 3,000-literal choice 45, 300 generic rules 50, long
+text literals 14. Only 8 corpus schemas (1.1–2.8 KB) needed more than the old
+first arena of 65,536 words.
+
+**Sizing.** First arena `min(4,194,304, 65,536 + 48 × bytes)` words (JS and
+Rust; the cap is the retain limit, so the arena stays reused); doubling to
+16,777,216 as before. A model of the host loop over fresh arrays showed only
+a first arena that fits pays: one too small costs about a whole compile, so
+factors 8 and 16 words a byte were no faster than 65,536 (synthetic 1,000
+rules: 332 ms at 8 attempts, 343 ms at 4, 338 ms at 3, 150 ms at 1).
+
+**Method.** Cold: a fresh process per run (JS: `node` imports the tree's
+`host/js/src/compile.mjs` and times one `compile` inside; Rust: a release
+binary over the assembled crate compiles once on a fresh thread, so the
+thread-local arena is new), the two trees interleaved run by run, median of
+31 runs. Warm: 15 compiles in one process, median of the last 11, median over
+5–9 processes. Before = d1fa06a, after = p-d374. A/A runs (the same tree
+twice) were within ±8% (JS) and ±7% (Rust).
+
+| schema | bytes | JS cold before → after (3 runs of 31) | Rust cold before → after (2 runs of 31) |
+| --- | ---: | --- | --- |
+| largest corpus schema (RFC 8392 CWT) | 2,834 | 23.1 → 19.3, 24.7 → 22.3, 57.1 → 50.0 ms (1.11–1.20×) | 0.96 → 0.66, 0.94 → 0.69 ms (1.36–1.45×) |
+| object-storage-v1 contract | 1,753 | 19.8 → 15.8, 24.3 → 17.6, 33.1 → 31.7 ms (1.04–1.38×) | 0.69 → 0.44, 0.73 → 0.59 ms (1.24–1.55×) |
+| synthetic 100 struct rules | 12,216 | 71.8 → 80.6, 99.3 → 101.1, 102.0 → 86.1 ms (0.89–1.18×) | 5.95 → 4.55, 5.92 → 4.52 ms (1.31×) |
+| synthetic 300 struct rules | 38,415 | 209 → 150, 202 → 148, 192 → 144 ms (1.34–1.39×) | 19.8 → 12.3, 25.4 → 15.0 ms (1.61–1.70×) |
+| synthetic 1,000 struct rules (needs 4.24 M words: one restart) | 130,115 | 635 → 557, 648 → 582, 540 → 536 ms (1.01–1.14×) | 101 → 86, 120 → 94 ms (1.17–1.29×) |
+| a 3,000-literal choice | 19,892 | 77.0 → 63.5, 81.8 → 59.3, 67.3 → 51.7 ms (1.21–1.38×) | 9.99 → 4.93, 8.06 → 5.25 ms (1.53–2.03×) |
+
+Warm compiles are unchanged within noise (the arena is already reused) except
+above the retain limit: Rust synthetic 1,000 rules 107 → 92 and 158 → 152 ms.
+Program bytes, pools, warnings and errors are identical before and after on
+all 503 corpus and synthetic inputs outside D374's lexing vectors (JS host,
+both trees), and compile2-test's arena-independence and JS == Rust checks
+hold.

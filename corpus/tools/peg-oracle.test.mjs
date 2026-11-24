@@ -280,6 +280,13 @@ test('D372: n*m with m < n matches nothing; /= extends a prelude rule, = replace
     ['uint = tstr\nr = uint', '1', false], ['int /= bool\nr = int', '-1', true]])
     assert.equal(check(compile(source), 'r', JSON.parse(json)), want, `${source} ${json}`);
 });
+test('D374: ;-comments in h\'\' and b64\'\' content are whitespace (RFC 9682 Appendix B.2)', () => {
+  for (const [source, encoded, want] of [["r = b64'AQ ; c\n I='", '420102', true], ["r = b64'AQI= ; c\n'", '420102', true],
+    ["r = b64'AQ= ; c\n ='", '4101', true], ["r = b64'-_8 ; url\n'", '42fbff', true], ["r = b64'AQI= ; end'", '420102', true],
+    ["r = h'01 ; c\n 02'", '420102', true], ["r = b64'AQ ; c\n I='", '420103', false]])
+    assert.equal(wireVerdict(source, encoded), want, `${source} ${encoded}`);
+  assert.equal(compile("r = b64'AQ= ; c\nA'").error, 'syntax');
+});
 
 // A balanced seeded sample, including the eight documented Ruby deviation mechanisms.
 // Candidate classes describe a syntactic mechanism; classification also requires the
