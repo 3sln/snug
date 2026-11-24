@@ -10051,10 +10051,19 @@ branch in a capped module for a corner only an escape reaches); a lower words-pe
 48 MiB at once); a builder type for `SequenceOptions` (refused: setters on the struct are
 simpler and keep one type).
 
-**Open:** the two snug/compile caps above (proposed: full gzip 99,400, full brotli 84,860,
-measured plus a small slack as in D373).
+**Caps (coordinator under D303, 2026-11-23):** snug/compile full gzip 99,313 → 99,400 and
+full brotli 84,800 → 84,860, the measured size plus a small slack. Justification: `b64''`
+comments per RFC 9682 B.2 (spec conformance), and first-arena sizing (a measured 1.2–2.0×
+gain on large compiles). Recorded in tools/size/budget.json.
 
-- [ ] **Signed off** (manager).
+- [x] **Signed off** (manager, 2026-11-23).
+  - Merged on d1fa06a. On the merged main: `bb size` passes with the raised caps, there is no
+    drift, and docs-test is ok.
+  - The coordinator accepted the engineering decisions as recorded, including the ≤16 MiB
+    first-arena retention bound.
+  - `#[non_exhaustive]` on `SequenceOptions` is kept; the setters are additive.
+  - Process: one `sed -i` on a then-untracked new test file. All tracked edits went through
+    Edit/Write. The rule covers every repo file, and the engineer has been told.
 
 ## Findings
 
