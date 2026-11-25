@@ -37,8 +37,8 @@
 ;; wall caps sum to about 23 hours, and a hosted job stops at 6. `bb gates --check`
 ;; refuses a partition whose shards do not hold exactly the set's gates, each
 ;; once, and one whose shard's wall caps sum past 330 minutes (so a shard can
-;; still run as a job of its own); it also checks ci.yml's release, land, compat
-;; and linux jobs against this map (kin/scripts/gates, ci-matrix-problems).
+;; still run as a job of its own); it also checks ci.yml's release, land and
+;; linux jobs against this map (kin/scripts/gates, ci-matrix-problems).
 {:gates
  {check            {:cmd ["bb" "check"] :caps [900 1800]
                     :doc "generate, run JS and Rust, require identical output"}
@@ -135,9 +135,10 @@
  :partitions
  {:release [release-core release-vm release-rust release-wasm release-long]}
 
- ;; D368: the cells hosted CI's compat (macOS) and linux jobs each run, one after another
- ;; in one job: npm-test on these Node majors, rust-api-test on these Rust toolchains
+ ;; D368, D375: the cells hosted CI's linux (Ubuntu) job runs, one after another in one
+ ;; job: npm-test on these Node majors, rust-api-test on these Rust toolchains
  ;; (rust-version: host/rust/Cargo.toml's). `bb gates --check` reads ci.yml against it.
+ ;; (D368's macOS compat job ran them too; D375 dropped it.)
  :ci-compat {:node ["20" "22" "24"] :rust ["rust-version" "stable"]}
 
  ;; D370 (P9.13 gates N2): the environment variables gate code reads, by what they may do to

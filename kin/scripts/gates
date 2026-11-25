@@ -69,6 +69,29 @@
            :when (> wall shard-wall-max)]
        (str "shard " sh ": wall caps sum to " wall " s, past " shard-wall-max " s (one CI job)")))))
 
+(defn job-needs
+  "A workflow job's `needs` as a list of job ids (strings): GitHub takes one id or a list."
+  [job]
+  (let [n (:needs job)]
+    (map name (cond (nil? n) [] (sequential? n) n :else [n]))))
+
+(defn needs-problems
+  "D375: in workflow `file` (parsed), every job's `needs` names a job of the same workflow (a
+  dangling one makes GitHub refuse to start the run), and every `needs.<id>` a job's
+  expressions read is one of that job's needs (anything else is empty at run time)."
+  [file doc]
+  (let [jobs (:jobs doc)
+        ids (set (map name (keys jobs)))]
+    (concat
+     (for [[jk job] jobs, n (job-needs job) :when (not (ids n))]
+       (str file ": job " (name jk) " needs " n ", which is not a job of " file))
+     (for [[jk job] jobs
+           :let [own (set (job-needs job))]
+           n (distinct (for [s (tree-seq coll? seq job) :when (string? s)
+                             [_ n] (re-seq #"\bneeds\.([A-Za-z_][A-Za-z0-9_-]*)" s)] n))
+           :when (not (own n))]
+       (str file ": job " (name jk) " reads needs." n " but does not need " n)))))
+
 (defn ci-matrix-problems
   "P9.13 WP3 (S10), D368: hosted CI (.github/workflows/ci.yml) runs what this map says.
   - release: a step per shard, exactly :partitions :release in order, each running even after an
@@ -76,10 +99,11 @@
     largest wall cap of its shard's gates (the watchdog, not GitHub, stops a stuck gate), the
     job's at most 360;
   - land: `bb gates land`, the job's timeout-minutes above the set's wall caps and at most 360;
-  - compat (macOS) and linux: exactly the :ci-compat cells (npm-test per Node major, rust-api-test
-    per Rust toolchain), each running after a failure, the job's timeout-minutes above their caps
-    and at most 360;
-  - ci: needs every job."
+  - linux (Ubuntu): exactly the :ci-compat cells (npm-test per Node major, rust-api-test per Rust
+    toolchain), each running after a failure, the job's timeout-minutes above their caps and at
+    most 360 (D375 dropped D368's macOS compat job, which ran the same cells);
+  - ci: needs exactly every other job of ci.yml (workflow-problems checks that each `needs`
+    names a job)."
   []
   (let [f (str root "/.github/workflows/ci.yml")]
     (if-not (fs/exists? f)
@@ -97,7 +121,7 @@
             rsteps (filter #(some->> (:run %) (re-find #"^bb gates (release-\S+)$")) (get-in jobs [:release :steps]))
             shards (map #(second (re-find #"^bb gates (release-\S+)$" (:run %))) rsteps)
             want (map name (get-in gate-map [:partitions :release]))
-            ;; compat / linux cells: [kind value step]
+            ;; linux cells: [kind value step]
             cells (fn [k npm-re rust-re]
                     (loop [[st & more] (get-in jobs [k :steps]) node nil acc []]
                       (if-not st
@@ -136,17 +160,21 @@
          (let [t (job-timeout :release)] (when (or (not (number? t)) (> t 360)) [(str "ci.yml: job release has timeout-minutes " t " (at most 360)")]))
          (when-not (some #(= "bb gates land" (:run %)) (get-in jobs [:land :steps])) ["ci.yml: job land does not run `bb gates land`"])
          (within :land (sum-min (get-in gate-map [:sets :land])))
-         (cell-problems :compat #"^bb gates npm-test$" #"^rustup run (\S+) bb gates rust-api-test$")
          (cell-problems :linux #"ci/run-gate\.sh npm-test " #"^rustup run (\S+) bash ci/run-gate\.sh rust-api-test ")
-         (let [needs (set (map keyword (get-in jobs [:ci :needs])))]
-           (for [k [:land :release :compat :linux] :when (not (needs k))]
-             (str "ci.yml: job ci does not need " (name k)))))))))
+         (let [needs (set (map keyword (job-needs (:ci jobs))))
+               others (disj (set (keys jobs)) :ci)]
+           (concat
+            (for [k (sort others) :when (not (needs k))]
+              (str "ci.yml: job ci does not need " (name k)))
+            (for [k (sort needs) :when (not (others k))]
+              (str "ci.yml: job ci needs " (name k) ", which is not another job of ci.yml")))))))))
 
 (defn workflow-problems
   "D368: every action a workflow or the setup action uses is local (./) or pinned by a full
   commit SHA; release.yml builds against ci.yml's KIN_REF; and every release.yml job that may
   write (contents: write, or id-token: write for trusted publishing) runs only when the guard
-  allows writes (needs.guard.outputs.write == 'true': main, a push or a non-dry-run dispatch)."
+  allows writes (needs.guard.outputs.write == 'true': main, a push or a non-dry-run dispatch).
+  D375: in both workflows every `needs` names an existing job (needs-problems)."
   []
   (let [dir (str root "/.github")
         files (concat (fs/glob dir "workflows/*.yml") (fs/glob dir "actions/*/action.yml"))
@@ -160,6 +188,8 @@
            :when (not (or (str/starts-with? u "./") (re-matches #"[\w.-]+/[\w./-]+@[0-9a-f]{40}" u)))]
        (str (rel f) ": " u " is not pinned by a full commit SHA"))
      (when-not release [".github/workflows/release.yml is missing"])
+     (when ci (needs-problems "ci.yml" ci))
+     (when release (needs-problems "release.yml" release))
      (when (and release (not= (get-in release [:env :KIN_REF]) (get-in ci [:env :KIN_REF])))
        [(str "release.yml: KIN_REF " (get-in release [:env :KIN_REF]) " is not ci.yml's " (get-in ci [:env :KIN_REF]))])
      (for [[k job] (:jobs release)
