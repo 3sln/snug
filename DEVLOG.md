@@ -10148,7 +10148,13 @@ bytes were recorded there, and Ubuntu has not been shown to give byte-identical 
 * The real proof is push CI after the coordinator's push: land, linux and `ci` green, with no
   compat job.
 
-- [ ] **Signed off** (manager).
+- [x] **Signed off** (manager, 2026-11-25).
+  - Merged on b56c4ff. On the merged main, `bb gates --check` is ok, apart from the known
+    ../kin note, and docs-test is ok.
+  - Every `needs` target exists in both workflows, checked by the engineer's YAML parse and
+    by the new `needs-problems` check. M1–M8 each fail as expected.
+  - The linux job exports its own SNUG_RUST_VERSION, so the setup action's line was dead.
+  - Push CI after the push is the hosted proof: land, linux and `ci`, with no compat job.
 
 ## Findings
 
