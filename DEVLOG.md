@@ -10067,6 +10067,42 @@ gain on large compiles). Recorded in tools/size/budget.json.
   - **Hosted:** push CI run 45330906629 on d165eac is green: land, linux, compat and the `ci`
     aggregate; release skipped as designed.
 
+### D377 — Performance and size audit after 0.2.0 (analysis only; no code, cap or build changed)
+**Record** (D377 engineer, 2026-11-25; for the manager).
+- **What it is.** [docs/plans/perf-size-audit.md](docs/plans/perf-size-audit.md) covers:
+  - the generated JS and Rust;
+  - both wasm modules;
+  - the VM, scanner and canonical-path loops;
+  - compile;
+  - the host glue;
+  - the npm module graph;
+  - each cap's headroom.
+  Each candidate gives its location, its expected gain with the method, its identity risk, its effort and the measurement it needs.
+- **How it was done.** The machine was CPU-loaded, so nothing was built, benchmarked or size-gated. Every figure is from on-disk records (budget.json, D341/P9.12, D371/D373/D374 sizes, bench/) or from counting the generated code. Each one is marked "measure later".
+- **Tightest caps:**
+  - `snug` gzip: 11 B.
+  - `snug/compile` full gzip and brotli: 11 B and 14 B.
+  - `snug/sources` min: 13 B.
+  - `runtime` brotli: 78 B.
+  - wasm compiler: 54 B.
+  So the next scanner, compiler or session change will hit a cap.
+
+**Top 5 candidates** (audit §10):
+1. **W1:** `wasm-opt -Oz --converge` on the compiler module. It is size only, has no identity risk, and buys the cc module out of its 54 B of headroom.
+2. **H2:** skip `charge` when `unit == 0` in `eval-scalars` (`kin/vm-leaf.kin:462`, schedule 2's one-leaf child). The outcomes are identical by construction; measure vm-bench.
+3. **H1:** in `keys-save` (`kin/vm-session-base.kin:473`), stop at the top-most map frame instead of scanning every frame on each `fpush`. Frame pushes go from O(depth²) to O(depth) on nested session input. It rests on D092's invariant, which must be proven first; measure vmsession-bench.
+4. **S4:** the duplicated host helpers (`clamp`, the `pick` block, `bytesInput`, `asBytes`, `isShared`). It is size only and takes `snug/sources` out of its 13 B.
+5. **G1:** validate each options bag once per call (encode → Writer, decode → check, view). This is host-only and removes work from small-message calls; measure the RPC rows.
+
+**Owner decisions** (audit §11):
+- S1/S2: inject or register the scanner in `snug/writer` and the Writer in `snug/view`/`snug/sequence`, about 6 KB gzip each (estimated).
+- S3: the verifier, deferred by D341.
+- W4: simd128 in the SDK runtime.
+- Whether a measured speed gain alone justifies a cap raise under D303 when headroom is at about 0.
+- K1–K3: these go to kin.
+
+- [ ] **Signed off** (manager).
+
 ## Findings
 
 - 2026-11-11 (manager): **the 6½-day `scan-test.mjs 300 1` process
