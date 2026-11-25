@@ -10067,6 +10067,75 @@ gain on large compiles). Recorded in tools/size/budget.json.
   - **Hosted:** push CI run 45330906629 on d165eac is green: land, linux, compat and the `ci`
     aggregate; release skipped as designed.
 
+### D376 — Plan: pluggable regex engines (gas-metered, bound into the Program) and the other CDDL gaps
+**Decision** (D376 engineer; plan only, from the manager; branch `p-d376` over main b56c4ff). No
+code changed. The plan is [docs/plans/gaps.md](docs/plans/gaps.md), a maintainer document that is
+not shipped. It covers the owner's direction (users plug in their own regex engine beside the
+built-in bounded one, which stays the default) and the other rows of cddl-support.md's refused
+list. Under D230, spec conformance stays the default.
+
+**Engineering decisions** (the plan gives the reasons and the alternatives):
+* **An engine is a special extension control.** It is bound like the ABNF module (D334) under the
+  built-in name `pcre`. That reuses the EXT leaf, the D190 verdict word with `room`, D143's
+  whole-item sessions and the one wasm import, so no new port is needed. `.regexp` stays the
+  built-in engine. Under `bus`, an engine is refused unless `controlsInBus`.
+* **Gas.** The engine reports gas in snug budget units. Its quota is the budget left after
+  1 + `EXT_CALL` + a handoff charge of ⌈content/8⌉. There is no per-match quota, as for the
+  built-in regexp and `.abnf`.
+  - An answer above the quota, or "exhausted", is `budget` at the item.
+  - A no-match is `pattern`.
+  - A throw or a malformed answer makes the call throw, `code: 'regex_engine'`, and never
+    becomes a verdict. A Rust panic poisons, as today.
+  - A hang cannot be pre-empted. That is documented, and wall-clock protection is left to the
+    deployment.
+  - A match never spans a yield. The quota never depends on the quantum or the route, so buffer
+    and session accounting stay identical for a deterministic engine.
+* **Program format 2.1** (additive): EXT flag bit 0 `ENGINE` (reason `pattern`, content as the
+  subject, handoff charge), and a NOT with any operand (for composite `.ne`). Only Programs that
+  use them are 2.1.
+* **The engine id is bound twice.** It is in the source key's registry element
+  (`[name, max, id]`, flag bit 2 for `.regexp` routing). It is also in each engine leaf's
+  argument `[id, dialect, pattern]`, checked at bind, so a mismatch is
+  `ProgramError('regex_engine')`.
+* **Patterns are checked at compile time.** A refusal is SchemaError `regexp` at the first use's
+  line and column, through a compile-side position table. Engine compile gas is summed against
+  the compile budget left (`limit_compile_budget`). At load, patterns are compiled again
+  (uncharged).
+* **Identity.** The built-in engine keeps full identity. A plugged engine guarantees only the
+  determinism of snug's own accounting around it, gated with scripted, chaos and reference
+  engines.
+* **Other gaps:**
+  - Composite `.ne`: NOT over a **ground** controller. The same ground check applies to
+    composite `.eq` (Breaking).
+  - Literal-set and interval `.plus`/`.cat`/`.det`, capped at 256 results. Unbounded string
+    forms are refused.
+  - Float `.plus`: exact in kin, with the magnitudes and the hex-float rounding (ties to even;
+    floor for an integer target).
+  - `#4.n`/`#5.n`: by value, as groups, with no format change.
+  - `\p{IsBlock}`: from a pinned Unicode 16.0 Blocks.txt, as an optional
+    `@3sln/snug/unicode-blocks` module, with XSD 1.0 aliases. Unknown names are an error.
+* **`.pcre`'s status:** no RFC, and not in the IANA CDDL Control Operators registry (read
+  2026-11-25). It is proposed in draft-bormann-cbor-cddl-freezer-18 §4.1: PCRE2, anchored both
+  sides.
+
+**Owner questions:**
+1. May an engine be async? Recommended: synchronous only for v1.
+2. Ship a recommended adapter? Recommended: none now; a PCRE2 (wasm and pcre2-sys) adapter
+   package later; snug-enforced wasm fuel noted as future work.
+3. May `.regexp` be routed to a plugged engine as an explicit option? Recommended: yes, if
+   there is demand.
+
+**Sequencing:**
+* WP1 `#4/#5`, WP2 blocks and WP3 `.plus`/`.cat`/`.det` run in parallel.
+* WP4 is format 2.1. Then WP5 (composite `.ne`) and WP6 (the engine core), then WP7 (the wasm
+  SDK).
+* WP8 is the owner decisions.
+
+**Checks:** `bb docs-test` only (the plan is outside the package file lists). No gates were run,
+because the machine is CPU-loaded (owner constraint).
+
+- [ ] **Signed off** (manager)
+
 ## Findings
 
 - 2026-11-11 (manager): **the 6½-day `scan-test.mjs 300 1` process
