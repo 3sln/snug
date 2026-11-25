@@ -11,7 +11,7 @@
 #                missing steps. A run that cannot write (a dry run, another ref) always tests
 #                and builds: for a released version on main it rebuilds the tagged commit and
 #                checks its bytes against the registries (elsewhere: HEAD).
-#   tests        ci.yml (workflow_call, mode release): the release set, compat and linux on
+#   tests        ci.yml (workflow_call, mode release): the release set (macOS) and linux on
 #                the commit; skipped when resuming (the commit was tested before it was tagged)
 #   build        kin/scripts/release-build.mjs on macOS: stamp, both npm tarballs, the .crate,
 #                the wasm modules, SHA256SUMS, release notes from CHANGELOG [<version>] (no

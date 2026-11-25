@@ -5,24 +5,25 @@
 # pull_request_target. .github/workflows/release.yml calls it (workflow_call, mode
 # 'release') to test a release commit before it is tagged and published.
 #
-#   pull requests, pushes to main   land     `bb gates land`, plus compat and linux
+#   pull requests, pushes to main   land     `bb gates land`, plus linux
 #   tags v* and src/v*, manual run, release  the five shards of :partitions :release,
-#   release.yml's call (mode release)        one after another in ONE job, plus
-#                                            compat and linux
+#   release.yml's call (mode release)        one after another in ONE job, plus linux
 #
-# Jobs (D368). The free plan runs at most 5 macOS jobs at once, and a tag run with
-# a job per shard and per cell lost cells as "not acquired". Each kind is one job,
-# so a run needs at most 2 macOS jobs at once (land or release, and compat):
+# Jobs (D368, D375). The free plan runs at most 5 macOS jobs at once, and a tag run
+# with a job per shard and per cell lost cells as "not acquired". Each kind is one
+# job, so a run needs 1 macOS job (land or release) plus 1 Ubuntu job (linux). A
+# macOS `compat` job (D368) repeated linux's cells on macOS; GitHub's macOS arm64
+# capacity kept cancelling it, and it was dropped (D375):
 #   land     macOS   `bb gates land`
 #   release  macOS   a step per shard, in :partitions order; every step runs and
 #                    reports even when an earlier one failed (if: success() ||
 #                    failure()), and the job fails at the end if any did
-#   compat   macOS   npm-test on Node 20, 22 and 24 (setup-node per version), and
-#                    rust-api-test under `rustup run` on rust-version and stable
-#   linux    Ubuntu  the same five cells through ci/run-gate.sh
+#   linux    Ubuntu  npm-test on Node 20, 22 and 24 and rust-api-test on
+#                    rust-version and stable, through ci/run-gate.sh
 # `bb gates --check` parses this file: the release steps are exactly the shards,
-# the compat and linux cells are ci/gate-map.edn's :ci-compat, and the timeouts
-# below clear the caps (kin/scripts/gates, ci-matrix-problems).
+# the linux cells are ci/gate-map.edn's :ci-compat, ci needs exactly the other
+# jobs, every `needs` names a job, and the timeouts below clear the caps
+# (kin/scripts/gates, ci-matrix-problems and workflow-problems).
 #
 # Matrix choice. The primary toolchain is macOS arm64, Node 24.6.0 (the exact
 # Node that tools/unicode/gen-tables.mjs pins, which unicode-test's --check
@@ -30,12 +31,12 @@
 # release-policy §2 records every Rust gate on, so a new Rust release cannot
 # turn a land run red by itself): every gate of both sets runs on it, once, including
 # the heavy identity, fuzz and proptest gates, whose subject is JS == Rust on
-# one machine, not a toolchain. The `compat` matrix adds only the cells a
-# toolchain can change: npm-test (host/js) on the latest Node 20, 22 and 24 (20
-# is engines.node's floor, with SNUG_NODE_OLDEST=1 as node-oldest runs it), and
-# rust-api-test on Rust 1.87 (rust-version) and on the latest stable, where a
-# new Rust release shows up first. The release set holds node-oldest
-# and msrv too, which test the floors on the primary job's runner.
+# one machine, not a toolchain. The `linux` job adds only the cells a
+# toolchain can change (:ci-compat): npm-test (host/js) on the latest Node 20, 22
+# and 24 (20 is engines.node's floor, with SNUG_NODE_OLDEST=1 as node-oldest runs
+# it), and rust-api-test on Rust 1.87 (rust-version) and on the latest stable,
+# where a new Rust release shows up first. The release set holds node-oldest
+# and msrv too, which test the floors on the primary macOS runner.
 #
 # proptest (release-long) runs on the primary Node 24 by design: its failing
 # slow-compile / slow-validate checks read the worker thread's CPU clock,
@@ -56,8 +57,8 @@
 # kin/scripts/watchdog.mjs with the gate map's caps, failing on a non-zero exit
 # or on a NOT RUN line. The macOS gate sets stay the only full runs.
 #
-# timeout-minutes. land, compat and linux: above the sum of their gates' wall
-# caps and at most GitHub's 360 (land 298 min of caps; compat and linux 130).
+# timeout-minutes. land and linux: above the sum of their gates' wall caps and
+# at most GitHub's 360 (land 298 min of caps; linux 130).
 # release: the five shards' caps sum to about 23 hours, more than one job may
 # run, so each shard STEP's timeout clears that shard's largest gate cap (a stuck
 # gate is stopped and named by its watchdog, not by GitHub) and the job has
@@ -158,56 +159,8 @@ jobs:
         timeout-minutes: 200
         run: bb gates release-long
 
-  # npm-test on Node 20, 22, 24 and rust-api-test on rust-version and stable, one macOS job
-  compat:
-    name: compat (Node 20/22/24, Rust rust-version/stable)
-    runs-on: macos-15
-    timeout-minutes: 150
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          path: snug
-          persist-credentials: false
-      # Rust: stable as the default (with clippy) and rust-version beside it; Node is set per cell below
-      - uses: ./snug/.github/actions/setup
-        with:
-          rust: stable
-          msrv: 'true'
-      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
-        if: success() || failure()
-        with:
-          node-version: '20'
-      - name: npm-test, Node 20
-        if: success() || failure()
-        run: bb gates npm-test
-        env:
-          # Node 20 lacks a test-only oracle (node-oldest runs npm test the same way)
-          SNUG_NODE_OLDEST: '1'
-      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
-        if: success() || failure()
-        with:
-          node-version: '22'
-      - name: npm-test, Node 22
-        if: success() || failure()
-        run: bb gates npm-test
-      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
-        if: success() || failure()
-        with:
-          node-version: '24'
-      - name: npm-test, Node 24
-        if: success() || failure()
-        run: bb gates npm-test
-      - name: rust-api-test, rust-version
-        if: success() || failure()
-        run: rustup run "$SNUG_RUST_VERSION" bb gates rust-api-test
-        env:
-          # the rust-version toolchain has no clippy (D344); anywhere else a missing clippy is a SKIP
-          SNUG_CLIPPY_OPTIONAL: '1'
-      - name: rust-api-test, stable
-        if: success() || failure()
-        run: rustup run stable bb gates rust-api-test
-
-  # npm-test and rust-api-test on Linux (see the header), one Ubuntu job, through ci/run-gate.sh
+  # the :ci-compat cells: npm-test on Node 20, 22, 24 and rust-api-test on rust-version and
+  # stable, on Linux (see the header), one Ubuntu job, through ci/run-gate.sh
   linux:
     name: linux (Node 20/22/24, Rust rust-version/stable)
     runs-on: ubuntu-24.04
@@ -236,6 +189,7 @@ jobs:
         if: success() || failure()
         run: bash ci/run-gate.sh npm-test host/js npm test --gate-wall=1800 --gate-cpu=3600
         env:
+          # Node 20 lacks a test-only oracle (node-oldest runs npm test the same way)
           SNUG_NODE_OLDEST: '1'
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         if: success() || failure()
@@ -255,6 +209,7 @@ jobs:
         if: success() || failure()
         run: rustup run "$SNUG_RUST_VERSION" bash ci/run-gate.sh rust-api-test . sh host/rust/tests/run
         env:
+          # the rust-version toolchain has no clippy (D344); anywhere else a missing clippy is a SKIP
           SNUG_CLIPPY_OPTIONAL: '1'
       - name: rust-api-test, stable
         if: success() || failure()
@@ -264,7 +219,7 @@ jobs:
   ci:
     name: ci
     if: always()
-    needs: [land, release, compat, linux]
+    needs: [land, release, linux]
     runs-on: ubuntu-24.04
     timeout-minutes: 5
     defaults:
@@ -274,10 +229,9 @@ jobs:
       - env:
           LAND: ${{ needs.land.result }}
           RELEASE: ${{ needs.release.result }}
-          COMPAT: ${{ needs.compat.result }}
           LINUX: ${{ needs.linux.result }}
           IS_RELEASE: ${{ inputs.mode == 'release' || (!inputs.mode && (github.event_name == 'workflow_dispatch' || startsWith(github.ref, 'refs/tags/'))) }}
         run: |
-          echo "land: $LAND  release: $RELEASE  compat: $COMPAT  linux: $LINUX  (release run: $IS_RELEASE)"
-          [ "$COMPAT" = success ] && [ "$LINUX" = success ] || exit 1
+          echo "land: $LAND  release: $RELEASE  linux: $LINUX  (release run: $IS_RELEASE)"
+          [ "$LINUX" = success ] || exit 1
           if [ "$IS_RELEASE" = true ]; then [ "$RELEASE" = success ]; else [ "$LAND" = success ]; fi

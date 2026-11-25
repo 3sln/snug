@@ -388,7 +388,7 @@ owner's order — test, then tag and release, then publish:
    commit. A source tag but parts missing: it resumes, building the
    tagged commit and doing only what is missing.
 2. **Gates on that exact commit:** `ci.yml`'s release job (the whole
-   release set of `ci/gate-map.edn`, §4.1), compat and linux. All must be
+   release set of `ci/gate-map.edn`, §4.1) and `linux`. All must be
    green; a NOT RUN line counts as a failure (§2).
 3. **Build** (`kin/scripts/release-build.mjs`, which runs locally too): a
    detached worktree of the commit, `bb stamp`, the `@3sln/snug` and
@@ -440,6 +440,16 @@ the run's `build.json` or the GitHub release) in DEVLOG. It does not touch
 
 - **Re-run the workflow** (re-run the failed jobs, or dispatch it on `main`
   with `dry_run` off). It finds what exists and does only the rest.
+- **A macOS job cancelled for runner capacity** (the job's annotation says
+  the job was "not acquired by Runner"): GitHub had no hosted macOS arm64
+  runner for it, and nothing about the commit failed. Re-run the failed
+  jobs; the guard resumes. (Release run 45440770648 of 0.2.0 needed this
+  twice, D375.)
+- **npm E404 on the publish PUT** (`publish-npm`) means the trusted
+  publisher is expired or mismatched. The owner re-creates it on
+  npmjs.com (package settings → trusted publisher: repository
+  `3sln/snug`, workflow `release.yml`, no environment), then re-runs the
+  failed jobs; the guard resumes and publishes only what is missing.
 - **Before anything is published** (a tag or the GitHub release exists, no
   registry has the version): the owner may delete the GitHub release and
   both tags (`gh release delete vX.Y.Z --cleanup-tag`,
@@ -453,7 +463,7 @@ the run's `build.json` or the GitHub release) in DEVLOG. It does not touch
   `cargo yank` with a fixed patch release (a new bump) over removal. The
   GitHub release may then be edited to point to the fix.
 
-### 4.1 Hosted CI (P9.20, D356; D368)
+### 4.1 Hosted CI (P9.20, D356; D368, D375)
 
 `.github/workflows/ci.yml` runs the gate sets of `ci/gate-map.edn` on
 GitHub Actions, with `bb gates`. Each gate runs under the watchdog with its
@@ -464,12 +474,15 @@ release commit.
 
 | Trigger | What runs |
 | --- | --- |
-| a pull request, a push to `main` | `land`, `compat` and `linux` |
-| a `v*` or `src/v*` tag, a manual run, `release.yml`'s call | `release`, `compat` and `linux` |
+| a pull request, a push to `main` | `land` and `linux` |
+| a `v*` or `src/v*` tag, a manual run, `release.yml`'s call | `release` and `linux` |
 
-**One job per kind (D368).** The free plan runs at most five macOS jobs at
-once, and one job per shard and per cell lost cells as "not acquired". A run
-now needs at most two macOS jobs at a time:
+**One job per kind (D368, D375).** The free plan runs at most five macOS
+jobs at once, and one job per shard and per cell lost cells as "not
+acquired". A run now needs one macOS job (`land` or `release`) and one
+Ubuntu job (`linux`). D368's macOS `compat` job ran the same five cells as
+`linux`; GitHub's macOS arm64 capacity kept cancelling it, so D375 dropped
+it:
 
 - **land** (macOS): `bb gates land`.
 - **release** (macOS): the five shards of `:partitions :release`
@@ -480,26 +493,28 @@ now needs at most two macOS jobs at a time:
   shard's largest gate cap: a stuck gate is stopped and named by its
   watchdog. The job has GitHub's 360 minutes; on hosted `macos-15` it
   takes about an hour (the vm shard about 26 minutes, the others 3–9).
-- **compat** (macOS): `npm-test` on the latest Node 20, 22 and 24
+- **linux** (`ubuntu-24.04`, x86_64): the toolchain cells of
+  `:ci-compat`, `npm-test` on the latest Node 20, 22 and 24
   (`actions/setup-node` per version), and `rust-api-test` on Rust 1.87
-  (`rust-version`, without Clippy as in `msrv`) and on the latest stable,
-  each under `rustup run`. The release set's `node-oldest` and `msrv` test
-  the declared floors on the primary toolchain.
-- **linux** (`ubuntu-24.04`, x86_64): the same five cells through
-  `ci/run-gate.sh`, which runs a gate's command under the watchdog with
-  its caps and fails on a non-zero exit or a NOT RUN line, as `bb gates`
-  does. The rust-version cells set `SNUG_CLIPPY_OPTIONAL=1` (D344). The
-  full gate sets run only on macOS, because the gate scripts use macOS
-  tools.
-- **ci** (required): fails unless compat and linux passed, and `land`
-  passed (or, on a release run, `release` did).
+  (`rust-version`, without Clippy as in `msrv`) and on the latest stable
+  (`rustup run`), through `ci/run-gate.sh`. That script runs a gate's
+  command under the watchdog with its caps and fails on a non-zero exit or
+  a NOT RUN line, as `bb gates` does. The Node 20 cell sets
+  `SNUG_NODE_OLDEST=1` and the rust-version cell
+  `SNUG_CLIPPY_OPTIONAL=1` (D344). The release set's `node-oldest` and
+  `msrv` test the declared floors on the primary macOS toolchain. The full
+  gate sets run only on macOS, because the gate scripts use macOS tools.
+- **ci** (required): fails unless `linux` passed and `land` passed (or, on
+  a release run, `release` did).
 
 `bb gates --check` reads `ci.yml` against the gate map: the release
 job's steps are exactly `:partitions :release` in order, each running after
-a failure and with a timeout above its shard's largest cap; `land`,
-`compat` and `linux` have timeouts above their gates' caps and at most 360;
-the compat and linux cells are exactly `:ci-compat`; `ci` needs every job.
-It also requires every action to be pinned by a full commit SHA (or local)
+a failure and with a timeout above its shard's largest cap; `land` and
+`linux` have timeouts above their gates' caps and at most 360; the linux
+cells are exactly `:ci-compat`; `ci` needs exactly the other jobs. In both
+workflows every `needs` must name an existing job (a dangling one stops
+GitHub from starting the run), and every `needs.<job>` a job reads must
+be one it needs (D375). It also requires every action to be pinned by a full commit SHA (or local)
 in both workflows and the setup action, `release.yml` to use `ci.yml`'s
 `KIN_REF`, and every job of `release.yml` that may write to be gated on the
 guard's `write` output (D368).
