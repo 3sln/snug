@@ -10067,6 +10067,89 @@ gain on large compiles). Recorded in tools/size/budget.json.
   - **Hosted:** push CI run 45330906629 on d165eac is green: land, linux, compat and the `ci`
     aggregate; release skipped as designed.
 
+### D375 — CI drops the macOS `compat` job: `linux` alone runs the :ci-compat cells; `bb gates --check` holds every workflow `needs` to an existing job; release-policy §4 gains two failure modes
+**Decision** (D375 engineer; work package D375 from the manager, approved; branch `p-d375` from
+main b56c4ff). It closes the two follow-ups under "Release 0.2.0" (Phase 9).
+
+**Why.** D368's macOS `compat` job ran npm-test on Node 20/22/24 and rust-api-test on
+rust-version and stable. The Ubuntu `linux` job runs the same five cells, and the release set's
+`node-oldest` and `msrv` cover the floors on the primary macOS runner. GitHub's macOS arm64
+capacity kept cancelling compat ("not acquired by Runner"); it is one reason release run
+45440770648 needed four attempts. The build and publish-crate jobs stay on macOS: the release
+bytes were recorded there, and Ubuntu has not been shown to give byte-identical output.
+
+**Changes.**
+* **`.github/workflows/ci.yml`:** the `compat` job is gone. The `ci` aggregate needs
+  `[land, release, linux]` and fails unless linux passed (plus land, or release on a release
+  run). The header now says a run needs 1 macOS job (land or release) plus 1 Ubuntu job; the
+  compat-matrix text is now about linux; and the timeout note reads "land and linux". The two
+  explanatory comments on the floor knobs moved to linux's Node 20 and rust-version steps.
+* **`.github/workflows/release.yml`:** only the header comment named compat. No `needs` in it
+  ever named compat: `tests` calls ci.yml as a whole.
+* **`.github/actions/setup/action.yml`:** it no longer writes `SNUG_RUST_VERSION` to
+  GITHUB_ENV. Its only reader was compat's `rustup run "$SNUG_RUST_VERSION"`; linux sets its
+  own, and nothing on macOS reads it (`git grep`).
+* **`ci/gate-map.edn`:** `:ci-compat` keeps its name and cells. The name is "the toolchain-compat
+  cells", not the job, and renaming it would only churn kin/scripts/gates. Its comment and the
+  `:partitions` comment now name the linux job alone.
+* **`kin/scripts/gates`:**
+  - `ci-matrix-problems` checks the cells of linux only (the compat call is removed). `ci` must
+    now need exactly the other jobs of ci.yml, so both "ci does not need X" and "ci needs X,
+    which is not another job" are reported. Before, it was a fixed list that included compat.
+  - New `needs-problems`, run by `workflow-problems` on ci.yml and release.yml. Every job's
+    `needs` (one id or a list) must name a job of the same workflow: a dangling `needs` stops
+    GitHub from starting the run. Every `needs.<id>` read in a job's strings (if, env, with)
+    must be one of that job's needs: anything else is empty at run time, so a stale
+    `${{ needs.compat.result }}` would read as "" and fail the aggregate quietly. This is
+    worth having: about 20 lines, it catches the exact way this change could have broken the
+    release workflow, and it covers release.yml, which no other check parses for `needs`.
+  - The floor-knob check (`knob-problems`) needed no change. It is per step: Node from the
+    preceding setup-node, Rust by `$SNUG_RUST_VERSION` in the run. It holds for linux's cells
+    (mutations M6, M7 below).
+* **docs/release-policy.md:**
+  - §4's gates step names the release job and linux.
+  - §4's "When a release fails part-way" gains two entries: a macOS job cancelled for runner
+    capacity ("not acquired by Runner"), fixed by re-running the failed jobs, after which the
+    guard resumes; and npm E404 on the publish PUT, with the manager's text (owner re-creates
+    the trusted publisher, then re-runs; the guard publishes only what is missing).
+  - §4.1: the trigger table, "one job per kind" (1 macOS plus 1 Ubuntu, and why compat went),
+    the linux bullet now carries the cell list and both floor knobs, the `ci` bullet, and the
+    `--check` paragraph (`ci` needs exactly the other jobs; the needs-target rule).
+  - §2 has no job list; it is unchanged.
+* No CHANGELOG entry: nothing user-facing.
+
+**Checks** (targeted, per the 2026-11-18 policy; no full gates, no identity):
+* `bb gates --check` on the branch: ok, exit 0. The only warning is the known `../kin/src`
+  difference from KIN_REF (`.cache/kin` at 312beab).
+* **Mutation proofs.** These ran in a throwaway detached worktree `.cache/d375-mut` of the
+  commit, running `kin/scripts/gates --check`. Each mutation was made and reverted with Edit,
+  and the tree was clean and ok again afterwards. Every mutation gave exit 1:
+  - M1 `ci` `needs: [land, release, compat, linux]`: "job ci needs compat, which is not
+    another job of ci.yml" and "… which is not a job of ci.yml".
+  - M2 `COMPAT: ${{ needs.compat.result }}` added to ci's step env: "job ci reads
+    needs.compat but does not need compat".
+  - M3 release.yml `tests` `needs: [guard, compat]`: "release.yml: job tests needs compat,
+    which is not a job of release.yml".
+  - M4 linux's Node 22 cell deleted: "job linux runs the cells [node 20, node 24, rust
+    rust-version, rust stable], :ci-compat is […node 22…]".
+  - M5 linux's rust stable cell deleted: the same message, without "rust stable".
+  - M6 and M7: `SNUG_NODE_OLDEST=1` on linux's Node 22 step and `SNUG_CLIPPY_OPTIONAL=1` on its
+    stable step. Each gives "sets …, a :floor knob, outside its floor".
+  - M8: a `compat` job re-added but not needed by `ci`: "job ci does not need compat".
+* **YAML and needs targets.** Both workflows were parsed with Babashka's clj-yaml (SnakeYAML;
+  no other YAML parser is installed here).
+  - ci.yml jobs: land, release, linux, ci. Only `ci` has needs: [land, release, linux], all of
+    which exist.
+  - release.yml jobs: guard, tests, build, tag-release, publish-crate, publish-npm. Their needs
+    are guard; [guard, tests]; [guard, build]; [guard, build, tag-release] twice. All exist.
+  - `grep -i compat` in release.yml: no hits.
+* actionlint is not installed locally, and was not downloaded.
+* `bb docs-test` ok (13 documents). No sh script was touched, so there was no /bin/dash run.
+* The real proof is push CI after the coordinator's push: land, linux and `ci` green, with no
+  compat job.
+
+- [ ] **Signed off** (manager).
+
 ## Findings
 
 - 2026-11-11 (manager): **the 6½-day `scan-test.mjs 300 1` process
@@ -13889,7 +13972,7 @@ can run alongside them; its build work is post-RC unless it is cheap.
     version.edn is unchanged.
   - **Follow-ups (engineering, decided by the manager under the coordinator's triage of
     2026-11-25):**
-    - [ ] **Release CI on macOS capacity.**
+    - [x] **Release CI on macOS capacity.** Done in D375.
       - CI's macOS `compat` job only checks the Node and Rust version floors.
       - The Ubuntu `linux` job already runs the same five cells, and the release set's
         node-oldest and msrv gates cover the floors on the macOS primary runner.
@@ -13898,7 +13981,8 @@ can run alongside them; its build work is post-RC unless it is cheap.
         release-policy text change to match.
       - build and publish-crate stay on macOS: the release bytes were recorded there, and
         Ubuntu has not been shown to give byte-identical output.
-    - [ ] **release-policy §4 failure modes:** add "npm E404 on the publish PUT means the
+    - [x] **release-policy §4 failure modes** (done in D375, with a second entry for macOS
+      runner-capacity cancellations): add "npm E404 on the publish PUT means the
       trusted publisher is expired or mismatched. The owner re-creates it on npmjs.com, then
       re-runs the failed jobs; the guard resumes."
 
