@@ -13850,10 +13850,57 @@ can run alongside them; its build work is post-RC unless it is cheap.
     - [x] Stale host comments (D373 part 2): the warning range W1..W8 (now W9) in docs/api.md,
       host/js/types/schema.d.ts and host/rust/src/compile.rs, and "at most 17 significant
       digits" (now 20) in host/js/src/compile.mjs and host/rust/src/compile.rs.
-  - **Post-release nits:**
+  - **Post-release nits:** all done in D374.
     - `b64''` comments (RFC 9682 Appendix B.2);
     - a `SequenceOptions` builder;
     - SEC-F7 sizing the first compile arena from the schema's length (speed only).
+- [x] **Release 0.2.0** (owner go, 2026-11-24). The first release made by the automated
+  workflow (D368).
+  - **Release commit:** `8c679f2` "Release 0.2.0" on main.
+    - Changes: version.edn `:version` 0.2.0, CHANGELOG `[Unreleased]` → `[0.2.0] —
+      2026-11-24`, and the README experimental notices name 0.2.0.
+    - It contains D370–D374 and the [0.2.0] changelog: Breaking changes from D371 (Rust
+      API), D372 (prelude `/=`) and D373 (strict lexing).
+  - **Tags and dist:**
+    - `src/v0.2.0`: annotated tag object 6bfb5bd on 8c679f2;
+    - `v0.2.0`: tag object 4add81f;
+    - the `dist` branch at aa47f10dbebfa96de68fc66bc263687f3a15767a.
+  - **GitHub pre-release** (0.x): https://github.com/3sln/snug/releases/tag/v0.2.0.
+
+    | Artefact | SHA-256 |
+    | --- | --- |
+    | `3sln-snug-0.2.0.tgz` | `d8569dc7dfface6d98ea5ddda30ea905b7b30ad5043dcbd0d99536dfaf7300ce` |
+    | `3sln-snug-wasm-0.2.0.tgz` | `5615a5a264d10c3532e3f5071614f466c4a6ff9c3b189bb54a6b90b7b6cdfee7` |
+    | `snug-cbor-0.2.0.crate` | `5b9e930c015d99eb8dbe9c012d753b6419a9d33a4b8551d70b4944daa1aaf960` |
+
+  - **Registries:** all published by trusted publishing (OIDC), with no tokens.
+    - crates.io `snug-cbor` 0.2.0: the index cksum was checked in the job.
+    - npm `@3sln/snug` and `@3sln/snug-wasm` 0.2.0, both `latest`: dist.integrity checked in
+      the job, with provenance.
+  - **Release run 45440770648 took 4 attempts.** The guard's resume made each re-run do only
+    what was missing (D368's design, now proven in production):
+    1. compat was cancelled: GitHub's macOS arm64 capacity ("not acquired by Runner").
+    2. Every test passed; build was cancelled for the same capacity reason.
+    3. build, tag-release and publish-crate succeeded. publish-npm failed with E404 on the
+       PUT: npm's trusted-publisher configurations had expired. Provenance signing had worked.
+       The owner re-created the trusted publishers on npmjs.com on 2026-11-25.
+    4. publish-npm succeeded.
+  - **After the release (§4):** CHANGELOG has a new empty `## [Unreleased]` above `[0.2.0]`.
+    version.edn is unchanged.
+  - **Follow-ups (engineering, decided by the manager under the coordinator's triage of
+    2026-11-25):**
+    - [ ] **Release CI on macOS capacity.**
+      - CI's macOS `compat` job only checks the Node and Rust version floors.
+      - The Ubuntu `linux` job already runs the same five cells, and the release set's
+        node-oldest and msrv gates cover the floors on the macOS primary runner.
+      - **Decision:** drop the macOS `compat` job and keep the five cells on Ubuntu, in push
+        CI and in the release run. The gate-map check, the `ci` aggregate and the
+        release-policy text change to match.
+      - build and publish-crate stay on macOS: the release bytes were recorded there, and
+        Ubuntu has not been shown to give byte-identical output.
+    - [ ] **release-policy §4 failure modes:** add "npm E404 on the publish PUT means the
+      trusted publisher is expired or mismatched. The owner re-creates it on npmjs.com, then
+      re-runs the failed jobs; the guard resumes."
 
 **Assignment (2026-11-11):** P9.1–P9.4 go to the P8.5 VM engineer, in that
 order. P9.5 onward are scheduled as the earlier items land.
