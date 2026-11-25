@@ -4916,6 +4916,12 @@ raises."
   first: record it in a D-entry, land it, and tell the coordinator. A larger
   raise, or one with no measured gain, goes to the coordinator before it
   lands. P8.7 catches small growth. D325 was approved on these terms.
+- *Amendment (coordinator, 2026-11-25, under the owner's rule that size must never cost
+  performance; D377 decision 4):*
+  - A measured speed gain is a standing reason for a cap raise. No cut has to be found first.
+  - The gain must be measured on a free machine (median, beyond A/A noise), and the raise
+    must stay under about 1 KB per cap.
+  - A larger raise goes to the coordinator, who takes it to the owner.
 - [x] **Decided by the owner** (2026-11-11, via coordinator).
 
 ### D290 — P8.5 phase 1: the compiler and verifier move to format 2.0 on a branch; a reference interpreter checks semantics before the VM (P8.5)
